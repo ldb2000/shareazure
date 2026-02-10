@@ -4314,65 +4314,67 @@ async function notifyExpiringGuestAccounts() {
 }
 
 // Démarrer le serveur avec migration des utilisateurs
-(async () => {
-  try {
-    // Migrer les utilisateurs hardcodés vers la DB
-    await migrateHardcodedUsers();
+if (require.main === module) {
+  (async () => {
+    try {
+      // Migrer les utilisateurs hardcodés vers la DB
+      await migrateHardcodedUsers();
 
-    // Tester la configuration email (optionnel, n'empêche pas le démarrage)
-    await emailService.testEmailConfiguration().catch(() => {
-      console.warn('⚠️  Service email non configuré - les emails ne seront pas envoyés');
-    });
+      // Tester la configuration email (optionnel, n'empêche pas le démarrage)
+      await emailService.testEmailConfiguration().catch(() => {
+        console.warn('⚠️  Service email non configuré - les emails ne seront pas envoyés');
+      });
 
-    app.listen(PORT, () => {
-      console.log(`🚀 Serveur démarré sur le port ${PORT}`);
-      console.log(`📁 Conteneur Azure: ${containerName}`);
-      console.log(`🌍 Environnement: ${process.env.NODE_ENV || 'development'}`);
+      app.listen(PORT, () => {
+        console.log(`🚀 Serveur démarré sur le port ${PORT}`);
+        console.log(`📁 Conteneur Azure: ${containerName}`);
+        console.log(`🌍 Environnement: ${process.env.NODE_ENV || 'development'}`);
 
-      // Démarrer les tâches périodiques
-      // Cleanup des comptes expirés toutes les minutes
-      setInterval(() => {
-        cleanupExpiredGuestAccounts().catch(err =>
-          console.error('Erreur tâche cleanup:', err)
-        );
-      }, 60 * 1000);
-
-      // Notifications d'expiration une fois par jour à 9h
-      // Pour les tests, vous pouvez réduire l'intervalle
-      setInterval(() => {
-        const now = new Date();
-        if (now.getHours() === 9 && now.getMinutes() < 1) {
-          notifyExpiringGuestAccounts().catch(err =>
-            console.error('Erreur tâche notification:', err)
+        // Démarrer les tâches périodiques
+        // Cleanup des comptes expirés toutes les minutes
+        setInterval(() => {
+          cleanupExpiredGuestAccounts().catch(err =>
+            console.error('Erreur tâche cleanup:', err)
           );
-        }
-      }, 60 * 1000);
+        }, 60 * 1000);
 
-      // Calcul des coûts une fois par jour à 2h du matin
-      setInterval(() => {
-        const now = new Date();
-        if (now.getHours() === 2 && now.getMinutes() < 1) {
-          calculateAllMonthlyCosts().catch(err =>
-            console.error('Erreur tâche calcul coûts:', err)
+        // Notifications d'expiration une fois par jour à 9h
+        // Pour les tests, vous pouvez réduire l'intervalle
+        setInterval(() => {
+          const now = new Date();
+          if (now.getHours() === 9 && now.getMinutes() < 1) {
+            notifyExpiringGuestAccounts().catch(err =>
+              console.error('Erreur tâche notification:', err)
+            );
+          }
+        }, 60 * 1000);
+
+        // Calcul des coûts une fois par jour à 2h du matin
+        setInterval(() => {
+          const now = new Date();
+          if (now.getHours() === 2 && now.getMinutes() < 1) {
+            calculateAllMonthlyCosts().catch(err =>
+              console.error('Erreur tâche calcul coûts:', err)
+            );
+          }
+        }, 60 * 1000);
+
+        // Vérification des réhydratations toutes les heures
+        setInterval(() => {
+          checkRehydrationStatus().catch(err =>
+            console.error('Erreur tâche réhydratation:', err)
           );
-        }
-      }, 60 * 1000);
+        }, 60 * 60 * 1000);
 
-      // Vérification des réhydratations toutes les heures
-      setInterval(() => {
-        checkRehydrationStatus().catch(err =>
-          console.error('Erreur tâche réhydratation:', err)
-        );
-      }, 60 * 60 * 1000);
-
-      console.log('✅ Tâches de nettoyage automatique activées');
-      console.log('✅ Tâche de calcul des coûts activée (quotidienne à 2h)');
-      console.log('✅ Tâche de vérification des réhydratations activée (horaire)');
-    });
-  } catch (error) {
-    console.error('❌ Erreur lors du démarrage:', error);
-    process.exit(1);
-  }
-})();
+        console.log('✅ Tâches de nettoyage automatique activées');
+        console.log('✅ Tâche de calcul des coûts activée (quotidienne à 2h)');
+        console.log('✅ Tâche de vérification des réhydratations activée (horaire)');
+      });
+    } catch (error) {
+      console.error('❌ Erreur lors du démarrage:', error);
+      process.exit(1);
+    }
+  })();
+}
 
 module.exports = app;

@@ -2,7 +2,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 
 // Initialisation de la base de données
-const dbPath = path.join(__dirname, 'shareazure.db');
+const dbPath = process.env.SHAREAZURE_DB_PATH || path.join(__dirname, 'shareazure.db');
 const db = new Database(dbPath);
 
 // Activer les foreign keys
