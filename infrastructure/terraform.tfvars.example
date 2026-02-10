@@ -1,0 +1,21 @@
+# Exemple de fichier de variables Terraform
+# Copiez ce fichier vers terraform.tfvars et modifiez les valeurs selon vos besoins
+
+project_name = "shareazure"
+location     = "francecentral"
+
+# Optionnel : spécifier un nom personnalisé pour le storage account
+# Sinon, un nom unique sera généré automatiquement
+# storage_account_name = "moncomptestorage"
+
+container_name = "uploads"
+
+# Configuration du storage account
+storage_account_tier       = "Standard"
+storage_replication_type   = "LRS"
+allow_blob_public_access   = false
+min_tls_version           = "TLS1_2"
+
+# Options de monitoring
+enable_application_insights = true
+

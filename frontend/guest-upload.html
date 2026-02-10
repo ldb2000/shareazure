@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ShareAzure - Espace Invité</title>
+    <link rel="stylesheet" href="css/guest.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        // Rediriger vers login si pas de token
+        window.addEventListener('DOMContentLoaded', () => {
+            const token = localStorage.getItem('guestToken') || sessionStorage.getItem('guestToken');
+            if (!token) {
+                window.location.href = 'guest-login.html';
+            }
+        });
+    </script>
+</head>
+<body>
+    <div class="guest-container">
+        <!-- Header -->
+        <header class="guest-header">
+            <div class="logo-container">
+                <img src="logo-april.svg" alt="APRIL" class="logo-april" onerror="this.style.display='none'">
+                <span class="app-name">ShareAzure - Espace Invité</span>
+            </div>
+            <button class="btn btn-logout" id="logoutBtn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>
+                </svg>
+                Déconnexion
+            </button>
+        </header>
+
+        <!-- Expiration Banner -->
+        <div class="expiration-banner" id="expirationBanner">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M12 6v6l4 2"/>
+            </svg>
+            <div>
+                <strong>Votre accès invité expire dans : <span id="expirationTime">...</span></strong>
+                <p>Email : <span id="guestEmail">...</span></p>
+            </div>
+        </div>
+
+        <!-- Limitations Banner -->
+        <div class="limitations-banner">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M12 8v4M12 16h.01"/>
+            </svg>
+            <div>
+                <strong>Accès limité :</strong>
+                <span>Vous pouvez uniquement déposer des fichiers. Le partage et la suppression ne sont pas autorisés.</span>
+            </div>
+        </div>
+
+        <!-- Upload Section -->
+        <div class="upload-section">
+            <h2>Déposer vos fichiers</h2>
+            <div class="upload-zone" id="uploadZone">
+                <svg class="upload-icon" viewBox="0 0 64 64" fill="none">
+                    <circle cx="32" cy="32" r="30" stroke="currentColor" stroke-width="2" stroke-dasharray="4 4"/>
+                    <path d="M32 20v24M20 32h24" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+                </svg>
+                <h3>Glissez-déposez vos fichiers ici</h3>
+                <p>ou</p>
+                <input type="file" id="fileInput" multiple hidden>
+                <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                    </svg>
+                    Choisir des fichiers
+                </button>
+                <p class="upload-limit">Taille maximale : 100 Mo par fichier</p>
+            </div>
+
+            <!-- Progress Bar -->
+            <div class="progress-wrapper" id="progressContainer" style="display: none;">
+                <div class="progress-bar-container">
+                    <div class="progress-bar-fill" id="progressBar"></div>
+                </div>
+                <p class="progress-label" id="progressText">0%</p>
+            </div>
+        </div>
+
+        <!-- Files List -->
+        <div class="files-section">
+            <h2>
+                Vos fichiers uploadés
+                <span class="badge" id="filesCount">0</span>
+            </h2>
+            <div id="filesList" class="files-list">
+                <div class="empty-state">
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+                        <path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/>
+                        <path d="M13 2v7h7"/>
+                    </svg>
+                    <p>Aucun fichier uploadé pour le moment</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="guest-footer">
+            <p>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2v20M2 12h20"/>
+                </svg>
+                À l'expiration de votre accès, tous vos fichiers seront automatiquement supprimés
+            </p>
+        </footer>
+    </div>
+
+    <script src="js/guest-upload.js"></script>
+</body>
+</html>

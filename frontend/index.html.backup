@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ShareAzure - Partage de fichiers sécurisé | APRIL</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Header -->
+    <header class="main-header">
+        <div class="header-container">
+            <div class="logo-container">
+                <img src="logo-april.svg" alt="APRIL" class="logo-april">
+                <span class="app-name">ShareAzure</span>
+            </div>
+            <nav class="main-nav">
+                <button class="nav-btn" id="historyNavBtn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    Historique
+                </button>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero-section">
+        <div class="hero-container">
+            <h1 class="hero-title">Partagez vos fichiers en toute sécurité</h1>
+            <p class="hero-subtitle">Solution de partage professionnel avec chiffrement et suivi des téléchargements</p>
+        </div>
+    </section>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <div class="content-container">
+            
+            <!-- Upload Card -->
+            <div class="upload-card">
+                <div class="upload-zone" id="uploadArea">
+                    <svg class="upload-icon" viewBox="0 0 64 64" fill="none">
+                        <circle cx="32" cy="32" r="30" stroke="currentColor" stroke-width="2" stroke-dasharray="4 4"/>
+                        <path d="M32 20v24M20 32h24" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+                    </svg>
+                    <h2 class="upload-title">Glissez-déposez vos fichiers ici</h2>
+                    <p class="upload-description">ou</p>
+                    <input type="file" id="fileInput" multiple hidden>
+                    <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                        </svg>
+                        Choisir des fichiers
+                    </button>
+                    <p class="upload-limit">Taille maximale : 100 Mo par fichier</p>
+                </div>
+
+                <!-- Progress Bar -->
+                <div class="progress-wrapper" id="progressContainer" style="display: none;">
+                    <div class="progress-bar-container">
+                        <div class="progress-bar-fill" id="progressBar"></div>
+                    </div>
+                    <p class="progress-label" id="progressText">0%</p>
+                </div>
+
+                <!-- Selected Files -->
+                <div class="selected-files-container" id="selectedFiles"></div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="action-buttons" id="actions" style="display: none;">
+                <button class="btn btn-primary btn-lg" id="uploadBtn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                    </svg>
+                    Uploader les fichiers
+                </button>
+                <button class="btn btn-outline" id="clearBtn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                    </svg>
+                    Annuler
+                </button>
+            </div>
+
+            <!-- Messages -->
+            <div id="messages"></div>
+
+            <!-- Files List Section -->
+            <div class="files-list-section">
+                <div class="section-header">
+                    <h2 class="section-title">Fichiers partagés</h2>
+                    <button class="btn btn-small btn-outline" id="refreshBtn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M1 4v6h6M23 20v-6h-6"/>
+                            <path d="M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 014.51 15"/>
+                        </svg>
+                        Actualiser
+                    </button>
+                </div>
+                <div class="files-grid" id="filesList">
+                    <div class="loading-state">
+                        <div class="spinner"></div>
+                        <p>Chargement des fichiers...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="main-footer">
+        <div class="footer-container">
+            <p>&copy; 2025 APRIL. Tous droits réservés. | ShareAzure - Partage sécurisé</p>
+        </div>
+    </footer>
+
+    <!-- Modals (keeping existing modals structure but will restyle) -->
+    <!-- Modal de confirmation -->
+    <div class="modal-overlay" id="deleteModal" style="display: none;">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>Confirmer la suppression</h3>
+            </div>
+            <div class="modal-body">
+                <p>Êtes-vous sûr de vouloir supprimer ce fichier ? Cette action est irréversible.</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" id="cancelDeleteBtn">Annuler</button>
+                <button class="btn btn-danger" id="confirmDeleteBtn">Supprimer</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de preview -->
+    <div class="modal-overlay" id="previewModal" style="display: none;">
+        <div class="modal-box modal-large">
+            <div class="modal-header">
+                <h3 id="previewTitle">Aperçu du fichier</h3>
+                <button class="btn-icon-close" id="closePreviewBtn">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body modal-body-preview" id="previewBody">
+                <div class="loading-state">
+                    <div class="spinner"></div>
+                    <p>Chargement de l'aperçu...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de partage -->
+    <div class="modal-overlay" id="shareModal" style="display: none;">
+        <div class="modal-box modal-medium">
+            <div class="modal-header">
+                <h3>Partager le fichier</h3>
+                <button class="btn-icon-close" id="closeShareBtn">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="share-file-info" id="shareFileInfo"></div>
+                
+                <div class="form-group">
+                    <label for="expirationSelect" class="form-label">Durée de validité du lien</label>
+                    <select id="expirationSelect" class="form-select">
+                        <option value="15">15 minutes</option>
+                        <option value="60" selected>1 heure</option>
+                        <option value="240">4 heures</option>
+                        <option value="480">8 heures</option>
+                        <option value="1440">24 heures</option>
+                        <option value="10080">7 jours</option>
+                        <option value="43200">30 jours</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="passwordInput" class="form-label">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                            <path d="M7 11V7a5 5 0 0110 0v4"/>
+                        </svg>
+                        Mot de passe (optionnel)
+                    </label>
+                    <input 
+                        type="password" 
+                        id="passwordInput" 
+                        class="form-input" 
+                        placeholder="Protection recommandée pour fichiers sensibles"
+                    >
+                </div>
+
+                <button class="btn btn-primary btn-full" id="generateLinkBtn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/>
+                        <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/>
+                    </svg>
+                    Générer le lien de partage
+                </button>
+
+                <div class="share-result" id="shareResult" style="display: none;">
+                    <div class="share-link-box">
+                        <input type="text" id="shareLink" readonly class="share-link-input">
+                        <button class="btn btn-success" id="copyLinkBtn">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                            </svg>
+                            Copier
+                        </button>
+                    </div>
+                    
+                    <div id="qrCodeContainer" class="qr-code-section">
+                        <p class="qr-label">Scannez pour télécharger</p>
+                        <img id="qrCodeImage" class="qr-code-image">
+                    </div>
+
+                    <p class="share-expires-text" id="shareExpires"></p>
+                    <div class="alert alert-warning" id="shareWarning">
+                        ⚠️ Ce lien permettra à quiconque de télécharger ce fichier jusqu'à son expiration.
+                    </div>
+                    <div class="alert alert-info" id="sharePassword" style="display: none;">
+                        🔒 Ce lien est protégé par mot de passe.
+                    </div>
+
+                    <div class="share-stats-box" id="shareStats">
+                        <p class="stats-title">Informations du lien</p>
+                        <p class="stats-id">ID : <code id="shareLinkId"></code></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal d'historique -->
+    <div class="modal-overlay" id="historyModal" style="display: none;">
+        <div class="modal-box modal-large">
+            <div class="modal-header">
+                <h3>Historique des partages</h3>
+                <button class="btn-icon-close" id="closeHistoryBtn">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div id="historyList" class="history-list">
+                    <div class="loading-state">
+                        <div class="spinner"></div>
+                        <p>Chargement de l'historique...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PDF.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

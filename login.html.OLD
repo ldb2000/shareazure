@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ShareAzure - Connexion</title>
+    <link rel="icon" type="image/svg+xml" href="frontend/favicon.svg">
+    <link rel="stylesheet" href="frontend/css/login.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="login-screen">
+        <div class="login-container">
+            <div class="login-header">
+                <img src="frontend/logo-april.svg" alt="APRIL" class="login-logo">
+                <h1>ShareAzure</h1>
+                <p>Connexion à votre espace</p>
+            </div>
+            
+            <form id="loginForm" class="login-form">
+                <div class="form-group">
+                    <label for="username">
+                        <i class="fas fa-user"></i>
+                        Nom d'utilisateur
+                    </label>
+                    <input type="text" id="username" name="username" required autocomplete="username" placeholder="Entrez votre nom d'utilisateur">
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">
+                        <i class="fas fa-lock"></i>
+                        Mot de passe
+                    </label>
+                    <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="Entrez votre mot de passe">
+                </div>
+                
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="rememberMe">
+                        <span>Se souvenir de moi</span>
+                    </label>
+                </div>
+                
+                <button type="submit" class="btn btn-primary btn-block">
+                    <i class="fas fa-sign-in-alt"></i>
+                    Se connecter
+                </button>
+                
+                <div id="loginError" class="login-error" style="display: none;">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <span id="loginErrorMessage"></span>
+                </div>
+            </form>
+            
+            <div class="login-footer">
+                <div class="login-help">
+                    <i class="fas fa-info-circle"></i>
+                    <div>
+                        <p><strong>Utilisateur :</strong> user / user123</p>
+                        <p><strong>Administrateur :</strong> admin / admin123</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/login.js"></script>
+</body>
+</html>
+
