@@ -10,7 +10,7 @@ const QRCode = require('qrcode');
 const bcrypt = require('bcrypt');
 const fs = require('fs');
 const path = require('path');
-const { db, shareLinksDb, downloadLogsDb, settingsDb, allowedEmailDomainsDb, usersDb, guestAccountsDb, fileOwnershipDb, teamsDb, teamMembersDb, costTrackingDb, operationLogsDb, fileTiersDb } = require('./database');
+const { db, shareLinksDb, downloadLogsDb, settingsDb, allowedEmailDomainsDb, usersDb, guestAccountsDb, fileOwnershipDb, teamsDb, teamMembersDb, costTrackingDb, operationLogsDb, fileTiersDb, activityLogsDb } = require('./database');
 const { migrateHardcodedUsers } = require('./migrateUsers');
 const emailService = require('./emailService');
 
@@ -19,7 +19,8 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware de sécurité
 app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  contentSecurityPolicy: false
 }));
 app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
@@ -30,9 +31,15 @@ app.use(express.json());
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limite chaque IP à 100 requêtes par fenêtre
+  max: 500, // limite chaque IP à 500 requêtes par fenêtre
+  standardHeaders: true,
+  legacyHeaders: false
 });
 app.use('/api/', limiter);
+
+// Servir les fichiers statiques frontend et admin depuis Express
+app.use('/admin', express.static(path.join(__dirname, '../admin')));
+app.use(express.static(path.join(__dirname, '../frontend')));
 
 // Fonction pour obtenir la taille maximale de fichier
 function getMaxFileSizeMB() {
@@ -137,14 +144,117 @@ async function streamToBuffer(readableStream) {
 }
 
 // Fonction pour logger les opérations
-const logOperation = (operation, details) => {
-  const logEntry = {
-    timestamp: new Date().toISOString(),
-    operation,
-    ...details
-  };
-  console.log(JSON.stringify(logEntry));
-  // Ici vous pouvez envoyer vers Application Insights si configuré
+const LOG_CATEGORIES = {
+  // Fichiers
+  file_uploaded: 'file', multiple_files_uploaded: 'file', file_downloaded: 'file',
+  file_previewed: 'file', file_deleted: 'file', file_renamed: 'file', file_moved: 'file',
+  upload_error: 'file', multiple_upload_error: 'file', delete_error: 'file',
+  folder_created: 'file',
+  // Partages
+  share_link_generated: 'share', share_generation_error: 'share', share_link_deactivated: 'share',
+  share_link_deleted: 'share', file_downloaded_via_share: 'share',
+  // Domaines
+  email_domain_added: 'domain', email_domain_deleted: 'domain',
+  email_domain_activated: 'domain', email_domain_deactivated: 'domain',
+  // Utilisateurs
+  user_created: 'user', user_creation_failed: 'user', user_deactivated: 'user', user_deleted: 'user',
+  user_activated: 'user', user_role_changed: 'user', user_password_reset: 'user',
+  // Invites
+  guest_account_created: 'user', guest_login: 'auth',
+  guest_account_disabled: 'user', guest_account_deleted: 'user',
+  guest_account_expired_cleaned: 'user', guest_expiration_notification_sent: 'user',
+  // Auth
+  auth_login: 'auth', admin_login: 'auth', user_login: 'auth',
+  // Systeme
+  container_created: 'system'
+};
+
+const LOG_LEVELS = {
+  // Fichiers
+  file_uploaded: 'success', multiple_files_uploaded: 'success', file_downloaded: 'info',
+  file_previewed: 'info', file_deleted: 'warning', file_renamed: 'info', file_moved: 'info',
+  upload_error: 'error', multiple_upload_error: 'error', delete_error: 'error',
+  folder_created: 'success',
+  // Partages
+  share_link_generated: 'success', share_generation_error: 'error', share_link_deactivated: 'warning',
+  share_link_deleted: 'warning', file_downloaded_via_share: 'info',
+  // Domaines
+  email_domain_added: 'success', email_domain_deleted: 'warning',
+  email_domain_activated: 'success', email_domain_deactivated: 'warning',
+  // Utilisateurs
+  user_created: 'success', user_creation_failed: 'error', user_deactivated: 'warning', user_deleted: 'error',
+  user_activated: 'success', user_role_changed: 'info', user_password_reset: 'info',
+  guest_account_created: 'success', guest_login: 'info',
+  guest_account_disabled: 'warning', guest_account_deleted: 'warning',
+  guest_account_expired_cleaned: 'info', guest_expiration_notification_sent: 'info',
+  // Auth
+  auth_login: 'info', admin_login: 'info', user_login: 'info',
+  // Systeme
+  container_created: 'success'
+};
+
+const LOG_MESSAGES = {
+  // Fichiers
+  file_uploaded: (d) => `Fichier "${d.originalName || d.blobName}" uploade`,
+  multiple_files_uploaded: (d) => `${d.count || 0} fichiers uploades`,
+  file_downloaded: (d) => `Fichier "${d.blobName}" telecharge`,
+  file_previewed: (d) => `Fichier "${d.blobName}" previsualise`,
+  file_deleted: (d) => `Fichier "${d.originalName || d.blobName}" supprime`,
+  file_renamed: (d) => `Fichier renomme: "${d.oldPath}" → "${d.newPath}"`,
+  file_moved: (d) => `Fichier deplace: "${d.sourcePath}" → "${d.destinationPath}"`,
+  upload_error: (d) => `Erreur upload: ${d.error}`,
+  multiple_upload_error: (d) => `Erreur upload multiple: ${d.error}`,
+  delete_error: (d) => `Erreur suppression: ${d.error}`,
+  folder_created: (d) => `Dossier "${d.folderName}" cree`,
+  // Partages
+  share_link_generated: (d) => `Lien de partage cree pour "${d.blobName}"`,
+  share_generation_error: (d) => `Erreur generation lien: ${d.error}`,
+  share_link_deactivated: (d) => `Lien de partage ${d.linkId} desactive`,
+  share_link_deleted: (d) => `Lien de partage ${d.linkId} supprime`,
+  file_downloaded_via_share: (d) => `Fichier "${d.blobName}" telecharge via partage`,
+  // Domaines
+  email_domain_added: (d) => `Domaine "${d.domain}" ajoute`,
+  email_domain_deleted: (d) => `Domaine "${d.domain}" supprime`,
+  email_domain_activated: (d) => `Domaine "${d.domain}" active`,
+  email_domain_deactivated: (d) => `Domaine "${d.domain}" desactive`,
+  // Utilisateurs
+  user_created: (d) => `Utilisateur "${d.targetUsername || d.username}" cree (role: ${d.role})`,
+  user_creation_failed: (d) => `Echec creation utilisateur "${d.targetUsername}": ${d.reason}`,
+  user_deactivated: (d) => `Utilisateur "${d.targetUsername}" desactive`,
+  user_deleted: (d) => `Utilisateur "${d.targetUsername}" supprime definitivement`,
+  user_activated: (d) => `Utilisateur "${d.targetUsername}" reactive`,
+  user_role_changed: (d) => `Role de "${d.targetUsername}" change: ${d.oldRole} → ${d.newRole}`,
+  user_password_reset: (d) => `Mot de passe de "${d.targetUsername}" reinitialise`,
+  guest_account_created: (d) => `Compte invite cree pour "${d.email}"`,
+  guest_login: (d) => `Connexion invite "${d.email}"`,
+  guest_account_disabled: (d) => `Compte invite "${d.email}" desactive`,
+  guest_account_deleted: (d) => `Compte invite "${d.guestId}" supprime`,
+  guest_account_expired_cleaned: (d) => `Compte invite expire nettoye`,
+  guest_expiration_notification_sent: (d) => `Notification expiration envoyee`,
+  // Auth
+  auth_login: (d) => `Connexion de "${d.username}" (${d.role})`,
+  admin_login: (d) => `Connexion admin "${d.username}"`,
+  user_login: (d) => `Connexion de "${d.username}" (${d.role})`,
+  // Systeme
+  container_created: (d) => `Container "${d.containerName}" cree`
+};
+
+const logOperation = (operation, details = {}) => {
+  try {
+    const message = LOG_MESSAGES[operation] ? LOG_MESSAGES[operation](details) : operation;
+    activityLogsDb.log({
+      level: LOG_LEVELS[operation] || 'info',
+      category: LOG_CATEGORIES[operation] || 'system',
+      operation,
+      message,
+      username: details.username || details.addedBy || details.createdBy || details.deletedBy || details.deactivatedBy || null,
+      details
+    });
+  } catch (e) {
+    // Fallback console en cas d'erreur DB
+    console.error('logOperation error:', e.message);
+  }
+  console.log(JSON.stringify({ timestamp: new Date().toISOString(), operation, ...details }));
 };
 
 // ============================================
@@ -536,7 +646,8 @@ app.post('/api/upload', authenticateUserOrGuest, upload.single('file'), validate
       size: req.file.size,
       contentType: req.file.mimetype,
       folderPath,
-      uploadedBy: uploaderInfo
+      uploadedBy: uploaderInfo,
+      username: req.user ? req.user.username : (req.guest ? req.guest.email : null)
     });
 
     res.json({
@@ -951,7 +1062,8 @@ app.delete('/api/files/:blobName', authenticateUser, async (req, res) => {
     logOperation('file_deleted', {
       blobName,
       deletedBy: req.user.username,
-      originalOwner: fileOwnership.user_owner || fileOwnership.guest_owner
+      originalOwner: fileOwnership.user_owner || fileOwnership.guest_owner,
+      username: req.user.username
     });
 
     res.json({
@@ -1857,6 +1969,44 @@ app.post('/api/settings/reset', async (req, res) => {
 });
 
 // ============================================
+// API Logs d'activité
+// ============================================
+
+// GET /api/admin/logs - Récupérer les logs d'activité
+app.get('/api/admin/logs', async (req, res) => {
+  try {
+    const { level, category, operation, search, page = 1, limit = 50 } = req.query;
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(200, Math.max(1, parseInt(limit)));
+    const offset = (pageNum - 1) * limitNum;
+
+    const result = activityLogsDb.getAll({ limit: limitNum, offset, level, category, operation, search });
+
+    res.json({
+      success: true,
+      logs: result.logs,
+      total: result.total,
+      page: pageNum,
+      totalPages: Math.ceil(result.total / limitNum)
+    });
+  } catch (error) {
+    console.error('Erreur chargement logs:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE /api/admin/logs - Effacer tous les logs d'activité
+app.delete('/api/admin/logs', async (req, res) => {
+  try {
+    activityLogsDb.clear();
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Erreur suppression logs:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============================================
 // API Domaines d'emails autorisés
 // ============================================
 
@@ -1903,7 +2053,7 @@ app.post('/api/admin/email-domains', async (req, res) => {
 
     try {
       allowedEmailDomainsDb.add(domain.trim(), username || null);
-      logOperation('email_domain_added', { domain: domain.trim(), addedBy: username });
+      logOperation('email_domain_added', { domain: domain.trim(), username });
       
       res.json({
         success: true,
@@ -1941,8 +2091,9 @@ app.delete('/api/admin/email-domains/:domain', async (req, res) => {
       });
     }
 
-    logOperation('email_domain_deleted', { domain });
-    
+    const username = extractUserFromToken(req);
+    logOperation('email_domain_deleted', { domain, username });
+
     res.json({
       success: true,
       message: 'Domaine supprimé avec succès'
@@ -1960,9 +2111,9 @@ app.delete('/api/admin/email-domains/:domain', async (req, res) => {
 app.put('/api/admin/email-domains/:domain/activate', async (req, res) => {
   try {
     const { domain } = req.params;
-    
+
     const result = allowedEmailDomainsDb.activate(domain);
-    
+
     if (result.changes === 0) {
       return res.status(404).json({
         success: false,
@@ -1970,8 +2121,9 @@ app.put('/api/admin/email-domains/:domain/activate', async (req, res) => {
       });
     }
 
-    logOperation('email_domain_activated', { domain });
-    
+    const username = extractUserFromToken(req);
+    logOperation('email_domain_activated', { domain, username });
+
     res.json({
       success: true,
       message: 'Domaine activé avec succès'
@@ -1989,9 +2141,9 @@ app.put('/api/admin/email-domains/:domain/activate', async (req, res) => {
 app.put('/api/admin/email-domains/:domain/deactivate', async (req, res) => {
   try {
     const { domain } = req.params;
-    
+
     const result = allowedEmailDomainsDb.deactivate(domain);
-    
+
     if (result.changes === 0) {
       return res.status(404).json({
         success: false,
@@ -1999,8 +2151,9 @@ app.put('/api/admin/email-domains/:domain/deactivate', async (req, res) => {
       });
     }
 
-    logOperation('email_domain_deactivated', { domain });
-    
+    const username = extractUserFromToken(req);
+    logOperation('email_domain_deactivated', { domain, username });
+
     res.json({
       success: true,
       message: 'Domaine désactivé avec succès'
@@ -2085,6 +2238,84 @@ async function initializeAdminPassword() {
     console.log('⚠️  Remplacez ADMIN_USERS[0].passwordHash avec ce hash en production');
   }
 }
+
+// Route POST /api/auth/login - Connexion unifiée (tous les rôles)
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+
+    if (!username || !password) {
+      return res.status(400).json({
+        success: false,
+        error: 'Nom d\'utilisateur et mot de passe requis'
+      });
+    }
+
+    const user = usersDb.getByUsername(username);
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        error: 'Identifiants invalides'
+      });
+    }
+
+    const passwordValid = await bcrypt.compare(password, user.password_hash);
+    if (!passwordValid) {
+      return res.status(401).json({
+        success: false,
+        error: 'Identifiants invalides'
+      });
+    }
+
+    usersDb.updateLastLogin(user.id);
+
+    const token = Buffer.from(`user:${user.id}:${user.username}:${Date.now()}`).toString('base64');
+
+    // Enrichir avec les infos d'équipe
+    const memberships = teamMembersDb.getByUser(user.id);
+    const teams = memberships.map(m => ({
+      teamId: m.team_id,
+      name: m.name,
+      displayName: m.display_name,
+      role: m.role
+    }));
+    const isTeamLeader = user.role === 'april_user' || teams.some(t => t.role === 'owner');
+
+    // Déterminer la redirection
+    let redirect;
+    if (user.role === 'admin') {
+      redirect = '/admin/';
+    } else if (isTeamLeader) {
+      redirect = 'team.html';
+    } else {
+      redirect = 'user.html';
+    }
+
+    logOperation('auth_login', { username: user.username, role: user.role });
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        name: user.full_name || user.username,
+        role: user.role,
+        email: user.email,
+        teams,
+        isTeamLeader
+      },
+      redirect
+    });
+
+  } catch (error) {
+    console.error('Erreur login unifié:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erreur serveur'
+    });
+  }
+});
 
 // Route POST /api/admin/login - Connexion admin
 app.post('/api/admin/login', async (req, res) => {
@@ -2251,7 +2482,16 @@ app.post('/api/user/login', async (req, res) => {
 // Route POST /api/user/verify - Vérifier un token utilisateur
 app.post('/api/user/verify', authenticateUser, (req, res) => {
   try {
-    // L'authentification est déjà faite par le middleware
+    // Enrichir avec les infos d'équipe
+    const memberships = teamMembersDb.getByUser(req.user.id);
+    const teams = memberships.map(m => ({
+      teamId: m.team_id,
+      name: m.name,
+      displayName: m.display_name,
+      role: m.role
+    }));
+    const isTeamLeader = req.user.role === 'april_user' || teams.some(t => t.role === 'owner');
+
     res.json({
       success: true,
       user: {
@@ -2259,7 +2499,9 @@ app.post('/api/user/verify', authenticateUser, (req, res) => {
         username: req.user.username,
         name: req.user.full_name || req.user.username,
         role: req.user.role,
-        email: req.user.email
+        email: req.user.email,
+        teams,
+        isTeamLeader
       }
     });
 
@@ -3166,7 +3408,7 @@ app.delete('/api/user/share-links/:linkId', async (req, res) => {
 });
 
 // ============================================================================
-// API ÉQUIPES (TEAMS)
+// API ADMIN - GESTION DES UTILISATEURS
 // ============================================================================
 
 // Middleware pour vérifier si l'utilisateur est admin
@@ -3179,6 +3421,239 @@ function requireAdmin(req, res, next) {
   }
   next();
 }
+
+// Route GET /api/admin/users - Lister tous les utilisateurs avec leurs équipes
+app.get('/api/admin/users', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const users = usersDb.getAll();
+    const enriched = users.map(user => {
+      const memberships = teamMembersDb.getByUser(user.id);
+      return {
+        ...user,
+        teams: memberships.map(m => ({
+          teamId: m.team_id,
+          name: m.name,
+          displayName: m.display_name,
+          role: m.role
+        }))
+      };
+    });
+    res.json({ success: true, users: enriched });
+  } catch (error) {
+    console.error('Erreur liste utilisateurs:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Route POST /api/admin/users - Créer un utilisateur
+app.post('/api/admin/users', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const { username, password, email, fullName, role } = req.body;
+    const actor = req.user.username;
+
+    if (!username || !password) {
+      logOperation('user_creation_failed', { targetUsername: username || '?', reason: 'Username ou mot de passe manquant', username: actor });
+      return res.status(400).json({ success: false, error: 'Username et mot de passe requis' });
+    }
+    if (!email) {
+      logOperation('user_creation_failed', { targetUsername: username, reason: 'Email manquant', username: actor });
+      return res.status(400).json({ success: false, error: 'Email requis' });
+    }
+
+    // Vérifier unicité username
+    const existingUser = usersDb.getByUsername(username);
+    if (existingUser) {
+      logOperation('user_creation_failed', { targetUsername: username, reason: 'Username deja utilise', username: actor });
+      return res.status(400).json({ success: false, error: 'Ce username existe déjà' });
+    }
+
+    // Vérifier unicité email
+    const existingEmail = usersDb.getByEmail(email);
+    if (existingEmail) {
+      logOperation('user_creation_failed', { targetUsername: username, reason: `Email "${email}" deja utilise`, username: actor });
+      return res.status(400).json({ success: false, error: 'Cet email est déjà utilisé' });
+    }
+
+    // Vérifier que le domaine de l'email est autorisé
+    const activeDomains = allowedEmailDomainsDb.getAllActive();
+    if (activeDomains.length > 0 && !allowedEmailDomainsDb.isAllowed(email)) {
+      const domain = email.split('@')[1];
+      logOperation('user_creation_failed', { targetUsername: username, reason: `Domaine "${domain}" non autorise`, username: actor });
+      return res.status(403).json({
+        success: false,
+        error: `Le domaine "${domain}" n'est pas autorisé. Ajoutez-le dans la liste des domaines autorisés avant de créer cet utilisateur.`
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    usersDb.create({
+      username,
+      email,
+      passwordHash,
+      role: role || 'user',
+      fullName: fullName || null
+    });
+
+    const created = usersDb.getByUsername(username);
+    logOperation('user_created', { targetUsername: username, role: role || 'user', email, username: actor });
+
+    res.status(201).json({ success: true, user: created });
+  } catch (error) {
+    console.error('Erreur création utilisateur:', error);
+    logOperation('user_creation_failed', { targetUsername: req.body?.username || '?', reason: error.message, username: req.user?.username });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Route PUT /api/admin/users/:id - Modifier un utilisateur (role, nom)
+app.put('/api/admin/users/:id', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    if (isNaN(userId)) {
+      return res.status(400).json({ success: false, error: 'ID invalide' });
+    }
+
+    const user = usersDb.getAll().find(u => u.id === userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
+    }
+
+    const { role, fullName } = req.body;
+    const actor = req.user.username;
+
+    if (role && role !== user.role) {
+      // Empêcher de retirer le rôle admin à soi-même
+      if (userId === req.user.id && role !== 'admin') {
+        return res.status(400).json({ success: false, error: 'Vous ne pouvez pas changer votre propre rôle' });
+      }
+      usersDb.updateRole(userId, role);
+      logOperation('user_role_changed', { targetUsername: user.username, oldRole: user.role, newRole: role, username: actor });
+    }
+
+    if (fullName !== undefined && fullName !== user.full_name) {
+      usersDb.updateFullName(userId, fullName);
+    }
+
+    const updated = usersDb.getAll().find(u => u.id === userId);
+    res.json({ success: true, user: updated });
+  } catch (error) {
+    console.error('Erreur modification utilisateur:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Route PUT /api/admin/users/:id/activate - Réactiver un utilisateur
+app.put('/api/admin/users/:id/activate', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    if (isNaN(userId)) {
+      return res.status(400).json({ success: false, error: 'ID invalide' });
+    }
+
+    const user = usersDb.getAll().find(u => u.id === userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
+    }
+
+    usersDb.activate(userId);
+    logOperation('user_activated', { targetUsername: user.username, username: req.user.username });
+
+    res.json({ success: true, message: 'Utilisateur réactivé' });
+  } catch (error) {
+    console.error('Erreur réactivation utilisateur:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Route PUT /api/admin/users/:id/password - Réinitialiser le mot de passe
+app.put('/api/admin/users/:id/password', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    if (isNaN(userId)) {
+      return res.status(400).json({ success: false, error: 'ID invalide' });
+    }
+
+    const { password } = req.body;
+    if (!password || password.length < 4) {
+      return res.status(400).json({ success: false, error: 'Mot de passe requis (min. 4 caractères)' });
+    }
+
+    const user = usersDb.getAll().find(u => u.id === userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    usersDb.updatePassword(userId, passwordHash);
+    logOperation('user_password_reset', { targetUsername: user.username, username: req.user.username });
+
+    res.json({ success: true, message: 'Mot de passe réinitialisé' });
+  } catch (error) {
+    console.error('Erreur réinitialisation mot de passe:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Route DELETE /api/admin/users/:id - Désactiver un utilisateur (soft-delete)
+app.delete('/api/admin/users/:id', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    if (isNaN(userId)) {
+      return res.status(400).json({ success: false, error: 'ID invalide' });
+    }
+
+    // Empêcher un admin de se supprimer lui-même
+    if (userId === req.user.id) {
+      return res.status(400).json({ success: false, error: 'Vous ne pouvez pas supprimer votre propre compte' });
+    }
+
+    const user = usersDb.getAll().find(u => u.id === userId);
+    usersDb.deactivate(userId);
+    logOperation('user_deactivated', { targetUsername: user?.username || `id:${userId}`, username: req.user.username });
+
+    res.json({ success: true, message: 'Utilisateur désactivé' });
+  } catch (error) {
+    console.error('Erreur désactivation utilisateur:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Route DELETE /api/admin/users/:id/permanent - Supprimer définitivement un utilisateur
+app.delete('/api/admin/users/:id/permanent', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    if (isNaN(userId)) {
+      return res.status(400).json({ success: false, error: 'ID invalide' });
+    }
+
+    if (userId === req.user.id) {
+      return res.status(400).json({ success: false, error: 'Vous ne pouvez pas supprimer votre propre compte' });
+    }
+
+    const user = usersDb.getAll().find(u => u.id === userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
+    }
+
+    // Retirer des équipes
+    const memberships = teamMembersDb.getByUser(userId);
+    for (const m of memberships) {
+      teamMembersDb.remove(m.team_id, userId);
+    }
+
+    usersDb.delete(userId);
+    logOperation('user_deleted', { targetUsername: user.username, username: req.user.username });
+
+    res.json({ success: true, message: 'Utilisateur supprimé définitivement' });
+  } catch (error) {
+    console.error('Erreur suppression utilisateur:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============================================================================
+// API ÉQUIPES (TEAMS)
+// ============================================================================
 
 // Route POST /api/teams - Créer une équipe (admin uniquement)
 app.post('/api/teams', authenticateUser, requireAdmin, async (req, res) => {
@@ -4352,6 +4827,11 @@ async function notifyExpiringGuestAccounts() {
     console.error('Erreur lors des notifications d\'expiration:', error);
   }
 }
+
+// Catch-all 404 pour les routes API non trouvées (retourne du JSON, pas du HTML)
+app.all('/api/*', (req, res) => {
+  res.status(404).json({ success: false, error: 'Route non trouvée' });
+});
 
 // Démarrer le serveur avec migration des utilisateurs
 if (require.main === module) {

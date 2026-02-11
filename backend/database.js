@@ -233,6 +233,23 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_operation_logs_period ON operation_logs(period_month);
   CREATE INDEX IF NOT EXISTS idx_operation_logs_composite ON operation_logs(entity_type, entity_id, period_month);
 
+  -- Table pour les logs d'activité (audit)
+  CREATE TABLE IF NOT EXISTS activity_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+    level TEXT NOT NULL DEFAULT 'info' CHECK(level IN ('info', 'warning', 'error', 'success')),
+    category TEXT NOT NULL DEFAULT 'system',
+    operation TEXT NOT NULL,
+    message TEXT,
+    username TEXT,
+    details TEXT,
+    ip_address TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_activity_logs_timestamp ON activity_logs(timestamp);
+  CREATE INDEX IF NOT EXISTS idx_activity_logs_category ON activity_logs(category);
+  CREATE INDEX IF NOT EXISTS idx_activity_logs_operation ON activity_logs(operation);
+
   -- Table pour les tiers de stockage
   CREATE TABLE IF NOT EXISTS file_tiers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -879,6 +896,52 @@ const usersDb = {
       WHERE id = ?
     `);
     return stmt.run(userId);
+  },
+
+  // Supprimer définitivement un utilisateur
+  delete: (userId) => {
+    const stmt = db.prepare('DELETE FROM users WHERE id = ?');
+    return stmt.run(userId);
+  },
+
+  // Réactiver un utilisateur
+  activate: (userId) => {
+    const stmt = db.prepare(`
+      UPDATE users
+      SET is_active = 1
+      WHERE id = ?
+    `);
+    return stmt.run(userId);
+  },
+
+  // Changer le rôle d'un utilisateur
+  updateRole: (userId, role) => {
+    const stmt = db.prepare(`
+      UPDATE users
+      SET role = ?
+      WHERE id = ?
+    `);
+    return stmt.run(role, userId);
+  },
+
+  // Changer le nom complet
+  updateFullName: (userId, fullName) => {
+    const stmt = db.prepare(`
+      UPDATE users
+      SET full_name = ?
+      WHERE id = ?
+    `);
+    return stmt.run(fullName || null, userId);
+  },
+
+  // Réinitialiser le mot de passe
+  updatePassword: (userId, passwordHash) => {
+    const stmt = db.prepare(`
+      UPDATE users
+      SET password_hash = ?
+      WHERE id = ?
+    `);
+    return stmt.run(passwordHash, userId);
   },
 
   // Obtenir tous les utilisateurs
@@ -2078,6 +2141,45 @@ const searchIndexDb = {
   }
 };
 
+// Fonctions pour les logs d'activité
+const activityLogsDb = {
+  log: ({ level = 'info', category = 'system', operation, message, username, details, ip_address }) => {
+    const stmt = db.prepare(`
+      INSERT INTO activity_logs (level, category, operation, message, username, details, ip_address)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    return stmt.run(level, category, operation, message || null, username || null,
+      details ? JSON.stringify(details) : null, ip_address || null);
+  },
+
+  getAll: ({ limit = 100, offset = 0, level, category, operation, search } = {}) => {
+    let where = [];
+    let params = [];
+
+    if (level) { where.push('level = ?'); params.push(level); }
+    if (category) { where.push('category = ?'); params.push(category); }
+    if (operation) { where.push('operation = ?'); params.push(operation); }
+    if (search) { where.push('(message LIKE ? OR operation LIKE ? OR username LIKE ?)'); params.push(`%${search}%`, `%${search}%`, `%${search}%`); }
+
+    const whereClause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+    const countStmt = db.prepare(`SELECT COUNT(*) as total FROM activity_logs ${whereClause}`);
+    const total = countStmt.get(...params).total;
+
+    const stmt = db.prepare(`
+      SELECT * FROM activity_logs ${whereClause}
+      ORDER BY timestamp DESC
+      LIMIT ? OFFSET ?
+    `);
+    const logs = stmt.all(...params, limit, offset);
+
+    return { logs, total };
+  },
+
+  clear: () => {
+    db.prepare('DELETE FROM activity_logs').run();
+  }
+};
+
 module.exports = {
   db,
   shareLinksDb,
@@ -2099,5 +2201,6 @@ module.exports = {
   transcriptionsDb,
   videoMarkersDb,
   aiCostTrackingDb,
-  searchIndexDb
+  searchIndexDb,
+  activityLogsDb
 };

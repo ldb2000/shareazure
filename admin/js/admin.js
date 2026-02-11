@@ -1,212 +1,37 @@
 // Configuration
 const API_URL = 'http://localhost:3000/api';
 
-// État de l'application
+// State
 let currentSection = 'dashboard';
 let allFiles = [];
 let allShares = [];
 let allLogs = [];
+let allGuests = [];
 let selectedFiles = [];
-let currentPage = 1;
-let itemsPerPage = 10;
-
-// Charts instances
 let uploadsChart = null;
 let fileTypesChart = null;
 
-// Initialisation
-document.addEventListener('DOMContentLoaded', () => {
-    checkAuthStatus();
-    initializeLogin();
-    initializeNavigation();
-    initializeEventListeners();
-});
-
 // ============================================
-// Navigation
+// AUTH
 // ============================================
 
-function initializeNavigation() {
-    const navItems = document.querySelectorAll('.nav-item');
-    
-    navItems.forEach(item => {
-        item.addEventListener('click', (e) => {
-            e.preventDefault();
-            const section = item.dataset.section;
-            switchSection(section);
-        });
-    });
+function getAuthToken() {
+    return localStorage.getItem('authToken') || sessionStorage.getItem('authToken') ||
+           localStorage.getItem('adminToken') || sessionStorage.getItem('adminToken');
 }
 
-function switchSection(section) {
-    // Mettre à jour la navigation
-    document.querySelectorAll('.nav-item').forEach(item => {
-        item.classList.remove('active');
-    });
-    document.querySelector(`[data-section="${section}"]`).classList.add('active');
-    
-    // Mettre à jour les sections
-    document.querySelectorAll('.content-section').forEach(sec => {
-        sec.classList.remove('active');
-    });
-    document.getElementById(section).classList.add('active');
-    
-    // Mettre à jour le titre
-    const titles = {
-        dashboard: { title: 'Dashboard', subtitle: 'Vue d\'ensemble de l\'activité' },
-        files: { title: 'Gestion des fichiers', subtitle: 'Tous les fichiers uploadés' },
-        shares: { title: 'Gestion des partages', subtitle: 'Historique des liens de partage' },
-        users: { title: 'Gestion des utilisateurs', subtitle: 'Administration des utilisateurs' },
-        guests: { title: 'Gestion des invités', subtitle: 'Comptes temporaires pour partenaires' },
-        logs: { title: 'Logs système', subtitle: 'Historique des opérations' },
-        settings: { title: 'Paramètres', subtitle: 'Configuration de l\'application' }
-    };
-    
-    document.getElementById('pageTitle').textContent = titles[section].title;
-    document.getElementById('pageSubtitle').textContent = titles[section].subtitle;
-    
-    currentSection = section;
-    
-    // Charger les données de la section
-    loadSectionData(section);
+function getAuthHeaders() {
+    const token = getAuthToken();
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
 }
 
-function loadSectionData(section) {
-    switch(section) {
-        case 'dashboard':
-            loadDashboard();
-            break;
-        case 'files':
-            loadFiles();
-            break;
-        case 'shares':
-            loadShares();
-            break;
-        case 'guests':
-            loadGuests();
-            break;
-        case 'logs':
-            loadLogs();
-            break;
-        case 'settings':
-            loadSettings();
-            loadEmailDomains();
-            break;
-    }
-}
-
-// ============================================
-// Authentication
-// ============================================
-
-function checkAuthStatus() {
-    const token = localStorage.getItem('adminToken') || sessionStorage.getItem('adminToken');
-    if (token) {
-        verifyToken(token).then(valid => {
-            if (valid) {
-                showAdminInterface();
-            } else {
-                showLoginScreen();
-            }
-        }).catch(() => {
-            showLoginScreen();
-        });
-    } else {
-        showLoginScreen();
-    }
-}
-
-function showLoginScreen() {
-    document.getElementById('loginScreen').style.display = 'flex';
-    document.getElementById('adminInterface').style.display = 'none';
-}
-
-function showAdminInterface() {
-    document.getElementById('loginScreen').style.display = 'none';
-    document.getElementById('adminInterface').style.display = 'block';
-    loadDashboard();
-    checkHealth();
-}
-
-function initializeLogin() {
-    const loginForm = document.getElementById('loginForm');
-    if (loginForm) {
-        loginForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            await handleLogin();
-        });
+async function checkAuth() {
+    const token = getAuthToken();
+    if (!token) {
+        window.location.href = '/login.html';
+        return;
     }
 
-    const logoutBtn = document.getElementById('logoutBtn');
-    if (logoutBtn) {
-        logoutBtn.addEventListener('click', handleLogout);
-    }
-}
-
-async function handleLogin() {
-    const username = document.getElementById('username').value;
-    const password = document.getElementById('password').value;
-    const rememberMe = document.getElementById('rememberMe').checked;
-    const errorDiv = document.getElementById('loginError');
-    const errorMessage = document.getElementById('loginErrorMessage');
-    const loginForm = document.getElementById('loginForm');
-    const submitBtn = loginForm.querySelector('button[type="submit"]');
-    const originalText = submitBtn.innerHTML;
-
-    // Réinitialiser les erreurs
-    errorDiv.style.display = 'none';
-    errorMessage.textContent = '';
-    
-    // Désactiver le bouton et afficher le chargement
-    submitBtn.disabled = true;
-    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Connexion...';
-
-    try {
-        const response = await fetch(`${API_URL}/admin/login`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ username, password })
-        });
-
-        const data = await response.json();
-
-        if (data.success && data.token) {
-            // Stocker le token
-            if (rememberMe) {
-                localStorage.setItem('adminToken', data.token);
-                localStorage.setItem('adminUser', JSON.stringify(data.user));
-            } else {
-                sessionStorage.setItem('adminToken', data.token);
-                sessionStorage.setItem('adminUser', JSON.stringify(data.user));
-            }
-
-            // Mettre à jour le nom d'utilisateur dans l'interface
-            const userNameElement = document.getElementById('currentUserName');
-            if (userNameElement) {
-                userNameElement.textContent = data.user.name || data.user.username;
-            }
-
-            // Afficher l'interface admin
-            showAdminInterface();
-        } else {
-            // Afficher l'erreur
-            errorMessage.textContent = data.error || 'Erreur de connexion';
-            errorDiv.style.display = 'flex';
-            loginForm.querySelector('input[type="password"]').value = '';
-        }
-    } catch (error) {
-        console.error('Erreur login:', error);
-        errorMessage.textContent = 'Erreur de connexion au serveur';
-        errorDiv.style.display = 'flex';
-    } finally {
-        submitBtn.disabled = false;
-        submitBtn.innerHTML = originalText;
-    }
-}
-
-async function verifyToken(token) {
     try {
         const response = await fetch(`${API_URL}/admin/verify`, {
             method: 'POST',
@@ -215,1538 +40,1375 @@ async function verifyToken(token) {
                 'Content-Type': 'application/json'
             }
         });
-
         const data = await response.json();
-        return data.success === true;
+        if (!data.success) {
+            window.location.href = '/login.html';
+            return;
+        }
+        const userNameEl = document.getElementById('currentUserName');
+        if (userNameEl) {
+            userNameEl.textContent = data.user.name || data.user.username;
+        }
+        const avatarEl = document.querySelector('.user-avatar');
+        if (avatarEl) {
+            const name = encodeURIComponent(data.user.name || data.user.username);
+            avatarEl.src = `https://ui-avatars.com/api/?name=${name}&background=003C61&color=fff`;
+        }
     } catch (error) {
-        console.error('Erreur vérification token:', error);
-        return false;
+        console.error('Auth check failed:', error);
+        window.location.href = '/login.html';
     }
 }
 
 function handleLogout() {
-    localStorage.removeItem('adminToken');
-    localStorage.removeItem('adminUser');
-    sessionStorage.removeItem('adminToken');
-    sessionStorage.removeItem('adminUser');
-    showLoginScreen();
-    
-    // Réinitialiser le formulaire
-    document.getElementById('loginForm').reset();
-}
-
-// Fonction helper pour ajouter le token aux requêtes API
-function getAuthHeaders() {
-    const token = localStorage.getItem('adminToken') || sessionStorage.getItem('adminToken');
-    return token ? { 'Authorization': `Bearer ${token}` } : {};
+    ['authToken', 'adminToken', 'adminUser', 'adminUsername', 'userToken', 'userData'].forEach(key => {
+        localStorage.removeItem(key);
+        sessionStorage.removeItem(key);
+    });
+    window.location.href = '/login.html';
 }
 
 // ============================================
-// Event Listeners
+// INIT
+// ============================================
+
+document.addEventListener('DOMContentLoaded', async () => {
+    await checkAuth();
+    initializeNavigation();
+    initializeEventListeners();
+    loadDashboard();
+
+    // Fermer les menus kebab quand on clique ailleurs
+    document.addEventListener('click', () => closeAllKebabs());
+});
+
+// ============================================
+// NAVIGATION
+// ============================================
+
+function initializeNavigation() {
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.preventDefault();
+            switchSection(item.dataset.section);
+        });
+    });
+}
+
+function switchSection(section) {
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.section === section);
+    });
+    document.querySelectorAll('.content-section').forEach(sec => {
+        sec.classList.toggle('active', sec.id === section);
+    });
+
+    const titles = {
+        dashboard: { title: 'Dashboard', subtitle: 'Vue d\'ensemble de l\'activite' },
+        files: { title: 'Gestion des fichiers', subtitle: 'Tous les fichiers uploades' },
+        shares: { title: 'Gestion des partages', subtitle: 'Historique des liens de partage' },
+        teams: { title: 'Gestion des equipes', subtitle: 'Equipes et membres' },
+        costs: { title: 'Suivi des couts', subtitle: 'Couts par entite et periode' },
+        users: { title: 'Gestion des utilisateurs', subtitle: 'Tous les comptes utilisateurs' },
+        guests: { title: 'Gestion des invites', subtitle: 'Comptes temporaires' },
+        logs: { title: 'Logs systeme', subtitle: 'Historique des operations' },
+        settings: { title: 'Parametres', subtitle: 'Configuration de l\'application' }
+    };
+
+    const t = titles[section] || { title: section, subtitle: '' };
+    document.getElementById('pageTitle').textContent = t.title;
+    document.getElementById('pageSubtitle').textContent = t.subtitle;
+
+    currentSection = section;
+    loadSectionData(section);
+}
+
+function loadSectionData(section) {
+    switch (section) {
+        case 'dashboard': loadDashboard(); break;
+        case 'files': loadFiles(); break;
+        case 'shares': loadShares(); break;
+        case 'teams': loadTeams(); break;
+        case 'costs': loadCosts(); break;
+        case 'users': loadUsers(); break;
+        case 'guests': loadGuests(); break;
+        case 'logs': loadLogs(); break;
+        case 'settings': loadSettings(); loadEmailDomains(); break;
+    }
+}
+
+// ============================================
+// EVENT LISTENERS
 // ============================================
 
 function initializeEventListeners() {
-    // Header buttons
+    document.getElementById('logoutBtn').addEventListener('click', handleLogout);
     document.getElementById('refreshBtn').addEventListener('click', () => {
         loadSectionData(currentSection);
-        showNotification('Données actualisées', 'success');
+        showNotification('Donnees actualisees', 'success');
     });
-    
-    // Files section
+
+    // Files
     document.getElementById('fileSearchInput')?.addEventListener('input', filterFiles);
     document.getElementById('fileTypeFilter')?.addEventListener('change', filterFiles);
     document.getElementById('fileSortBy')?.addEventListener('change', sortFiles);
     document.getElementById('selectAllFiles')?.addEventListener('change', toggleSelectAllFiles);
     document.getElementById('deleteSelectedBtn')?.addEventListener('click', deleteSelectedFiles);
-    
-    // Shares section
+
+    // Shares
     document.getElementById('shareSearchInput')?.addEventListener('input', filterShares);
     document.getElementById('shareStatusFilter')?.addEventListener('change', filterShares);
     document.getElementById('exportSharesBtn')?.addEventListener('click', exportSharesCSV);
-    
-    // Logs section
-    document.getElementById('logLevelFilter')?.addEventListener('change', filterLogs);
-    document.getElementById('logOperationFilter')?.addEventListener('change', filterLogs);
+
+    // Logs
+    document.getElementById('logLevelFilter')?.addEventListener('change', () => { logsPage = 1; loadLogs(); });
+    document.getElementById('logCategoryFilter')?.addEventListener('change', () => { logsPage = 1; loadLogs(); });
+    document.getElementById('logSearchInput')?.addEventListener('keypress', (e) => { if (e.key === 'Enter') { logsPage = 1; loadLogs(); } });
     document.getElementById('clearLogsBtn')?.addEventListener('click', clearLogs);
     document.getElementById('exportLogsBtn')?.addEventListener('click', exportLogs);
-    
+    document.getElementById('logsPrevBtn')?.addEventListener('click', () => window.changeLogsPage(-1));
+    document.getElementById('logsNextBtn')?.addEventListener('click', () => window.changeLogsPage(1));
+
     // Settings
     document.getElementById('saveSettingsBtn')?.addEventListener('click', saveSettings);
     document.getElementById('resetSettingsBtn')?.addEventListener('click', resetSettings);
     document.getElementById('addEmailDomainBtn')?.addEventListener('click', addEmailDomain);
+    document.getElementById('domainsPrevBtn')?.addEventListener('click', () => window.changeDomainsPage(-1));
+    document.getElementById('domainsNextBtn')?.addEventListener('click', () => window.changeDomainsPage(1));
     document.getElementById('newEmailDomainInput')?.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            addEmailDomain();
-        }
+        if (e.key === 'Enter') addEmailDomain();
     });
-    
-    // Modals
-    document.getElementById('closeFileDetailsBtn')?.addEventListener('click', () => {
-        document.getElementById('fileDetailsModal').style.display = 'none';
+
+    // Modals close
+    document.getElementById('closeFileDetailsBtn')?.addEventListener('click', () => closeModal('fileDetailsModal'));
+    document.getElementById('confirmNoBtn')?.addEventListener('click', () => closeModal('confirmModal'));
+
+    // Teams
+    document.getElementById('createTeamBtn')?.addEventListener('click', () => showModal('createTeamModal'));
+    document.getElementById('submitCreateTeam')?.addEventListener('click', createTeam);
+    document.getElementById('closeCreateTeamBtn')?.addEventListener('click', () => closeModal('createTeamModal'));
+    document.getElementById('cancelCreateTeamBtn')?.addEventListener('click', () => closeModal('createTeamModal'));
+
+    // Costs
+    document.getElementById('refreshCostsBtn')?.addEventListener('click', loadCosts);
+    document.getElementById('costsPeriod')?.addEventListener('change', loadCosts);
+
+    // Users
+    document.getElementById('createUserBtn')?.addEventListener('click', () => showModal('createUserModal'));
+    document.getElementById('submitCreateUser')?.addEventListener('click', createUser);
+    document.getElementById('closeCreateUserBtn')?.addEventListener('click', () => closeModal('createUserModal'));
+    document.getElementById('cancelCreateUserBtn')?.addEventListener('click', () => closeModal('createUserModal'));
+
+    // Edit User modal
+    document.getElementById('submitEditUser')?.addEventListener('click', () => window.saveEditUser());
+    document.getElementById('closeEditUserBtn')?.addEventListener('click', () => closeModal('editUserModal'));
+    document.getElementById('cancelEditUserBtn')?.addEventListener('click', () => closeModal('editUserModal'));
+
+    // Reset Password modal
+    document.getElementById('submitResetPassword')?.addEventListener('click', () => window.submitResetPassword());
+    document.getElementById('closeResetPasswordBtn')?.addEventListener('click', () => closeModal('resetPasswordModal'));
+    document.getElementById('cancelResetPasswordBtn')?.addEventListener('click', () => closeModal('resetPasswordModal'));
+
+    // User Teams modal
+    document.getElementById('closeUserTeamsBtn')?.addEventListener('click', () => closeModal('userTeamsModal'));
+    document.getElementById('cancelUserTeamsBtn')?.addEventListener('click', () => closeModal('userTeamsModal'));
+
+    // Team Detail modal
+    document.getElementById('closeTeamDetailBtn')?.addEventListener('click', () => closeModal('teamDetailModal'));
+    document.getElementById('cancelTeamDetailBtn')?.addEventListener('click', () => closeModal('teamDetailModal'));
+
+    // Guests
+    document.getElementById('createGuestBtn')?.addEventListener('click', () => {
+        document.getElementById('guestEmail').value = '';
+        document.getElementById('createGuestError').style.display = 'none';
+        showModal('createGuestModal');
     });
-    
-    document.getElementById('confirmNoBtn')?.addEventListener('click', () => {
-        document.getElementById('confirmModal').style.display = 'none';
+    document.getElementById('submitCreateGuestBtn')?.addEventListener('click', createGuest);
+    document.getElementById('closeCreateGuestBtn')?.addEventListener('click', () => closeModal('createGuestModal'));
+    document.getElementById('cancelCreateGuestBtn')?.addEventListener('click', () => closeModal('createGuestModal'));
+    document.getElementById('closeGuestDetailsBtn')?.addEventListener('click', () => closeModal('guestDetailsModal'));
+    document.getElementById('guestStatusFilter')?.addEventListener('change', filterGuests);
+    document.getElementById('guestSearch')?.addEventListener('input', filterGuests);
+    document.getElementById('guestEmail')?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); createGuest(); }
     });
 }
 
 // ============================================
-// Dashboard
+// API HELPER
+// ============================================
+
+async function apiRequest(endpoint, method = 'GET', body = null) {
+    const options = {
+        method,
+        headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders()
+        }
+    };
+    if (body) options.body = JSON.stringify(body);
+    const response = await fetch(`${API_URL}${endpoint}`, options);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Erreur serveur');
+    return data;
+}
+
+// ============================================
+// DASHBOARD
 // ============================================
 
 async function loadDashboard() {
     try {
-        // Charger les fichiers pour les stats
         const files = await fetchFiles();
-        
-        // Calculer les statistiques
+
+        // Stats
+        document.getElementById('statTotalFiles').textContent = files.length;
+
+        // Teams count
+        try {
+            const teamsRes = await apiRequest('/teams');
+            document.getElementById('statTotalTeams').textContent = teamsRes.success ? teamsRes.teams.length : 0;
+        } catch (e) { document.getElementById('statTotalTeams').textContent = '0'; }
+
+        // Users count
+        try {
+            const usersRes = await apiRequest('/admin/users');
+            document.getElementById('statTotalUsers').textContent = usersRes.success ? (usersRes.users || []).length : '-';
+        } catch (e) { document.getElementById('statTotalUsers').textContent = '-'; }
+
+        // Costs
+        try {
+            const costsRes = await apiRequest('/admin/costs');
+            document.getElementById('statTotalCosts').textContent = costsRes.success ? `$${(costsRes.totals.overall || 0).toFixed(2)}` : '$0.00';
+        } catch (e) { document.getElementById('statTotalCosts').textContent = '$0.00'; }
+
+        // Charts
         const stats = calculateStats(files);
-        
-        // Mettre à jour les cartes de stats
-        document.getElementById('statTotalFiles').textContent = stats.totalFiles;
-        document.getElementById('statTotalSize').textContent = formatBytes(stats.totalSize);
-        document.getElementById('statActiveShares').textContent = stats.activeShares;
-        document.getElementById('statDownloads').textContent = stats.downloads;
-        
-        // Créer les graphiques
         createUploadsChart(stats.uploadsByDay);
         createFileTypesChart(stats.filesByType);
-        
-        // Charger l'activité récente
         loadRecentActivity(files);
-        
+
     } catch (error) {
-        console.error('Erreur chargement dashboard:', error);
-        showNotification('Erreur lors du chargement du dashboard', 'error');
+        console.error('Dashboard error:', error);
     }
 }
 
 function calculateStats(files) {
     const now = new Date();
-    const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
-    
-    // Stats globales
-    const totalFiles = files.length;
-    const totalSize = files.reduce((sum, f) => sum + (f.size || 0), 0);
-    
-    // Uploads par jour (7 derniers jours)
     const uploadsByDay = {};
     for (let i = 6; i >= 0; i--) {
         const date = new Date(now - i * 24 * 60 * 60 * 1000);
-        const dateKey = date.toISOString().split('T')[0];
-        uploadsByDay[dateKey] = 0;
+        uploadsByDay[date.toISOString().split('T')[0]] = 0;
     }
-    
     files.forEach(file => {
-        const fileDate = new Date(file.lastModified);
-        const dateKey = fileDate.toISOString().split('T')[0];
-        if (uploadsByDay.hasOwnProperty(dateKey)) {
-            uploadsByDay[dateKey]++;
-        }
+        const dateKey = new Date(file.lastModified).toISOString().split('T')[0];
+        if (uploadsByDay.hasOwnProperty(dateKey)) uploadsByDay[dateKey]++;
     });
-    
-    // Types de fichiers
     const filesByType = {};
     files.forEach(file => {
         const type = getFileCategory(file.contentType);
         filesByType[type] = (filesByType[type] || 0) + 1;
     });
-    
-    return {
-        totalFiles,
-        totalSize,
-        activeShares: Math.floor(Math.random() * 20), // Simulé pour l'instant
-        downloads: Math.floor(Math.random() * 100), // Simulé pour l'instant
-        uploadsByDay,
-        filesByType
-    };
+    return { uploadsByDay, filesByType };
 }
 
 function createUploadsChart(uploadsByDay) {
     const ctx = document.getElementById('uploadsChart');
     if (!ctx) return;
-    
-    // Détruire le graphique existant
-    if (uploadsChart) {
-        uploadsChart.destroy();
-    }
-    
-    const labels = Object.keys(uploadsByDay).map(date => {
-        const d = new Date(date);
-        return d.toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' });
-    });
-    
-    const data = Object.values(uploadsByDay);
-    
+    if (uploadsChart) uploadsChart.destroy();
     uploadsChart = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: labels,
-            datasets: [{
-                label: 'Uploads',
-                data: data,
-                borderColor: '#6366f1',
-                backgroundColor: 'rgba(99, 102, 241, 0.1)',
-                tension: 0.4,
-                fill: true
-            }]
+            labels: Object.keys(uploadsByDay).map(d => new Date(d).toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' })),
+            datasets: [{ label: 'Uploads', data: Object.values(uploadsByDay), borderColor: '#003C61', backgroundColor: 'rgba(0, 60, 97, 0.1)', tension: 0.4, fill: true }]
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: {
-                    display: false
-                }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        stepSize: 1
-                    }
-                }
-            }
-        }
+        options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
     });
 }
 
 function createFileTypesChart(filesByType) {
     const ctx = document.getElementById('fileTypesChart');
     if (!ctx) return;
-    
-    // Détruire le graphique existant
-    if (fileTypesChart) {
-        fileTypesChart.destroy();
-    }
-    
-    const colors = {
-        'Images': '#10b981',
-        'Documents': '#3b82f6',
-        'PDF': '#ef4444',
-        'Vidéos': '#f59e0b',
-        'Audio': '#8b5cf6',
-        'Autres': '#64748b'
-    };
-    
+    if (fileTypesChart) fileTypesChart.destroy();
+    const colors = { 'Images': '#639E30', 'Documents': '#003C61', 'PDF': '#DC2626', 'Videos': '#F8AA36', 'Audio': '#8b5cf6', 'Autres': '#64748b' };
     fileTypesChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
             labels: Object.keys(filesByType),
-            datasets: [{
-                data: Object.values(filesByType),
-                backgroundColor: Object.keys(filesByType).map(type => colors[type] || '#64748b')
-            }]
+            datasets: [{ data: Object.values(filesByType), backgroundColor: Object.keys(filesByType).map(t => colors[t] || '#64748b') }]
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: {
-                    position: 'right'
-                }
-            }
-        }
+        options: { responsive: true, plugins: { legend: { position: 'right' } } }
     });
 }
 
 function loadRecentActivity(files) {
     const container = document.getElementById('recentActivity');
     if (!container) return;
-    
-    // Prendre les 10 derniers fichiers
-    const recentFiles = files
-        .sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified))
-        .slice(0, 10);
-    
-    if (recentFiles.length === 0) {
-        container.innerHTML = '<p class="loading">Aucune activité récente</p>';
-        return;
-    }
-    
-    container.innerHTML = recentFiles.map(file => {
-        const icon = getFileIcon(file.contentType);
-        const time = formatTimeAgo(file.lastModified);
-        
-        return `
-            <div class="activity-item">
-                <div class="activity-icon">${icon}</div>
-                <div class="activity-content">
-                    <p class="activity-title">Fichier uploadé</p>
-                    <p class="activity-details">${file.metadata?.originalName || file.name}</p>
-                </div>
-                <div class="activity-time">${time}</div>
+    const recent = files.sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified)).slice(0, 10);
+    if (recent.length === 0) { container.innerHTML = '<p class="loading">Aucune activite recente</p>'; return; }
+    container.innerHTML = recent.map(file => `
+        <div class="activity-item">
+            <div class="activity-icon">${getFileIcon(file.contentType)}</div>
+            <div class="activity-content">
+                <p class="activity-title">Fichier uploade</p>
+                <p class="activity-details">${file.metadata?.originalName || file.name}</p>
             </div>
-        `;
-    }).join('');
+            <div class="activity-time">${formatTimeAgo(file.lastModified)}</div>
+        </div>
+    `).join('');
 }
 
 // ============================================
-// Files Management
+// FILES
 // ============================================
+
+async function fetchFiles() {
+    const response = await fetch(`${API_URL}/files`, { headers: getAuthHeaders() });
+    if (!response.ok) throw new Error('Erreur');
+    const data = await response.json();
+    return data.files || [];
+}
 
 async function loadFiles() {
     try {
-        const files = await fetchFiles();
-        allFiles = files;
-        renderFilesTable(files);
+        allFiles = await fetchFiles();
+        renderFilesTable(allFiles);
     } catch (error) {
-        console.error('Erreur chargement fichiers:', error);
-        showNotification('Erreur lors du chargement des fichiers', 'error');
+        console.error('Files error:', error);
     }
-}
-
-async function fetchFiles() {
-    const response = await fetch(`${API_URL}/files`);
-    if (!response.ok) throw new Error('Erreur de chargement');
-    const data = await response.json();
-    return data.files || [];
 }
 
 function renderFilesTable(files) {
     const tbody = document.getElementById('filesTableBody');
     if (!tbody) return;
-    
-    if (files.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="loading">Aucun fichier</td></tr>';
-        return;
-    }
-    
-    tbody.innerHTML = files.map(file => {
-        const icon = getFileIcon(file.contentType);
-        const category = getFileCategory(file.contentType);
-        const size = formatBytes(file.size);
-        const date = new Date(file.lastModified).toLocaleString('fr-FR');
-        
-        return `
-            <tr>
-                <td><input type="checkbox" class="file-checkbox" data-blob-name="${file.name}"></td>
-                <td>
-                    <div class="file-name">
-                        <span class="file-icon">${icon}</span>
-                        <span class="file-name-text">${file.metadata?.originalName || file.name}</span>
-                    </div>
-                </td>
-                <td>${category}</td>
-                <td>${size}</td>
-                <td>${date}</td>
-                <td><span class="status-badge active">0 partages</span></td>
-                <td>
-                    <div class="table-actions">
-                        <button class="btn btn-small btn-secondary" onclick="viewFileDetails('${file.name}')">
-                            👁️ Voir
-                        </button>
-                        <button class="btn btn-small btn-danger" onclick="deleteFile('${file.name}')">
-                            🗑️
-                        </button>
-                    </div>
-                </td>
-            </tr>
-        `;
-    }).join('');
-    
-    // Ajouter les event listeners pour les checkboxes
-    document.querySelectorAll('.file-checkbox').forEach(cb => {
-        cb.addEventListener('change', updateSelectedFiles);
-    });
+    if (files.length === 0) { tbody.innerHTML = '<tr><td colspan="7" class="loading">Aucun fichier</td></tr>'; return; }
+    tbody.innerHTML = files.map(file => `
+        <tr>
+            <td><input type="checkbox" class="file-checkbox" data-blob-name="${file.name}"></td>
+            <td><div class="file-name"><span class="file-icon">${getFileIcon(file.contentType)}</span> <span class="file-name-text">${escapeHtml(file.metadata?.originalName || file.name)}</span></div></td>
+            <td>${getFileCategory(file.contentType)}</td>
+            <td>${formatBytes(file.size)}</td>
+            <td>${new Date(file.lastModified).toLocaleString('fr-FR')}</td>
+            <td><span class="status-badge active">0</span></td>
+            <td><div class="table-actions">
+                <button class="btn btn-small btn-secondary" onclick="viewFileDetails('${file.name}')"><i class="fas fa-eye"></i></button>
+                <button class="btn btn-small btn-danger" onclick="deleteFile('${file.name}')"><i class="fas fa-trash"></i></button>
+            </div></td>
+        </tr>
+    `).join('');
+    document.querySelectorAll('.file-checkbox').forEach(cb => cb.addEventListener('change', updateSelectedFiles));
 }
 
 function filterFiles() {
-    const searchTerm = document.getElementById('fileSearchInput').value.toLowerCase();
-    const typeFilter = document.getElementById('fileTypeFilter').value;
-    
-    let filtered = allFiles.filter(file => {
-        const matchesSearch = (file.metadata?.originalName || file.name).toLowerCase().includes(searchTerm);
-        const matchesType = !typeFilter || getFileCategory(file.contentType) === typeFilter;
-        return matchesSearch && matchesType;
-    });
-    
-    renderFilesTable(filtered);
+    const search = document.getElementById('fileSearchInput').value.toLowerCase();
+    const type = document.getElementById('fileTypeFilter').value;
+    renderFilesTable(allFiles.filter(f => {
+        const name = (f.metadata?.originalName || f.name).toLowerCase();
+        return (!search || name.includes(search)) && (!type || getFileCategory(f.contentType) === type);
+    }));
 }
 
 function sortFiles() {
     const sortBy = document.getElementById('fileSortBy').value;
-    
     let sorted = [...allFiles];
-    
-    switch(sortBy) {
-        case 'date-desc':
-            sorted.sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified));
-            break;
-        case 'date-asc':
-            sorted.sort((a, b) => new Date(a.lastModified) - new Date(b.lastModified));
-            break;
-        case 'size-desc':
-            sorted.sort((a, b) => b.size - a.size);
-            break;
-        case 'size-asc':
-            sorted.sort((a, b) => a.size - b.size);
-            break;
-        case 'name-asc':
-            sorted.sort((a, b) => (a.metadata?.originalName || a.name).localeCompare(b.metadata?.originalName || b.name));
-            break;
-        case 'name-desc':
-            sorted.sort((a, b) => (b.metadata?.originalName || b.name).localeCompare(a.metadata?.originalName || a.name));
-            break;
+    switch (sortBy) {
+        case 'date-desc': sorted.sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified)); break;
+        case 'date-asc': sorted.sort((a, b) => new Date(a.lastModified) - new Date(b.lastModified)); break;
+        case 'size-desc': sorted.sort((a, b) => b.size - a.size); break;
+        case 'size-asc': sorted.sort((a, b) => a.size - b.size); break;
+        case 'name-asc': sorted.sort((a, b) => (a.metadata?.originalName || a.name).localeCompare(b.metadata?.originalName || b.name)); break;
+        case 'name-desc': sorted.sort((a, b) => (b.metadata?.originalName || b.name).localeCompare(a.metadata?.originalName || a.name)); break;
     }
-    
     renderFilesTable(sorted);
 }
 
 function toggleSelectAllFiles(e) {
-    const checkboxes = document.querySelectorAll('.file-checkbox');
-    checkboxes.forEach(cb => cb.checked = e.target.checked);
+    document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = e.target.checked);
     updateSelectedFiles();
 }
 
 function updateSelectedFiles() {
-    const checkboxes = document.querySelectorAll('.file-checkbox:checked');
-    selectedFiles = Array.from(checkboxes).map(cb => cb.dataset.blobName);
+    selectedFiles = Array.from(document.querySelectorAll('.file-checkbox:checked')).map(cb => cb.dataset.blobName);
     document.getElementById('deleteSelectedBtn').disabled = selectedFiles.length === 0;
 }
 
-async function deleteFile(blobName) {
-    if (!confirm('Êtes-vous sûr de vouloir supprimer ce fichier ?')) return;
-    
+window.deleteFile = async (blobName) => {
+    if (!confirm('Supprimer ce fichier ?')) return;
     try {
-        const response = await fetch(`${API_URL}/files/${blobName}`, {
-            method: 'DELETE'
-        });
-        
-        if (!response.ok) throw new Error('Erreur de suppression');
-        
-        showNotification('Fichier supprimé avec succès', 'success');
+        await fetch(`${API_URL}/files/${blobName}`, { method: 'DELETE', headers: getAuthHeaders() });
+        showNotification('Fichier supprime', 'success');
         loadFiles();
-    } catch (error) {
-        console.error('Erreur suppression:', error);
-        showNotification('Erreur lors de la suppression', 'error');
-    }
-}
+    } catch (e) { showNotification('Erreur suppression', 'error'); }
+};
 
 async function deleteSelectedFiles() {
-    if (!confirm(`Êtes-vous sûr de vouloir supprimer ${selectedFiles.length} fichier(s) ?`)) return;
-    
-    try {
-        for (const blobName of selectedFiles) {
-            await fetch(`${API_URL}/files/${blobName}`, { method: 'DELETE' });
-        }
-        
-        showNotification(`${selectedFiles.length} fichier(s) supprimé(s)`, 'success');
-        selectedFiles = [];
-        loadFiles();
-    } catch (error) {
-        console.error('Erreur suppression multiple:', error);
-        showNotification('Erreur lors de la suppression', 'error');
+    if (!confirm(`Supprimer ${selectedFiles.length} fichier(s) ?`)) return;
+    for (const name of selectedFiles) {
+        await fetch(`${API_URL}/files/${name}`, { method: 'DELETE', headers: getAuthHeaders() });
     }
+    showNotification(`${selectedFiles.length} fichier(s) supprime(s)`, 'success');
+    selectedFiles = [];
+    loadFiles();
 }
 
-function viewFileDetails(blobName) {
+window.viewFileDetails = (blobName) => {
     const file = allFiles.find(f => f.name === blobName);
     if (!file) return;
-    
-    const modal = document.getElementById('fileDetailsModal');
-    const body = document.getElementById('fileDetailsBody');
-    
-    const icon = getFileIcon(file.contentType);
-    
-    body.innerHTML = `
+    document.getElementById('fileDetailsBody').innerHTML = `
         <div style="text-align: center; padding: 20px;">
-            <div style="font-size: 64px; margin-bottom: 20px;">${icon}</div>
-            <h4 style="margin-bottom: 20px;">${file.metadata?.originalName || file.name}</h4>
-            <div style="text-align: left; max-width: 500px; margin: 0 auto;">
-                <p><strong>Nom du blob:</strong> ${file.name}</p>
+            <div style="font-size: 64px; margin-bottom: 20px;">${getFileIcon(file.contentType)}</div>
+            <h4>${escapeHtml(file.metadata?.originalName || file.name)}</h4>
+            <div style="text-align: left; max-width: 500px; margin: 20px auto;">
+                <p><strong>Blob:</strong> ${file.name}</p>
                 <p><strong>Type:</strong> ${file.contentType}</p>
                 <p><strong>Taille:</strong> ${formatBytes(file.size)}</p>
-                <p><strong>Uploadé le:</strong> ${new Date(file.lastModified).toLocaleString('fr-FR')}</p>
-                <p><strong>Catégorie:</strong> ${getFileCategory(file.contentType)}</p>
+                <p><strong>Date:</strong> ${new Date(file.lastModified).toLocaleString('fr-FR')}</p>
             </div>
-            <div style="margin-top: 30px; display: flex; gap: 12px; justify-content: center;">
-                <button class="btn btn-primary" onclick="downloadFile('${file.name}')">
-                    ⬇️ Télécharger
-                </button>
-                <button class="btn btn-secondary" onclick="previewFile('${file.name}')">
-                    👁️ Aperçu
-                </button>
+            <div style="margin-top: 20px; display: flex; gap: 12px; justify-content: center;">
+                <button class="btn btn-primary" onclick="window.open('${API_URL}/download/${file.name}', '_blank')"><i class="fas fa-download"></i> Telecharger</button>
+                <button class="btn btn-secondary" onclick="window.open('${API_URL}/preview/${file.name}', '_blank')"><i class="fas fa-eye"></i> Apercu</button>
             </div>
-        </div>
-    `;
-    
-    modal.style.display = 'flex';
-}
-
-async function downloadFile(blobName) {
-    window.open(`${API_URL}/download/${blobName}`, '_blank');
-}
-
-async function previewFile(blobName) {
-    window.open(`${API_URL}/preview/${blobName}`, '_blank');
-}
+        </div>`;
+    showModal('fileDetailsModal');
+};
 
 // ============================================
-// Shares Management
+// SHARES
 // ============================================
 
 async function loadShares() {
-    // Pour l'instant, on simule des données
-    // TODO: Implémenter un endpoint backend pour récupérer l'historique
-    allShares = generateMockShares();
+    try {
+        const res = await apiRequest('/share/history');
+        allShares = res.success ? (res.shares || []) : [];
+    } catch (e) {
+        allShares = [];
+    }
     renderSharesTable(allShares);
-}
-
-function generateMockShares() {
-    // Données simulées pour démonstration
-    return allFiles.slice(0, 5).map((file, index) => ({
-        id: `share-${index}`,
-        fileName: file.metadata?.originalName || file.name,
-        blobName: file.name,
-        createdAt: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000),
-        expiresAt: new Date(Date.now() + Math.random() * 7 * 24 * 60 * 60 * 1000),
-        downloads: Math.floor(Math.random() * 20),
-        status: Math.random() > 0.5 ? 'active' : 'expired'
-    }));
 }
 
 function renderSharesTable(shares) {
     const tbody = document.getElementById('sharesTableBody');
     if (!tbody) return;
-    
-    if (shares.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="loading">Aucun partage</td></tr>';
-        return;
-    }
-    
-    tbody.innerHTML = shares.map(share => {
-        const createdDate = new Date(share.createdAt).toLocaleString('fr-FR');
-        const expiresDate = new Date(share.expiresAt).toLocaleString('fr-FR');
-        const statusClass = share.status === 'active' ? 'active' : 'expired';
-        const statusText = share.status === 'active' ? 'Actif' : 'Expiré';
-        
-        return `
-            <tr>
-                <td>${share.fileName}</td>
-                <td>${createdDate}</td>
-                <td>${expiresDate}</td>
-                <td><span class="status-badge ${statusClass}">${statusText}</span></td>
-                <td>${share.downloads}</td>
-                <td>
-                    <div class="table-actions">
-                        <button class="btn btn-small btn-secondary" onclick="copyShareLink('${share.id}')">
-                            📋 Copier
-                        </button>
-                    </div>
-                </td>
-            </tr>
-        `;
+    if (shares.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="loading">Aucun partage</td></tr>'; return; }
+    tbody.innerHTML = shares.map(s => {
+        const isExpired = new Date() > new Date(s.expires_at);
+        const isActive = s.is_active === 1 && !isExpired;
+        return `<tr>
+            <td>${escapeHtml(s.original_name || s.blob_name)}</td>
+            <td>${formatDate(s.created_at)}</td>
+            <td>${formatDate(s.expires_at)}</td>
+            <td><span class="status-badge ${isActive ? 'active' : 'expired'}">${isActive ? 'Actif' : 'Expire'}</span></td>
+            <td>${s.download_count || 0}</td>
+            <td><button class="btn btn-small btn-secondary" onclick="navigator.clipboard.writeText('${s.share_url || ''}'); showNotification('Lien copie', 'success')"><i class="fas fa-copy"></i></button></td>
+        </tr>`;
     }).join('');
 }
 
 function filterShares() {
-    const searchTerm = document.getElementById('shareSearchInput').value.toLowerCase();
-    const statusFilter = document.getElementById('shareStatusFilter').value;
-    
-    let filtered = allShares.filter(share => {
-        const matchesSearch = share.fileName.toLowerCase().includes(searchTerm);
-        const matchesStatus = !statusFilter || share.status === statusFilter;
-        return matchesSearch && matchesStatus;
-    });
-    
-    renderSharesTable(filtered);
-}
-
-function exportSharesCSV() {
-    const headers = ['Fichier', 'Créé le', 'Expire le', 'Statut', 'Téléchargements'];
-    const rows = allShares.map(share => [
-        share.fileName,
-        new Date(share.createdAt).toISOString(),
-        new Date(share.expiresAt).toISOString(),
-        share.status,
-        share.downloads
-    ]);
-    
-    const csv = [headers, ...rows]
-        .map(row => row.join(','))
-        .join('\n');
-    
-    downloadCSV(csv, 'partages.csv');
-}
-
-function copyShareLink(shareId) {
-    // Simulé pour l'instant
-    showNotification('Lien copié dans le presse-papiers', 'success');
-}
-
-// ============================================
-// Logs Management
-// ============================================
-
-async function loadLogs() {
-    // Générer des logs simulés
-    allLogs = generateMockLogs();
-    renderLogs(allLogs);
-}
-
-function generateMockLogs() {
-    const operations = ['upload', 'download', 'delete', 'share'];
-    const levels = ['info', 'warning', 'error'];
-    
-    return Array.from({ length: 50 }, (_, i) => ({
-        timestamp: new Date(Date.now() - i * 60 * 1000),
-        level: levels[Math.floor(Math.random() * levels.length)],
-        operation: operations[Math.floor(Math.random() * operations.length)],
-        message: `Operation ${operations[Math.floor(Math.random() * operations.length)]} completed`,
-        details: { user: 'admin', ip: '192.168.1.1' }
+    const search = document.getElementById('shareSearchInput').value.toLowerCase();
+    const status = document.getElementById('shareStatusFilter').value;
+    renderSharesTable(allShares.filter(s => {
+        const name = (s.original_name || s.blob_name || '').toLowerCase();
+        const isExpired = new Date() > new Date(s.expires_at);
+        const isActive = s.is_active === 1 && !isExpired;
+        const matchStatus = !status || (status === 'active' && isActive) || (status === 'expired' && !isActive);
+        return (!search || name.includes(search)) && matchStatus;
     }));
 }
 
-function renderLogs(logs) {
-    const container = document.getElementById('logsContainer');
-    if (!container) return;
-    
-    if (logs.length === 0) {
-        container.innerHTML = '<p class="loading">Aucun log</p>';
-        return;
-    }
-    
-    container.innerHTML = logs.map(log => {
-        const time = new Date(log.timestamp).toLocaleString('fr-FR');
-        return `
-            <div class="log-entry ${log.level}">
-                <span class="log-timestamp">${time}</span>
-                <span class="log-level">${log.level}</span>
-                <span class="log-message">${log.operation}: ${log.message}</span>
-            </div>
-        `;
-    }).join('');
-}
-
-function filterLogs() {
-    const levelFilter = document.getElementById('logLevelFilter').value;
-    const operationFilter = document.getElementById('logOperationFilter').value;
-    
-    let filtered = allLogs.filter(log => {
-        const matchesLevel = !levelFilter || log.level === levelFilter;
-        const matchesOperation = !operationFilter || log.operation === operationFilter;
-        return matchesLevel && matchesOperation;
+function exportSharesCSV() {
+    const rows = [['Fichier', 'Cree le', 'Expire le', 'Statut', 'Telechargements']];
+    allShares.forEach(s => {
+        const isActive = s.is_active === 1 && new Date() <= new Date(s.expires_at);
+        rows.push([s.original_name || s.blob_name, s.created_at, s.expires_at, isActive ? 'Actif' : 'Expire', s.download_count || 0]);
     });
-    
-    renderLogs(filtered);
-}
-
-function clearLogs() {
-    if (!confirm('Êtes-vous sûr de vouloir effacer tous les logs ?')) return;
-    allLogs = [];
-    renderLogs(allLogs);
-    showNotification('Logs effacés', 'success');
-}
-
-function exportLogs() {
-    const logsText = allLogs.map(log => 
-        `[${new Date(log.timestamp).toISOString()}] ${log.level.toUpperCase()} - ${log.operation}: ${log.message}`
-    ).join('\n');
-    
-    downloadText(logsText, 'logs.txt');
+    downloadCSV(rows.map(r => r.join(',')).join('\n'), 'partages.csv');
 }
 
 // ============================================
-// Settings
+// TEAMS
+// ============================================
+
+async function loadTeams() {
+    const container = document.getElementById('teamsList');
+    container.innerHTML = '<p class="loading">Chargement...</p>';
+    try {
+        const res = await apiRequest('/teams');
+        if (!res.success || res.teams.length === 0) {
+            container.innerHTML = '<p class="loading">Aucune equipe</p>';
+            return;
+        }
+        container.innerHTML = `<table class="data-table">
+            <thead><tr><th>Nom</th><th>Nom affiche</th><th>Membres</th><th>Fichiers</th><th>Taille</th><th>Creee le</th><th>Actions</th></tr></thead>
+            <tbody>${res.teams.map(t => `<tr>
+                <td><strong>${escapeHtml(t.name)}</strong></td>
+                <td>${escapeHtml(t.display_name)}</td>
+                <td>${t.stats?.memberCount || 0}</td>
+                <td>${t.stats?.fileCount || 0}</td>
+                <td>${formatBytes(t.stats?.totalSize || 0)}</td>
+                <td>${formatDate(t.created_at)}</td>
+                <td><div class="table-actions">
+                    <button class="btn btn-small btn-secondary" onclick="viewTeam(${t.id})"><i class="fas fa-eye"></i></button>
+                    <button class="btn btn-small btn-danger" onclick="deleteTeam(${t.id})"><i class="fas fa-trash"></i></button>
+                </div></td>
+            </tr>`).join('')}</tbody></table>`;
+    } catch (e) {
+        container.innerHTML = '<p class="loading" style="color: var(--danger-color);">Erreur chargement</p>';
+    }
+}
+
+window.viewTeam = async (teamId) => {
+    try {
+        const res = await apiRequest(`/teams/${teamId}`);
+        if (!res.success) throw new Error(res.error);
+        const t = res.team;
+        document.getElementById('teamDetailTitle').textContent = `Equipe : ${t.display_name || t.name}`;
+        const members = t.members || [];
+        document.getElementById('teamDetailBody').innerHTML = `
+            <div style="margin-bottom: 16px;">
+                <p><strong>Nom :</strong> ${escapeHtml(t.name)}</p>
+                <p><strong>Nom affiche :</strong> ${escapeHtml(t.display_name || '-')}</p>
+                <p><strong>Description :</strong> ${escapeHtml(t.description || '-')}</p>
+                <p><strong>Creee le :</strong> ${formatDate(t.created_at)}</p>
+                <p><strong>Fichiers :</strong> ${t.stats?.fileCount || 0} (${formatBytes(t.stats?.totalSize || 0)})</p>
+            </div>
+            <h4>Membres (${members.length})</h4>
+            ${members.length > 0 ? `<table class="data-table">
+                <thead><tr><th>Username</th><th>Nom</th><th>Email</th><th>Role</th><th>Rejoint le</th></tr></thead>
+                <tbody>${members.map(m => `<tr>
+                    <td><strong>${escapeHtml(m.username)}</strong></td>
+                    <td>${escapeHtml(m.full_name || '-')}</td>
+                    <td>${escapeHtml(m.email || '-')}</td>
+                    <td><span class="badge-info">${m.role}</span></td>
+                    <td>${formatDate(m.joined_at)}</td>
+                </tr>`).join('')}</tbody></table>` : '<p style="color:#888;">Aucun membre</p>'}`;
+        showModal('teamDetailModal');
+    } catch (e) { showNotification('Erreur chargement equipe', 'error'); }
+};
+
+window.deleteTeam = async (teamId) => {
+    if (!confirm('Supprimer cette equipe ?')) return;
+    try {
+        await apiRequest(`/teams/${teamId}`, 'DELETE');
+        showNotification('Equipe supprimee', 'success');
+        loadTeams();
+    } catch (e) { showNotification('Erreur suppression', 'error'); }
+};
+
+async function createTeam() {
+    const name = document.getElementById('teamName').value.trim();
+    const displayName = document.getElementById('teamDisplayName').value.trim();
+    const description = document.getElementById('teamDescription').value.trim();
+    if (!name || !displayName) { showNotification('Remplissez les champs obligatoires', 'error'); return; }
+    try {
+        await apiRequest('/teams', 'POST', { name, displayName, description });
+        showNotification('Equipe creee', 'success');
+        closeModal('createTeamModal');
+        document.getElementById('teamName').value = '';
+        document.getElementById('teamDisplayName').value = '';
+        document.getElementById('teamDescription').value = '';
+        loadTeams();
+    } catch (e) { showNotification(e.message || 'Erreur creation', 'error'); }
+}
+
+// ============================================
+// COSTS
+// ============================================
+
+async function loadCosts() {
+    try {
+        const period = document.getElementById('costsPeriod').value;
+        let param = '';
+        if (period === 'last') {
+            const d = new Date(); d.setMonth(d.getMonth() - 1);
+            param = `?period=${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        } else if (period === 'year') {
+            param = `?period=${new Date().getFullYear()}`;
+        }
+        const res = await apiRequest(`/admin/costs${param}`);
+        if (!res.success) throw new Error(res.error);
+
+        document.getElementById('costsUsers').textContent = `$${(res.totals.users || 0).toFixed(2)}`;
+        document.getElementById('costsTeams').textContent = `$${(res.totals.teams || 0).toFixed(2)}`;
+        document.getElementById('costsGuests').textContent = `$${(res.totals.guests || 0).toFixed(2)}`;
+        document.getElementById('costsTotal').textContent = `$${(res.totals.overall || 0).toFixed(2)}`;
+
+        const allCosts = [
+            ...(res.summary?.users || []).map(c => ({ ...c, type: 'user' })),
+            ...(res.summary?.teams || []).map(c => ({ ...c, type: 'team' })),
+            ...(res.summary?.guests || []).map(c => ({ ...c, type: 'guest' }))
+        ].sort((a, b) => (b.total_cost || 0) - (a.total_cost || 0));
+
+        const container = document.getElementById('costsDetails');
+        if (allCosts.length === 0) { container.innerHTML = '<p class="loading">Aucune donnee</p>'; return; }
+        container.innerHTML = `<table class="data-table">
+            <thead><tr><th>Type</th><th>ID</th><th>Stockage</th><th>Operations</th><th>Bande passante</th><th>Total</th></tr></thead>
+            <tbody>${allCosts.map(c => `<tr>
+                <td><span class="badge-info">${c.type}</span></td>
+                <td>${c.entity_id}</td>
+                <td>$${(c.storage_cost || 0).toFixed(2)}</td>
+                <td>$${(c.operations_cost || 0).toFixed(2)}</td>
+                <td>$${(c.bandwidth_cost || 0).toFixed(2)}</td>
+                <td><strong>$${(c.total_cost || 0).toFixed(2)}</strong></td>
+            </tr>`).join('')}</tbody></table>`;
+    } catch (e) {
+        console.error('Costs error:', e);
+        showNotification('Erreur chargement couts', 'error');
+    }
+}
+
+// ============================================
+// USERS
+// ============================================
+
+async function loadUsers() {
+    const container = document.getElementById('usersList');
+    container.innerHTML = '<p class="loading">Chargement...</p>';
+    try {
+        const res = await apiRequest('/admin/users');
+        const users = res.success ? (res.users || []) : [];
+        if (users.length === 0) { container.innerHTML = '<p class="loading">Aucun utilisateur</p>'; return; }
+
+        const roleBadge = (role) => {
+            const colors = { admin: 'background:rgba(239,68,68,0.1);color:#ef4444;', april_user: 'background:rgba(245,158,11,0.1);color:#f59e0b;', user: 'background:rgba(59,130,246,0.1);color:#3b82f6;' };
+            const labels = { admin: 'Admin', april_user: 'Responsable', user: 'Utilisateur' };
+            return `<span class="status-badge" style="${colors[role] || colors.user}">${labels[role] || role}</span>`;
+        };
+
+        const statusBadge = (isActive) => isActive ?
+            '<span class="status-badge active">Actif</span>' :
+            '<span class="status-badge expired">Inactif</span>';
+
+        container.innerHTML = `<table class="data-table">
+            <thead><tr><th>Username</th><th>Nom</th><th>Email</th><th>Role</th><th>Statut</th><th>Equipes</th><th>Derniere connexion</th><th style="width:50px;"></th></tr></thead>
+            <tbody>${users.map(u => {
+                const esc = escapeHtml(u.username);
+                return `<tr style="${u.is_active ? '' : 'opacity: 0.55;'}">
+                <td><strong>${esc}</strong></td>
+                <td>${escapeHtml(u.full_name || '-')}</td>
+                <td>${escapeHtml(u.email || '-')}</td>
+                <td>${roleBadge(u.role)}</td>
+                <td>${statusBadge(u.is_active)}</td>
+                <td>${(u.teams && u.teams.length > 0) ? u.teams.map(t => `<span class="badge-info" style="margin-right:4px;">${escapeHtml(t.displayName || t.name)} (${t.role})</span>`).join('') : '<span style="color:#888;">-</span>'}</td>
+                <td>${u.last_login_at ? formatDate(u.last_login_at) : 'Jamais'}</td>
+                <td>
+                    <div class="kebab-menu">
+                        <button class="kebab-btn" data-kebab="${u.id}"><i class="fas fa-ellipsis-vertical"></i></button>
+                        <div class="kebab-dropdown" id="kebab-user-${u.id}">
+                            <button class="kebab-dropdown-item" data-action="editUser" data-id="${u.id}"><i class="fas fa-pen"></i> Modifier</button>
+                            <button class="kebab-dropdown-item" data-action="resetPassword" data-id="${u.id}" data-name="${esc}"><i class="fas fa-key"></i> Mot de passe</button>
+                            <button class="kebab-dropdown-item" data-action="editTeams" data-id="${u.id}" data-name="${esc}"><i class="fas fa-users-gear"></i> Gerer les equipes</button>
+                            <div class="kebab-divider"></div>
+                            ${u.is_active ?
+                                `<button class="kebab-dropdown-item danger" data-action="deactivateUser" data-id="${u.id}" data-name="${esc}"><i class="fas fa-ban"></i> Desactiver</button>` :
+                                `<button class="kebab-dropdown-item success" data-action="activateUser" data-id="${u.id}" data-name="${esc}"><i class="fas fa-check"></i> Reactiver</button>`}
+                            <button class="kebab-dropdown-item danger" data-action="deleteUser" data-id="${u.id}" data-name="${esc}"><i class="fas fa-trash"></i> Supprimer</button>
+                        </div>
+                    </div>
+                </td>
+            </tr>`;
+            }).join('')}</tbody></table>`;
+
+        // Bind kebab menu events
+        container.querySelectorAll('[data-kebab]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const id = btn.dataset.kebab;
+                const dropdown = document.getElementById(`kebab-user-${id}`);
+                const wasOpen = dropdown.classList.contains('open');
+                closeAllKebabs();
+                if (!wasOpen) dropdown.classList.add('open');
+            });
+        });
+
+        container.querySelectorAll('[data-action]').forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                closeAllKebabs();
+                const { action, id, name } = item.dataset;
+                const uid = parseInt(id);
+                switch (action) {
+                    case 'editUser': openEditUser(uid); break;
+                    case 'resetPassword': openResetPassword(uid, name); break;
+                    case 'editTeams': editUserTeams(uid, name); break;
+                    case 'deactivateUser': deactivateUser(uid, name); break;
+                    case 'activateUser': activateUser(uid, name); break;
+                    case 'deleteUser': deleteUser(uid, name); break;
+                }
+            });
+        });
+    } catch (e) {
+        container.innerHTML = '<p class="loading">Erreur de chargement</p>';
+    }
+}
+
+function closeAllKebabs() {
+    document.querySelectorAll('.kebab-dropdown.open').forEach(d => d.classList.remove('open'));
+}
+
+async function createUser() {
+    const username = document.getElementById('newUserUsername').value.trim();
+    const fullName = document.getElementById('newUserFullName').value.trim();
+    const email = document.getElementById('newUserEmail').value.trim();
+    const password = document.getElementById('newUserPassword').value;
+    const role = document.getElementById('newUserRole').value;
+    if (!username || !password) { showNotification('Username et mot de passe requis', 'error'); return; }
+    try {
+        await apiRequest('/admin/users', 'POST', { username, fullName, email, password, role });
+        showNotification('Utilisateur cree', 'success');
+        closeModal('createUserModal');
+        document.getElementById('newUserUsername').value = '';
+        document.getElementById('newUserFullName').value = '';
+        document.getElementById('newUserEmail').value = '';
+        document.getElementById('newUserPassword').value = '';
+        loadUsers();
+    } catch (e) { showNotification(e.message || 'Erreur creation', 'error'); }
+}
+
+window.editUserTeams = async (userId, username) => {
+    document.getElementById('userTeamsTitle').textContent = `Equipes de ${username}`;
+    document.getElementById('userTeamsBody').innerHTML = '<p class="loading">Chargement...</p>';
+    showModal('userTeamsModal');
+    try {
+        const [usersRes, teamsRes] = await Promise.all([
+            apiRequest('/admin/users'),
+            apiRequest('/teams')
+        ]);
+        const user = (usersRes.users || []).find(u => u.id === userId);
+        const userTeams = user?.teams || [];
+        const allTeams = teamsRes.success ? (teamsRes.teams || []) : [];
+        const availableTeams = allTeams.filter(t => !userTeams.some(ut => ut.teamId === t.id));
+
+        document.getElementById('userTeamsBody').innerHTML = `
+            <h4>Equipes actuelles</h4>
+            ${userTeams.length > 0 ? `<table class="data-table">
+                <thead><tr><th>Equipe</th><th>Role</th><th>Actions</th></tr></thead>
+                <tbody>${userTeams.map(t => `<tr>
+                    <td><strong>${escapeHtml(t.displayName || t.name)}</strong></td>
+                    <td><span class="badge-info">${t.role}</span></td>
+                    <td><button class="btn btn-small btn-danger" onclick="removeUserFromTeam(${userId}, ${t.teamId}, '${escapeHtml(username)}')"><i class="fas fa-times"></i> Retirer</button></td>
+                </tr>`).join('')}</tbody></table>` : '<p style="color:#888;">Aucune equipe</p>'}
+            <hr style="margin: 16px 0;">
+            <h4>Ajouter a une equipe</h4>
+            ${availableTeams.length > 0 ? `<div style="display:flex;gap:8px;align-items:flex-end;">
+                <div class="form-group" style="flex:2;margin-bottom:0;">
+                    <label>Equipe</label>
+                    <select id="addTeamSelect" class="filter-select" style="width:100%;">
+                        ${availableTeams.map(t => `<option value="${t.id}">${escapeHtml(t.display_name || t.name)}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="form-group" style="flex:1;margin-bottom:0;">
+                    <label>Role</label>
+                    <select id="addTeamRoleSelect" class="filter-select" style="width:100%;">
+                        <option value="member">Membre</option>
+                        <option value="owner">Owner</option>
+                    </select>
+                </div>
+                <button class="btn btn-primary btn-small" onclick="addUserToTeam(${userId}, '${escapeHtml(username)}')"><i class="fas fa-plus"></i> Ajouter</button>
+            </div>` : '<p style="color:#888;">Toutes les equipes sont deja assignees</p>'}`;
+    } catch (e) {
+        document.getElementById('userTeamsBody').innerHTML = '<p style="color:var(--danger-color);">Erreur chargement</p>';
+    }
+};
+
+window.addUserToTeam = async (userId, username) => {
+    const teamId = document.getElementById('addTeamSelect').value;
+    const role = document.getElementById('addTeamRoleSelect').value;
+    try {
+        await apiRequest(`/teams/${teamId}/members`, 'POST', { userId, role });
+        showNotification('Utilisateur ajoute a l\'equipe', 'success');
+        editUserTeams(userId, username);
+        loadUsers();
+    } catch (e) { showNotification(e.message || 'Erreur ajout', 'error'); }
+};
+
+window.removeUserFromTeam = async (userId, teamId, username) => {
+    if (!confirm('Retirer cet utilisateur de l\'equipe ?')) return;
+    try {
+        await apiRequest(`/teams/${teamId}/members/${userId}`, 'DELETE');
+        showNotification('Utilisateur retire de l\'equipe', 'success');
+        editUserTeams(userId, username);
+        loadUsers();
+    } catch (e) { showNotification(e.message || 'Erreur suppression', 'error'); }
+};
+
+window.deactivateUser = async (userId, username) => {
+    if (!confirm(`Desactiver l'utilisateur "${username}" ?`)) return;
+    try {
+        await apiRequest(`/admin/users/${userId}`, 'DELETE');
+        showNotification('Utilisateur desactive', 'success');
+        loadUsers();
+    } catch (e) { showNotification(e.message || 'Erreur', 'error'); }
+};
+
+window.activateUser = async (userId, username) => {
+    try {
+        await apiRequest(`/admin/users/${userId}/activate`, 'PUT');
+        showNotification(`Utilisateur "${username}" reactive`, 'success');
+        loadUsers();
+    } catch (e) { showNotification(e.message || 'Erreur', 'error'); }
+};
+
+window.deleteUser = async (userId, username) => {
+    if (!confirm(`Supprimer definitivement l'utilisateur "${username}" ?\n\nCette action est irreversible.`)) return;
+    try {
+        await apiRequest(`/admin/users/${userId}/permanent`, 'DELETE');
+        showNotification(`Utilisateur "${username}" supprime`, 'success');
+        loadUsers();
+    } catch (e) { showNotification(e.message || 'Erreur', 'error'); }
+};
+
+window.openEditUser = async (userId) => {
+    try {
+        const res = await apiRequest('/admin/users');
+        const user = (res.users || []).find(u => u.id === userId);
+        if (!user) { showNotification('Utilisateur non trouve', 'error'); return; }
+        document.getElementById('editUserId').value = user.id;
+        document.getElementById('editUserUsername').value = user.username;
+        document.getElementById('editUserFullName').value = user.full_name || '';
+        document.getElementById('editUserEmail').value = user.email || '';
+        document.getElementById('editUserRole').value = user.role;
+        showModal('editUserModal');
+    } catch (e) { showNotification('Erreur', 'error'); }
+};
+
+window.saveEditUser = async () => {
+    const userId = document.getElementById('editUserId').value;
+    const role = document.getElementById('editUserRole').value;
+    const fullName = document.getElementById('editUserFullName').value.trim();
+    try {
+        await apiRequest(`/admin/users/${userId}`, 'PUT', { role, fullName });
+        showNotification('Utilisateur modifie', 'success');
+        closeModal('editUserModal');
+        loadUsers();
+    } catch (e) { showNotification(e.message || 'Erreur', 'error'); }
+};
+
+window.openResetPassword = (userId, username) => {
+    document.getElementById('resetPasswordUserId').value = userId;
+    document.getElementById('resetPasswordUsername').textContent = username;
+    document.getElementById('resetPasswordInput').value = '';
+    showModal('resetPasswordModal');
+};
+
+window.submitResetPassword = async () => {
+    const userId = document.getElementById('resetPasswordUserId').value;
+    const password = document.getElementById('resetPasswordInput').value;
+    if (!password || password.length < 4) { showNotification('Mot de passe trop court (min. 4)', 'error'); return; }
+    try {
+        await apiRequest(`/admin/users/${userId}/password`, 'PUT', { password });
+        showNotification('Mot de passe reinitialise', 'success');
+        closeModal('resetPasswordModal');
+    } catch (e) { showNotification(e.message || 'Erreur', 'error'); }
+};
+
+// ============================================
+// GUESTS
+// ============================================
+
+async function loadGuests() {
+    try {
+        const res = await apiRequest('/admin/guest-accounts');
+        if (res.success) {
+            allGuests = res.guests || [];
+            updateGuestsStats(res.stats || {});
+            renderGuestsTable(allGuests);
+        }
+    } catch (e) { console.error('Guests error:', e); }
+}
+
+function updateGuestsStats(stats) {
+    document.getElementById('totalGuestsCount').textContent = stats.total || 0;
+    document.getElementById('activeGuestsCount').textContent = stats.active || 0;
+    const expiring = allGuests.filter(g => g.is_active && !g.isExpired && g.hoursRemaining > 0 && g.hoursRemaining <= 24).length;
+    document.getElementById('expiringSoonCount').textContent = expiring;
+    document.getElementById('disabledGuestsCount').textContent = stats.disabled || 0;
+}
+
+function renderGuestsTable(guests) {
+    const tbody = document.getElementById('guestsTableBody');
+    if (guests.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="loading">Aucun invite</td></tr>';
+        return;
+    }
+    tbody.innerHTML = guests.map(g => `<tr>
+        <td><strong>${escapeHtml(g.email)}</strong> ${g.code_used === 1 ? '<span class="badge-success">Utilise</span>' : '<span class="badge-warning">En attente</span>'}</td>
+        <td>${escapeHtml(g.creator_username || 'N/A')}</td>
+        <td><span class="badge-info">${g.file_count || 0}</span></td>
+        <td>${formatDate(g.created_at)}</td>
+        <td>${formatDate(g.account_expires_at)}</td>
+        <td>${formatTimeRemaining(g)}</td>
+        <td>${getGuestStatusBadge(g)}</td>
+        <td><div class="table-actions">
+            <button class="btn btn-icon btn-small" onclick="viewGuestDetails('${g.guest_id}')"><i class="fas fa-eye"></i></button>
+            ${g.is_active === 1 ? `<button class="btn btn-icon btn-small btn-warning" onclick="disableGuest('${g.guest_id}', '${escapeHtml(g.email)}')"><i class="fas fa-ban"></i></button>` : ''}
+            <button class="btn btn-icon btn-small btn-danger" onclick="deleteGuest('${g.guest_id}', '${escapeHtml(g.email)}')"><i class="fas fa-trash"></i></button>
+        </div></td>
+    </tr>`).join('');
+}
+
+function getGuestStatusBadge(g) {
+    if (!g.is_active) return '<span class="badge-danger">Desactive</span>';
+    if (g.isExpired) return '<span class="badge-danger">Expire</span>';
+    if (g.hoursRemaining <= 24) return '<span class="badge-warning">Expire bientot</span>';
+    return '<span class="badge-success">Actif</span>';
+}
+
+function formatTimeRemaining(g) {
+    if (!g.is_active) return '<span style="color: #ef4444;">Desactive</span>';
+    if (g.isExpired) return '<span style="color: #ef4444;">Expire</span>';
+    if (g.daysRemaining > 0) return `<span style="color: ${g.daysRemaining <= 1 ? '#f59e0b' : '#10b981'};">${g.daysRemaining} jour(s)</span>`;
+    if (g.hoursRemaining > 0) return `<span style="color: #f59e0b;">${g.hoursRemaining}h</span>`;
+    return '<span style="color: #ef4444;">Bientot</span>';
+}
+
+async function createGuest() {
+    const email = document.getElementById('guestEmail').value.trim();
+    if (!email || !email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+        showCreateGuestError('Email invalide');
+        return;
+    }
+    const btn = document.getElementById('submitCreateGuestBtn');
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creation...';
+    try {
+        const res = await apiRequest('/admin/guest-accounts', 'POST', { email });
+        if (res.success) {
+            closeModal('createGuestModal');
+            showNotification(res.message || 'Invite cree', 'success');
+            loadGuests();
+        } else { showCreateGuestError(res.error || 'Erreur'); }
+    } catch (e) { showCreateGuestError(e.message || 'Erreur'); }
+    finally { btn.disabled = false; btn.innerHTML = orig; }
+}
+
+function showCreateGuestError(msg) {
+    const el = document.getElementById('createGuestError');
+    document.getElementById('createGuestErrorMessage').textContent = msg;
+    el.style.display = 'block';
+    setTimeout(() => el.style.display = 'none', 5000);
+}
+
+window.viewGuestDetails = (guestId) => {
+    const g = allGuests.find(x => x.guest_id === guestId);
+    if (!g) return;
+    document.getElementById('guestDetailsBody').innerHTML = `
+        <div style="display: grid; gap: 1.5rem;">
+            <div><h4 style="margin-bottom: 1rem;"><i class="fas fa-info-circle"></i> Informations</h4>
+                <p><strong>Email:</strong> ${escapeHtml(g.email)}</p>
+                <p><strong>ID:</strong> <code>${g.guest_id}</code></p>
+                <p><strong>Cree par:</strong> ${escapeHtml(g.creator_username || 'N/A')}</p>
+                <p><strong>Date:</strong> ${formatDate(g.created_at)}</p>
+            </div>
+            <div><h4 style="margin-bottom: 1rem;"><i class="fas fa-clock"></i> Expiration</h4>
+                <p><strong>Expire le:</strong> ${formatDate(g.account_expires_at)}</p>
+                <p><strong>Temps restant:</strong> ${formatTimeRemaining(g)}</p>
+                <p><strong>Code utilise:</strong> ${g.code_used === 1 ? 'Oui' : 'Non'}</p>
+                <p><strong>Statut:</strong> ${getGuestStatusBadge(g)}</p>
+            </div>
+            <div><h4 style="margin-bottom: 1rem;"><i class="fas fa-file"></i> Fichiers: ${g.file_count || 0}</h4></div>
+        </div>`;
+    showModal('guestDetailsModal');
+};
+
+window.disableGuest = async (guestId, email) => {
+    const ok = await showConfirmDialog('Desactiver l\'invite', `Desactiver ${email} ?`);
+    if (!ok) return;
+    try {
+        await apiRequest(`/admin/guest-accounts/${guestId}/disable`, 'PUT');
+        showNotification('Invite desactive', 'success');
+        loadGuests();
+    } catch (e) { showNotification('Erreur', 'error'); }
+};
+
+window.deleteGuest = async (guestId, email) => {
+    const ok = await showConfirmDialog('Supprimer l\'invite', `Supprimer ${email} et ses fichiers ?`);
+    if (!ok) return;
+    try {
+        const res = await apiRequest(`/admin/guest-accounts/${guestId}`, 'DELETE');
+        showNotification(`Invite supprime (${res.stats?.filesDeleted || 0} fichier(s))`, 'success');
+        loadGuests();
+    } catch (e) { showNotification('Erreur', 'error'); }
+};
+
+function filterGuests() {
+    const status = document.getElementById('guestStatusFilter').value;
+    const search = document.getElementById('guestSearch').value.toLowerCase();
+    renderGuestsTable(allGuests.filter(g => {
+        let matchStatus = true;
+        if (status === 'active') matchStatus = g.is_active === 1 && !g.isExpired;
+        else if (status === 'expired') matchStatus = g.isExpired;
+        else if (status === 'disabled') matchStatus = g.is_active === 0;
+        const matchSearch = !search || g.email.toLowerCase().includes(search) || (g.creator_username || '').toLowerCase().includes(search);
+        return matchStatus && matchSearch;
+    }));
+}
+
+// ============================================
+// LOGS
+// ============================================
+
+let logsPage = 1;
+let logsTotal = 0;
+const LOGS_PER_PAGE = 50;
+
+const LEVEL_ICONS = { info: 'fa-info-circle', success: 'fa-check-circle', warning: 'fa-exclamation-triangle', error: 'fa-times-circle' };
+const LEVEL_LABELS = { info: 'Info', success: 'Succes', warning: 'Warning', error: 'Erreur' };
+const CATEGORY_ICONS = { file: 'fa-file', share: 'fa-share-alt', domain: 'fa-globe', user: 'fa-user', auth: 'fa-key', system: 'fa-cog' };
+const CATEGORY_LABELS = { file: 'Fichier', share: 'Partage', domain: 'Domaine', user: 'Utilisateur', auth: 'Auth', system: 'Systeme' };
+
+async function loadLogs() {
+    const level = document.getElementById('logLevelFilter')?.value || '';
+    const category = document.getElementById('logCategoryFilter')?.value || '';
+    const search = document.getElementById('logSearchInput')?.value?.trim() || '';
+
+    let query = `/admin/logs?page=${logsPage}&limit=${LOGS_PER_PAGE}`;
+    if (level) query += `&level=${encodeURIComponent(level)}`;
+    if (category) query += `&category=${encodeURIComponent(category)}`;
+    if (search) query += `&search=${encodeURIComponent(search)}`;
+
+    try {
+        const res = await apiRequest(query);
+        if (res.success) {
+            allLogs = res.logs || [];
+            logsTotal = res.total || 0;
+            renderLogs();
+        }
+    } catch (e) {
+        document.getElementById('logsTableBody').innerHTML = '<tr><td colspan="5" style="color: var(--danger-color);">Erreur de chargement des logs</td></tr>';
+        document.getElementById('logsPagination').style.display = 'none';
+    }
+}
+
+function renderLogs() {
+    const tbody = document.getElementById('logsTableBody');
+    const pagination = document.getElementById('logsPagination');
+    if (!tbody) return;
+
+    if (allLogs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="color: var(--text-secondary); font-style: italic; text-align: center; padding: 40px;">Aucun log trouve</td></tr>';
+        pagination.style.display = 'none';
+        return;
+    }
+
+    tbody.innerHTML = allLogs.map(l => {
+        const time = new Date(l.timestamp).toLocaleString('fr-FR');
+        const lvl = l.level || 'info';
+        const cat = l.category || 'system';
+        const levelIcon = LEVEL_ICONS[lvl] || 'fa-info-circle';
+        const levelLabel = LEVEL_LABELS[lvl] || lvl;
+        const catIcon = CATEGORY_ICONS[cat] || 'fa-cog';
+        const catLabel = CATEGORY_LABELS[cat] || cat;
+        return `<tr>
+            <td style="white-space: nowrap; color: var(--text-secondary); font-size: 13px;">${time}</td>
+            <td><span class="log-level-badge ${lvl}"><i class="fas ${levelIcon}"></i> ${levelLabel}</span></td>
+            <td><span class="log-category-badge"><i class="fas ${catIcon}"></i> ${catLabel}</span></td>
+            <td>${escapeHtml(l.message || l.operation || '')}</td>
+            <td style="color: var(--text-secondary);">${escapeHtml(l.username || '-')}</td>
+        </tr>`;
+    }).join('');
+
+    const totalPages = Math.ceil(logsTotal / LOGS_PER_PAGE);
+    pagination.style.display = 'flex';
+    document.getElementById('logsCount').textContent = `${logsTotal} log${logsTotal > 1 ? 's' : ''}`;
+    if (totalPages > 1) {
+        document.getElementById('logsPageInfo').textContent = `Page ${logsPage} / ${totalPages}`;
+        document.getElementById('logsPrevBtn').style.display = '';
+        document.getElementById('logsNextBtn').style.display = '';
+        document.getElementById('logsPrevBtn').disabled = logsPage <= 1;
+        document.getElementById('logsNextBtn').disabled = logsPage >= totalPages;
+    } else {
+        document.getElementById('logsPageInfo').textContent = '';
+        document.getElementById('logsPrevBtn').style.display = 'none';
+        document.getElementById('logsNextBtn').style.display = 'none';
+    }
+}
+
+window.changeLogsPage = function(delta) {
+    const totalPages = Math.ceil(logsTotal / LOGS_PER_PAGE);
+    const newPage = logsPage + delta;
+    if (newPage >= 1 && newPage <= totalPages) {
+        logsPage = newPage;
+        loadLogs();
+    }
+};
+
+async function clearLogs() {
+    if (!confirm('Effacer tous les logs ?')) return;
+    try {
+        await apiRequest('/admin/logs', 'DELETE');
+        showNotification('Logs effaces', 'success');
+        logsPage = 1;
+        loadLogs();
+    } catch (e) { showNotification('Erreur', 'error'); }
+}
+
+async function exportLogs() {
+    try {
+        const res = await apiRequest(`/admin/logs?limit=10000`);
+        const logs = res.logs || [];
+        const text = logs.map(l => `[${l.timestamp}] ${(l.level || 'info').toUpperCase()} [${l.category || 'system'}] ${l.message || l.operation} ${l.username ? '(' + l.username + ')' : ''}`).join('\n');
+        downloadText(text, `logs-${new Date().toISOString().slice(0,10)}.txt`);
+    } catch (e) { showNotification('Erreur export', 'error'); }
+}
+
+// ============================================
+// SETTINGS
 // ============================================
 
 async function loadSettings() {
     try {
-        const response = await fetch(`${API_URL}/settings`);
-        const data = await response.json();
-        
-        if (data.success) {
-            const settings = data.settings;
-            
-            // Remplir les champs du formulaire
-            if (settings.maxFileSizeMB) document.getElementById('maxFileSizeMB').value = settings.maxFileSizeMB.value;
-            if (settings.containerName) document.getElementById('containerName').value = settings.containerName.value;
-            if (settings.storageQuota) document.getElementById('storageQuota').value = settings.storageQuota.value;
-            if (settings.maxShareDays) document.getElementById('maxShareDays').value = settings.maxShareDays.value;
-            if (settings.defaultShareMinutes) document.getElementById('defaultShareMinutes').value = settings.defaultShareMinutes.value;
-            if (settings.requirePassword) document.getElementById('requirePassword').checked = settings.requirePassword.value === 'true';
-            if (settings.rateLimit) document.getElementById('rateLimit').value = settings.rateLimit.value;
-            if (settings.enableLogs) document.getElementById('enableLogs').checked = settings.enableLogs.value === 'true';
-            if (settings.enableAudit) document.getElementById('enableAudit').checked = settings.enableAudit.value === 'true';
-            if (settings.notifyUploads) document.getElementById('notifyUploads').checked = settings.notifyUploads.value === 'true';
-            if (settings.notifyShares) document.getElementById('notifyShares').checked = settings.notifyShares.value === 'true';
-            if (settings.notifyQuota) document.getElementById('notifyQuota').checked = settings.notifyQuota.value === 'true';
-        }
-    } catch (error) {
-        console.error('Erreur lors du chargement des paramètres:', error);
-        showNotification('Erreur lors du chargement des paramètres', 'error');
-    }
+        const res = await apiRequest('/settings');
+        if (!res.success) return;
+        const s = res.settings;
+        if (s.maxFileSizeMB) document.getElementById('maxFileSizeMB').value = s.maxFileSizeMB.value;
+        if (s.containerName) document.getElementById('containerName').value = s.containerName.value;
+        if (s.storageQuota) document.getElementById('storageQuota').value = s.storageQuota.value;
+        if (s.maxShareDays) document.getElementById('maxShareDays').value = s.maxShareDays.value;
+        if (s.defaultShareMinutes) document.getElementById('defaultShareMinutes').value = s.defaultShareMinutes.value;
+        if (s.requirePassword) document.getElementById('requirePassword').checked = s.requirePassword.value === 'true';
+        if (s.rateLimit) document.getElementById('rateLimit').value = s.rateLimit.value;
+        if (s.enableLogs) document.getElementById('enableLogs').checked = s.enableLogs.value === 'true';
+        if (s.enableAudit) document.getElementById('enableAudit').checked = s.enableAudit.value === 'true';
+        if (s.notifyUploads) document.getElementById('notifyUploads').checked = s.notifyUploads.value === 'true';
+        if (s.notifyShares) document.getElementById('notifyShares').checked = s.notifyShares.value === 'true';
+        if (s.notifyQuota) document.getElementById('notifyQuota').checked = s.notifyQuota.value === 'true';
+    } catch (e) { console.error('Settings error:', e); }
 }
 
 async function saveSettings() {
-    // Récupérer les valeurs
-    const settings = {
-        maxFileSizeMB: document.getElementById('maxFileSizeMB').value,
-        containerName: document.getElementById('containerName').value,
-        storageQuota: document.getElementById('storageQuota').value,
-        maxShareDays: document.getElementById('maxShareDays').value,
-        defaultShareMinutes: document.getElementById('defaultShareMinutes').value,
-        requirePassword: document.getElementById('requirePassword').checked.toString(),
-        rateLimit: document.getElementById('rateLimit').value,
-        enableLogs: document.getElementById('enableLogs').checked.toString(),
-        enableAudit: document.getElementById('enableAudit').checked.toString(),
-        notifyUploads: document.getElementById('notifyUploads').checked.toString(),
-        notifyShares: document.getElementById('notifyShares').checked.toString(),
-        notifyQuota: document.getElementById('notifyQuota').checked.toString()
-    };
-    
     try {
-        const response = await fetch(`${API_URL}/settings`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(settings)
+        await apiRequest('/settings', 'PUT', {
+            maxFileSizeMB: document.getElementById('maxFileSizeMB').value,
+            containerName: document.getElementById('containerName').value,
+            storageQuota: document.getElementById('storageQuota').value,
+            maxShareDays: document.getElementById('maxShareDays').value,
+            defaultShareMinutes: document.getElementById('defaultShareMinutes').value,
+            requirePassword: document.getElementById('requirePassword').checked.toString(),
+            rateLimit: document.getElementById('rateLimit').value,
+            enableLogs: document.getElementById('enableLogs').checked.toString(),
+            enableAudit: document.getElementById('enableAudit').checked.toString(),
+            notifyUploads: document.getElementById('notifyUploads').checked.toString(),
+            notifyShares: document.getElementById('notifyShares').checked.toString(),
+            notifyQuota: document.getElementById('notifyQuota').checked.toString()
         });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showNotification('Paramètres enregistrés avec succès', 'success');
-        } else {
-            showNotification(`Erreur: ${data.error}`, 'error');
-        }
-    } catch (error) {
-        console.error('Erreur lors de la sauvegarde des paramètres:', error);
-        showNotification('Erreur lors de la sauvegarde des paramètres', 'error');
-    }
+        showNotification('Parametres enregistres', 'success');
+    } catch (e) { showNotification('Erreur sauvegarde', 'error'); }
 }
 
 async function resetSettings() {
-    if (!confirm('Êtes-vous sûr de vouloir réinitialiser tous les paramètres ?')) return;
-    
+    if (!confirm('Reinitialiser les parametres ?')) return;
     try {
-        const response = await fetch(`${API_URL}/settings/reset`, {
-            method: 'POST'
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            // Recharger les paramètres depuis le serveur
-            await loadSettings();
-            showNotification('Paramètres réinitialisés', 'success');
-        } else {
-            showNotification(`Erreur: ${data.error}`, 'error');
-        }
-    } catch (error) {
-        console.error('Erreur lors de la réinitialisation:', error);
-        showNotification('Erreur lors de la réinitialisation des paramètres', 'error');
-    }
+        await apiRequest('/settings/reset', 'POST');
+        await loadSettings();
+        showNotification('Parametres reinitialises', 'success');
+    } catch (e) { showNotification('Erreur', 'error'); }
 }
 
 // ============================================
-// Email Domains Management
+// EMAIL DOMAINS
 // ============================================
+
+let allDomains = [];
+let domainsPage = 1;
+const DOMAINS_PER_PAGE = 10;
 
 async function loadEmailDomains() {
     try {
-        const response = await fetch(`${API_URL}/admin/email-domains`, {
-            headers: {
-                'Authorization': `Bearer ${getAuthToken()}`
-            }
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            renderEmailDomains(data.domains || []);
-        } else {
-            document.getElementById('emailDomainsList').innerHTML = '<p style="color: #ef4444;">Erreur lors du chargement</p>';
+        const res = await apiRequest('/admin/email-domains');
+        if (res.success) {
+            allDomains = res.domains || [];
+            domainsPage = 1;
+            renderEmailDomains();
         }
-    } catch (error) {
-        console.error('Erreur lors du chargement des domaines:', error);
-        document.getElementById('emailDomainsList').innerHTML = '<p style="color: #ef4444;">Erreur lors du chargement</p>';
+    } catch (e) {
+        document.getElementById('emailDomainsTableBody').innerHTML = '<tr><td colspan="4" style="color: var(--danger-color);">Erreur de chargement</td></tr>';
+        document.getElementById('emailDomainsPagination').style.display = 'none';
     }
 }
 
-function renderEmailDomains(domains) {
-    const container = document.getElementById('emailDomainsList');
-    
-    if (domains.length === 0) {
-        container.innerHTML = '<p style="color: #666; font-style: italic;">Aucun domaine autorisé. Ajoutez-en un pour permettre les partages.</p>';
+function renderEmailDomains() {
+    const tbody = document.getElementById('emailDomainsTableBody');
+    const pagination = document.getElementById('emailDomainsPagination');
+
+    if (allDomains.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="color: var(--text-secondary); font-style: italic;">Aucun domaine configure</td></tr>';
+        pagination.style.display = 'none';
         return;
     }
-    
-    container.innerHTML = domains.map(domain => `
-        <div class="email-domain-item" style="display: flex; align-items: center; justify-content: space-between; padding: 10px; background: #f5f5f5; border-radius: 6px; margin-bottom: 8px;">
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <span style="font-weight: 600; color: #003C61;">${escapeHtml(domain.domain)}</span>
-                ${domain.is_active === 1 ? 
-                    '<span style="background: #10b981; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem;">Actif</span>' : 
-                    '<span style="background: #ef4444; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem;">Inactif</span>'
-                }
-                <span style="color: #666; font-size: 0.875rem;">Ajouté le ${new Date(domain.created_at).toLocaleDateString('fr-FR')}</span>
-            </div>
-            <div style="display: flex; gap: 5px;">
-                ${domain.is_active === 1 ? 
-                    `<button class="btn btn-secondary btn-small" onclick="deactivateEmailDomain('${domain.domain}')" title="Désactiver">
-                        <i class="fas fa-ban"></i>
-                    </button>` :
-                    `<button class="btn btn-primary btn-small" onclick="activateEmailDomain('${domain.domain}')" title="Activer">
-                        <i class="fas fa-check"></i>
-                    </button>`
-                }
-                <button class="btn btn-danger btn-small" onclick="deleteEmailDomain('${domain.domain}')" title="Supprimer">
-                    <i class="fas fa-trash"></i>
-                </button>
-            </div>
-        </div>
+
+    const totalPages = Math.ceil(allDomains.length / DOMAINS_PER_PAGE);
+    if (domainsPage > totalPages) domainsPage = totalPages;
+    const start = (domainsPage - 1) * DOMAINS_PER_PAGE;
+    const pageDomains = allDomains.slice(start, start + DOMAINS_PER_PAGE);
+
+    tbody.innerHTML = pageDomains.map(d => `
+        <tr>
+            <td><strong style="color: var(--primary-color);">${escapeHtml(d.domain)}</strong></td>
+            <td>${d.is_active === 1 ? '<span class="status-badge active">Actif</span>' : '<span class="status-badge expired">Inactif</span>'}</td>
+            <td>${d.created_at ? new Date(d.created_at).toLocaleDateString('fr-FR') : '-'}</td>
+            <td><div class="table-actions">
+                ${d.is_active === 1 ?
+                    `<button class="btn btn-secondary btn-small" onclick="deactivateEmailDomain('${escapeHtml(d.domain)}')" title="Desactiver"><i class="fas fa-ban"></i></button>` :
+                    `<button class="btn btn-primary btn-small" onclick="activateEmailDomain('${escapeHtml(d.domain)}')" title="Activer"><i class="fas fa-check"></i></button>`}
+                <button class="btn btn-danger btn-small" onclick="deleteEmailDomain('${escapeHtml(d.domain)}')" title="Supprimer"><i class="fas fa-trash"></i></button>
+            </div></td>
+        </tr>
     `).join('');
+
+    pagination.style.display = 'flex';
+    document.getElementById('domainsCount').textContent = `${allDomains.length} domaine${allDomains.length > 1 ? 's' : ''}`;
+    if (totalPages > 1) {
+        document.getElementById('domainsPageInfo').textContent = `Page ${domainsPage} / ${totalPages}`;
+        document.getElementById('domainsPrevBtn').style.display = '';
+        document.getElementById('domainsNextBtn').style.display = '';
+        document.getElementById('domainsPrevBtn').disabled = domainsPage <= 1;
+        document.getElementById('domainsNextBtn').disabled = domainsPage >= totalPages;
+    } else {
+        document.getElementById('domainsPageInfo').textContent = '';
+        document.getElementById('domainsPrevBtn').style.display = 'none';
+        document.getElementById('domainsNextBtn').style.display = 'none';
+    }
 }
+
+window.changeDomainsPage = function(delta) {
+    const totalPages = Math.ceil(allDomains.length / DOMAINS_PER_PAGE);
+    const newPage = domainsPage + delta;
+    if (newPage >= 1 && newPage <= totalPages) {
+        domainsPage = newPage;
+        renderEmailDomains();
+    }
+};
 
 async function addEmailDomain() {
-    const domainInput = document.getElementById('newEmailDomainInput');
-    const domain = domainInput.value.trim();
-    
-    if (!domain) {
-        showNotification('Veuillez entrer un domaine', 'error');
-        return;
-    }
-    
-    // Validation basique du domaine
-    const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/;
-    if (!domainRegex.test(domain)) {
-        showNotification('Format de domaine invalide', 'error');
-        return;
-    }
-    
+    const input = document.getElementById('newEmailDomainInput');
+    const domain = input.value.trim();
+    if (!domain) { showNotification('Entrez un domaine', 'error'); return; }
     try {
-        const response = await fetch(`${API_URL}/admin/email-domains`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${getAuthToken()}`
-            },
-            body: JSON.stringify({ domain })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showNotification('Domaine ajouté avec succès', 'success');
-            domainInput.value = '';
-            loadEmailDomains();
-        } else {
-            showNotification(`Erreur: ${data.error}`, 'error');
-        }
-    } catch (error) {
-        console.error('Erreur lors de l\'ajout du domaine:', error);
-        showNotification('Erreur lors de l\'ajout du domaine', 'error');
-    }
+        await apiRequest('/admin/email-domains', 'POST', { domain });
+        showNotification('Domaine ajoute', 'success');
+        input.value = '';
+        loadEmailDomains();
+    } catch (e) { showNotification(e.message || 'Erreur', 'error'); }
 }
 
-async function deleteEmailDomain(domain) {
-    if (!confirm(`Êtes-vous sûr de vouloir supprimer le domaine "${domain}" ?`)) {
-        return;
-    }
-    
-    try {
-        const response = await fetch(`${API_URL}/admin/email-domains/${encodeURIComponent(domain)}`, {
-            method: 'DELETE',
-            headers: {
-                'Authorization': `Bearer ${getAuthToken()}`
-            }
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showNotification('Domaine supprimé avec succès', 'success');
-            loadEmailDomains();
-        } else {
-            showNotification(`Erreur: ${data.error}`, 'error');
-        }
-    } catch (error) {
-        console.error('Erreur lors de la suppression du domaine:', error);
-        showNotification('Erreur lors de la suppression du domaine', 'error');
-    }
+window.deleteEmailDomain = async (domain) => {
+    if (!confirm(`Supprimer ${domain} ?`)) return;
+    try { await apiRequest(`/admin/email-domains/${encodeURIComponent(domain)}`, 'DELETE'); showNotification('Supprime', 'success'); loadEmailDomains(); }
+    catch (e) { showNotification('Erreur', 'error'); }
+};
+
+window.activateEmailDomain = async (domain) => {
+    try { await apiRequest(`/admin/email-domains/${encodeURIComponent(domain)}/activate`, 'PUT'); showNotification('Active', 'success'); loadEmailDomains(); }
+    catch (e) { showNotification('Erreur', 'error'); }
+};
+
+window.deactivateEmailDomain = async (domain) => {
+    try { await apiRequest(`/admin/email-domains/${encodeURIComponent(domain)}/deactivate`, 'PUT'); showNotification('Desactive', 'success'); loadEmailDomains(); }
+    catch (e) { showNotification('Erreur', 'error'); }
+};
+
+// ============================================
+// MODALS
+// ============================================
+
+function showModal(id) { document.getElementById(id).style.display = 'flex'; }
+function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+
+function showConfirmDialog(title, message) {
+    return new Promise(resolve => {
+        document.getElementById('confirmTitle').textContent = title;
+        document.getElementById('confirmMessage').textContent = message;
+        const yes = document.getElementById('confirmYesBtn');
+        const no = document.getElementById('confirmNoBtn');
+        const cleanup = () => { yes.removeEventListener('click', onYes); no.removeEventListener('click', onNo); closeModal('confirmModal'); };
+        const onYes = () => { cleanup(); resolve(true); };
+        const onNo = () => { cleanup(); resolve(false); };
+        yes.addEventListener('click', onYes);
+        no.addEventListener('click', onNo);
+        showModal('confirmModal');
+    });
 }
 
-async function activateEmailDomain(domain) {
-    try {
-        const response = await fetch(`${API_URL}/admin/email-domains/${encodeURIComponent(domain)}/activate`, {
-            method: 'PUT',
-            headers: {
-                'Authorization': `Bearer ${getAuthToken()}`
-            }
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showNotification('Domaine activé avec succès', 'success');
-            loadEmailDomains();
-        } else {
-            showNotification(`Erreur: ${data.error}`, 'error');
-        }
-    } catch (error) {
-        console.error('Erreur lors de l\'activation du domaine:', error);
-        showNotification('Erreur lors de l\'activation du domaine', 'error');
-    }
+// ============================================
+// UTILITIES
+// ============================================
+
+function getFileIcon(ct) {
+    if (!ct) return '<i class="fas fa-file"></i>';
+    if (ct.startsWith('image/')) return '<i class="fas fa-file-image" style="color: #639E30;"></i>';
+    if (ct.startsWith('video/')) return '<i class="fas fa-file-video" style="color: #F8AA36;"></i>';
+    if (ct.startsWith('audio/')) return '<i class="fas fa-file-audio" style="color: #8b5cf6;"></i>';
+    if (ct === 'application/pdf') return '<i class="fas fa-file-pdf" style="color: #DC2626;"></i>';
+    if (ct.includes('word') || ct.includes('document')) return '<i class="fas fa-file-word" style="color: #003C61;"></i>';
+    if (ct.includes('excel') || ct.includes('spreadsheet')) return '<i class="fas fa-file-excel" style="color: #639E30;"></i>';
+    return '<i class="fas fa-file"></i>';
 }
 
-async function deactivateEmailDomain(domain) {
-    try {
-        const response = await fetch(`${API_URL}/admin/email-domains/${encodeURIComponent(domain)}/deactivate`, {
-            method: 'PUT',
-            headers: {
-                'Authorization': `Bearer ${getAuthToken()}`
-            }
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showNotification('Domaine désactivé avec succès', 'success');
-            loadEmailDomains();
-        } else {
-            showNotification(`Erreur: ${data.error}`, 'error');
-        }
-    } catch (error) {
-        console.error('Erreur lors de la désactivation du domaine:', error);
-        showNotification('Erreur lors de la désactivation du domaine', 'error');
+function getFileCategory(ct) {
+    if (!ct) return 'Autres';
+    if (ct.startsWith('image/')) return 'Images';
+    if (ct.startsWith('video/')) return 'Videos';
+    if (ct.startsWith('audio/')) return 'Audio';
+    if (ct === 'application/pdf') return 'PDF';
+    if (ct.includes('word') || ct.includes('document') || ct.includes('text') || ct.includes('excel') || ct.includes('powerpoint')) return 'Documents';
+    return 'Autres';
+}
+
+function formatBytes(bytes) {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024, sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return (bytes / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
+}
+
+function formatDate(d) {
+    if (!d) return '-';
+    return new Date(d).toLocaleDateString('fr-FR') + ' ' + new Date(d).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatTimeAgo(date) {
+    const secs = Math.floor((new Date() - new Date(date)) / 1000);
+    const intervals = { 'an': 31536000, 'mois': 2592000, 'jour': 86400, 'heure': 3600, 'minute': 60 };
+    for (const [name, val] of Object.entries(intervals)) {
+        const n = Math.floor(secs / val);
+        if (n >= 1) return `Il y a ${n} ${name}${n > 1 ? 's' : ''}`;
     }
+    return 'A l\'instant';
 }
 
 function escapeHtml(text) {
+    if (!text) return '';
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
 }
 
-// Fonction helper pour obtenir le token
-function getAuthToken() {
-    return localStorage.getItem('adminToken') || sessionStorage.getItem('adminToken');
-}
-
-// ============================================
-// Utility Functions
-// ============================================
-
-async function checkHealth() {
-    try {
-        const response = await fetch(`${API_URL}/health`);
-        if (response.ok) {
-            console.log('✅ API Health OK');
-        }
-    } catch (error) {
-        console.error('❌ API Health Error:', error);
-    }
-}
-
-function getFileIcon(contentType) {
-    if (!contentType) return '📄';
-    
-    if (contentType.startsWith('image/')) return '🖼️';
-    if (contentType.startsWith('video/')) return '🎬';
-    if (contentType.startsWith('audio/')) return '🎵';
-    if (contentType === 'application/pdf') return '📕';
-    if (contentType.includes('word') || contentType.includes('document')) return '📝';
-    if (contentType.includes('excel') || contentType.includes('spreadsheet')) return '📊';
-    if (contentType.includes('powerpoint') || contentType.includes('presentation')) return '📊';
-    if (contentType.includes('zip') || contentType.includes('compressed')) return '📦';
-    
-    return '📄';
-}
-
-function getFileCategory(contentType) {
-    if (!contentType) return 'Autres';
-    
-    if (contentType.startsWith('image/')) return 'Images';
-    if (contentType.startsWith('video/')) return 'Vidéos';
-    if (contentType.startsWith('audio/')) return 'Audio';
-    if (contentType === 'application/pdf') return 'PDF';
-    if (contentType.includes('word') || contentType.includes('document') || 
-        contentType.includes('text') || contentType.includes('excel') || 
-        contentType.includes('powerpoint')) return 'Documents';
-    
-    return 'Autres';
-}
-
-function formatBytes(bytes) {
-    if (bytes === 0) return '0 B';
-    
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-function formatTimeAgo(date) {
-    const seconds = Math.floor((new Date() - new Date(date)) / 1000);
-    
-    const intervals = {
-        'an': 31536000,
-        'mois': 2592000,
-        'jour': 86400,
-        'heure': 3600,
-        'minute': 60,
-        'seconde': 1
-    };
-    
-    for (const [name, secondsInInterval] of Object.entries(intervals)) {
-        const interval = Math.floor(seconds / secondsInInterval);
-        
-        if (interval >= 1) {
-            return `Il y a ${interval} ${name}${interval > 1 ? 's' : ''}`;
-        }
-    }
-    
-    return 'À l\'instant';
-}
-
 function showNotification(message, type = 'info') {
-    // Créer une notification temporaire
-    const notification = document.createElement('div');
-    notification.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        padding: 16px 24px;
-        background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#3b82f6'};
-        color: white;
-        border-radius: 8px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        z-index: 10000;
-        animation: slideIn 0.3s ease;
-    `;
-    notification.textContent = message;
-    
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-        notification.style.animation = 'slideOut 0.3s ease';
-        setTimeout(() => notification.remove(), 300);
-    }, 3000);
+    const el = document.createElement('div');
+    el.style.cssText = `position: fixed; top: 20px; right: 20px; padding: 16px 24px; background: ${type === 'success' ? '#639E30' : type === 'error' ? '#DC2626' : '#003C61'}; color: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); z-index: 10000; animation: slideIn 0.3s ease; display: flex; align-items: center; gap: 8px;`;
+    const icon = type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle';
+    el.innerHTML = `<i class="fas fa-${icon}"></i> ${message}`;
+    document.body.appendChild(el);
+    setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; setTimeout(() => el.remove(), 300); }, 3000);
 }
 
 function downloadCSV(csv, filename) {
     const blob = new Blob([csv], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    window.URL.revokeObjectURL(url);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
 }
 
 function downloadText(text, filename) {
     const blob = new Blob([text], { type: 'text/plain' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    window.URL.revokeObjectURL(url);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
 }
 
-// Styles pour les animations
+// Animation styles
 const style = document.createElement('style');
-style.textContent = `
-    @keyframes slideIn {
-        from {
-            transform: translateX(100%);
-            opacity: 0;
-        }
-        to {
-            transform: translateX(0);
-            opacity: 1;
-        }
-    }
-    
-    @keyframes slideOut {
-        from {
-            transform: translateX(0);
-            opacity: 1;
-        }
-        to {
-            transform: translateX(100%);
-            opacity: 0;
-        }
-    }
-`;
+style.textContent = `@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }`;
 document.head.appendChild(style);
-
-// ============================================
-// GUEST MANAGEMENT
-// ============================================
-
-let allGuests = [];
-
-// Charger les invités
-async function loadGuests() {
-    try {
-        const response = await fetch(`${API_URL}/admin/guest-accounts`, {
-            headers: {
-                'Authorization': `Bearer ${getAuthToken()}`
-            }
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            allGuests = data.guests || [];
-            updateGuestsStats(data.stats || {});
-            renderGuestsTable(allGuests);
-        } else {
-            showNotification('Erreur lors du chargement des invités', 'error');
-        }
-    } catch (error) {
-        console.error('Erreur lors du chargement des invités:', error);
-        showNotification('Erreur de connexion au serveur', 'error');
-    }
-}
-
-// Mettre à jour les statistiques
-function updateGuestsStats(stats) {
-    document.getElementById('totalGuestsCount').textContent = stats.total || 0;
-    document.getElementById('activeGuestsCount').textContent = stats.active || 0;
-    
-    // Calculer les invités expirant bientôt (< 24h)
-    const expiringSoon = allGuests.filter(g => {
-        if (!g.is_active || g.isExpired) return false;
-        return g.hoursRemaining > 0 && g.hoursRemaining <= 24;
-    }).length;
-    
-    document.getElementById('expiringSoonCount').textContent = expiringSoon;
-    document.getElementById('disabledGuestsCount').textContent = stats.disabled || 0;
-}
-
-// Afficher la table des invités
-function renderGuestsTable(guests) {
-    const tbody = document.getElementById('guestsTableBody');
-    
-    if (guests.length === 0) {
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="8" class="table-empty">
-                    <i class="fas fa-user-clock" style="font-size: 3rem; opacity: 0.3;"></i>
-                    <p>Aucun invité trouvé</p>
-                </td>
-            </tr>
-        `;
-        return;
-    }
-    
-    tbody.innerHTML = guests.map(guest => {
-        const statusBadge = getGuestStatusBadge(guest);
-        const timeRemaining = formatTimeRemaining(guest);
-        
-        return `
-            <tr>
-                <td>
-                    <strong>${escapeHtml(guest.email)}</strong>
-                    ${guest.code_used === 1 ? '<span class="badge badge-success">Code utilisé</span>' : '<span class="badge badge-warning">En attente</span>'}
-                </td>
-                <td>${escapeHtml(guest.creator_username || 'N/A')}</td>
-                <td>
-                    <span class="badge badge-info">${guest.file_count || 0} fichier(s)</span>
-                </td>
-                <td>${formatDate(guest.created_at)}</td>
-                <td>${formatDate(guest.account_expires_at)}</td>
-                <td>${timeRemaining}</td>
-                <td>${statusBadge}</td>
-                <td>
-                    <div style="display: flex; gap: 5px;">
-                        <button class="btn btn-icon btn-small" onclick="viewGuestDetails('${guest.guest_id}')" title="Détails">
-                            <i class="fas fa-eye"></i>
-                        </button>
-                        ${guest.is_active === 1 ? 
-                            `<button class="btn btn-icon btn-small btn-warning" onclick="disableGuest('${guest.guest_id}', '${escapeHtml(guest.email)}')" title="Désactiver">
-                                <i class="fas fa-ban"></i>
-                            </button>` : ''
-                        }
-                        <button class="btn btn-icon btn-small btn-danger" onclick="deleteGuest('${guest.guest_id}', '${escapeHtml(guest.email)}')" title="Supprimer">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                </td>
-            </tr>
-        `;
-    }).join('');
-}
-
-// Obtenir le badge de statut
-function getGuestStatusBadge(guest) {
-    if (!guest.is_active) {
-        return '<span class="badge badge-danger">Désactivé</span>';
-    }
-    if (guest.isExpired) {
-        return '<span class="badge badge-danger">Expiré</span>';
-    }
-    if (guest.hoursRemaining <= 24) {
-        return '<span class="badge badge-warning">Expire bientôt</span>';
-    }
-    return '<span class="badge badge-success">Actif</span>';
-}
-
-// Formater le temps restant
-function formatTimeRemaining(guest) {
-    if (!guest.is_active) {
-        return '<span style="color: #ef4444;">Désactivé</span>';
-    }
-    if (guest.isExpired) {
-        return '<span style="color: #ef4444;">Expiré</span>';
-    }
-    
-    const days = guest.daysRemaining;
-    const hours = guest.hoursRemaining;
-    
-    if (days > 0) {
-        return `<span style="color: ${days <= 1 ? '#f59e0b' : '#10b981'};">${days} jour(s)</span>`;
-    }
-    if (hours > 0) {
-        return `<span style="color: #f59e0b;">${hours}h restantes</span>`;
-    }
-    return '<span style="color: #ef4444;">Expire bientôt</span>';
-}
-
-// Créer un invité
-async function createGuest() {
-    const email = document.getElementById('guestEmail').value.trim();
-    
-    if (!email || !email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
-        showCreateGuestError('Email invalide');
-        return;
-    }
-    
-    const btn = document.getElementById('submitCreateGuestBtn');
-    const originalText = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Création...';
-    
-    try {
-        const response = await fetch(`${API_URL}/admin/guest-accounts`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${getAuthToken()}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ email })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            closeModal('createGuestModal');
-            showNotification(data.message, 'success');
-            
-            // Afficher le code si l'email n'a pas été envoyé
-            if (!data.guest.emailSent && data.message.includes('Code:')) {
-                const code = data.message.split('Code: ')[1];
-                showNotification(`Code de vérification : ${code} (copié dans le presse-papier)`, 'info', 10000);
-                navigator.clipboard.writeText(code).catch(() => {});
-            }
-            
-            loadGuests();
-        } else {
-            showCreateGuestError(data.error || 'Erreur lors de la création');
-        }
-    } catch (error) {
-        console.error('Erreur création invité:', error);
-        showCreateGuestError('Erreur de connexion au serveur');
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = originalText;
-    }
-}
-
-// Afficher erreur de création
-function showCreateGuestError(message) {
-    const errorEl = document.getElementById('createGuestError');
-    const messageEl = document.getElementById('createGuestErrorMessage');
-    messageEl.textContent = message;
-    errorEl.style.display = 'block';
-    
-    setTimeout(() => {
-        errorEl.style.display = 'none';
-    }, 5000);
-}
-
-// Désactiver un invité
-async function disableGuest(guestId, email) {
-    const confirmed = await showConfirmDialog(
-        'Désactiver l\'invité',
-        `Êtes-vous sûr de vouloir désactiver le compte de ${email} ?`
-    );
-    
-    if (!confirmed) return;
-    
-    try {
-        const response = await fetch(`${API_URL}/admin/guest-accounts/${guestId}/disable`, {
-            method: 'PUT',
-            headers: {
-                'Authorization': `Bearer ${getAuthToken()}`
-            }
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showNotification('Invité désactivé avec succès', 'success');
-            loadGuests();
-        } else {
-            showNotification(data.error || 'Erreur lors de la désactivation', 'error');
-        }
-    } catch (error) {
-        console.error('Erreur désactivation invité:', error);
-        showNotification('Erreur de connexion au serveur', 'error');
-    }
-}
-
-// Supprimer un invité
-async function deleteGuest(guestId, email) {
-    const confirmed = await showConfirmDialog(
-        'Supprimer l\'invité',
-        `Êtes-vous sûr de vouloir supprimer définitivement le compte de ${email} et tous ses fichiers ?`
-    );
-    
-    if (!confirmed) return;
-    
-    try {
-        const response = await fetch(`${API_URL}/admin/guest-accounts/${guestId}`, {
-            method: 'DELETE',
-            headers: {
-                'Authorization': `Bearer ${getAuthToken()}`
-            }
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showNotification(`Invité supprimé (${data.stats.filesDeleted} fichier(s) supprimé(s))`, 'success');
-            loadGuests();
-        } else {
-            showNotification(data.error || 'Erreur lors de la suppression', 'error');
-        }
-    } catch (error) {
-        console.error('Erreur suppression invité:', error);
-        showNotification('Erreur de connexion au serveur', 'error');
-    }
-}
-
-// Voir les détails d'un invité
-function viewGuestDetails(guestId) {
-    const guest = allGuests.find(g => g.guest_id === guestId);
-    if (!guest) return;
-    
-    const detailsBody = document.getElementById('guestDetailsBody');
-    detailsBody.innerHTML = `
-        <div style="display: grid; gap: 1.5rem;">
-            <div class="detail-section">
-                <h4 style="margin: 0 0 1rem 0; color: #003C61;">
-                    <i class="fas fa-info-circle"></i> Informations générales
-                </h4>
-                <div class="detail-grid">
-                    <div class="detail-item">
-                        <label>Email</label>
-                        <span>${escapeHtml(guest.email)}</span>
-                    </div>
-                    <div class="detail-item">
-                        <label>Guest ID</label>
-                        <span style="font-family: monospace; font-size: 0.9rem;">${guest.guest_id}</span>
-                    </div>
-                    <div class="detail-item">
-                        <label>Créé par</label>
-                        <span>${escapeHtml(guest.creator_username || 'N/A')}</span>
-                    </div>
-                    <div class="detail-item">
-                        <label>Date de création</label>
-                        <span>${formatDate(guest.created_at)}</span>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="detail-section">
-                <h4 style="margin: 0 0 1rem 0; color: #003C61;">
-                    <i class="fas fa-clock"></i> Expiration
-                </h4>
-                <div class="detail-grid">
-                    <div class="detail-item">
-                        <label>Expire le</label>
-                        <span>${formatDate(guest.account_expires_at)}</span>
-                    </div>
-                    <div class="detail-item">
-                        <label>Temps restant</label>
-                        <span>${formatTimeRemaining(guest)}</span>
-                    </div>
-                    <div class="detail-item">
-                        <label>Code utilisé</label>
-                        <span>${guest.code_used === 1 ? '✅ Oui' : '❌ Non'}</span>
-                    </div>
-                    <div class="detail-item">
-                        <label>Statut</label>
-                        <span>${getGuestStatusBadge(guest)}</span>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="detail-section">
-                <h4 style="margin: 0 0 1rem 0; color: #003C61;">
-                    <i class="fas fa-file"></i> Fichiers
-                </h4>
-                <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
-                    <div class="stat-card stat-info">
-                        <div class="stat-icon">
-                            <i class="fas fa-file-upload"></i>
-                        </div>
-                        <div class="stat-details">
-                            <p class="stat-label">Fichiers uploadés</p>
-                            <p class="stat-value">${guest.file_count || 0}</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    showModal('guestDetailsModal');
-}
-
-// Filtrer les invités
-function filterGuests() {
-    const statusFilter = document.getElementById('guestStatusFilter').value;
-    const searchTerm = document.getElementById('guestSearch').value.toLowerCase();
-    
-    let filtered = allGuests;
-    
-    // Filtrer par statut
-    if (statusFilter) {
-        filtered = filtered.filter(guest => {
-            switch(statusFilter) {
-                case 'active':
-                    return guest.is_active === 1 && !guest.isExpired;
-                case 'expired':
-                    return guest.isExpired;
-                case 'disabled':
-                    return guest.is_active === 0;
-                default:
-                    return true;
-            }
-        });
-    }
-    
-    // Filtrer par recherche
-    if (searchTerm) {
-        filtered = filtered.filter(guest =>
-            guest.email.toLowerCase().includes(searchTerm) ||
-            (guest.creator_username || '').toLowerCase().includes(searchTerm)
-        );
-    }
-    
-    renderGuestsTable(filtered);
-}
-
-// Event listeners pour les invités
-document.addEventListener('DOMContentLoaded', () => {
-    // Bouton créer invité
-    const createGuestBtn = document.getElementById('createGuestBtn');
-    if (createGuestBtn) {
-        createGuestBtn.addEventListener('click', () => {
-            document.getElementById('guestEmail').value = '';
-            document.getElementById('createGuestError').style.display = 'none';
-            showModal('createGuestModal');
-        });
-    }
-    
-    // Bouton soumettre création
-    const submitCreateGuestBtn = document.getElementById('submitCreateGuestBtn');
-    if (submitCreateGuestBtn) {
-        submitCreateGuestBtn.addEventListener('click', createGuest);
-    }
-    
-    // Enter key dans le formulaire
-    const guestEmailInput = document.getElementById('guestEmail');
-    if (guestEmailInput) {
-        guestEmailInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                createGuest();
-            }
-        });
-    }
-    
-    // Boutons fermer modal
-    ['closeCreateGuestBtn', 'cancelCreateGuestBtn'].forEach(btnId => {
-        const btn = document.getElementById(btnId);
-        if (btn) {
-            btn.addEventListener('click', () => closeModal('createGuestModal'));
-        }
-    });
-    
-    const closeGuestDetailsBtn = document.getElementById('closeGuestDetailsBtn');
-    if (closeGuestDetailsBtn) {
-        closeGuestDetailsBtn.addEventListener('click', () => closeModal('guestDetailsModal'));
-    }
-    
-    // Filtres
-    const guestStatusFilter = document.getElementById('guestStatusFilter');
-    if (guestStatusFilter) {
-        guestStatusFilter.addEventListener('change', filterGuests);
-    }
-    
-    const guestSearch = document.getElementById('guestSearch');
-    if (guestSearch) {
-        guestSearch.addEventListener('input', filterGuests);
-    }
-});
-
-// ============================================
-// MODAL HELPERS
-// ============================================
-
-function showModal(modalId) {
-    const modal = document.getElementById(modalId);
-    if (modal) {
-        modal.style.display = 'flex';
-    }
-}
-
-function closeModal(modalId) {
-    const modal = document.getElementById(modalId);
-    if (modal) {
-        modal.style.display = 'none';
-    }
-}
-
-function showConfirmDialog(title, message) {
-    return new Promise((resolve) => {
-        const modal = document.getElementById('confirmModal');
-        const titleEl = document.getElementById('confirmTitle');
-        const messageEl = document.getElementById('confirmMessage');
-        const yesBtn = document.getElementById('confirmYesBtn');
-        const noBtn = document.getElementById('confirmNoBtn');
-        
-        titleEl.textContent = title;
-        messageEl.textContent = message;
-        
-        const handleYes = () => {
-            cleanup();
-            resolve(true);
-        };
-        
-        const handleNo = () => {
-            cleanup();
-            resolve(false);
-        };
-        
-        const cleanup = () => {
-            yesBtn.removeEventListener('click', handleYes);
-            noBtn.removeEventListener('click', handleNo);
-            modal.style.display = 'none';
-        };
-        
-        yesBtn.addEventListener('click', handleYes);
-        noBtn.addEventListener('click', handleNo);
-        
-        modal.style.display = 'flex';
-    });
-}

@@ -8,22 +8,29 @@ let filteredFiles = [];
 let currentPath = '';
 let imageFiles = [];
 let currentImageIndex = 0;
+let userTeamFiles = [];
 
 // Initialisation
 document.addEventListener('DOMContentLoaded', () => {
     checkAuth();
     initializeEventListeners();
     loadFiles();
+    loadTeamFilesSection();
 });
 
 // ============================================
 // Authentication
 // ============================================
 
+function getAuthToken() {
+    return localStorage.getItem('authToken') || sessionStorage.getItem('authToken') ||
+           localStorage.getItem('userToken') || sessionStorage.getItem('userToken');
+}
+
 function checkAuth() {
-    const token = localStorage.getItem('userToken') || sessionStorage.getItem('userToken');
+    const token = getAuthToken();
     if (!token) {
-        window.location.href = '../../login.html';
+        window.location.href = 'login.html';
         return;
     }
 
@@ -198,7 +205,7 @@ function initializeEventListeners() {
 
 async function loadFiles(path = '') {
     try {
-        const token = localStorage.getItem('userToken') || sessionStorage.getItem('userToken');
+        const token = getAuthToken();
         const url = path ? `${API_URL}/user/files?path=${encodeURIComponent(path)}` : `${API_URL}/user/files`;
         const response = await fetch(url, {
             headers: {
@@ -335,7 +342,7 @@ function renderGridView() {
     grid.style.display = 'grid';
     document.getElementById('filesList').style.display = 'none';
 
-    const token = localStorage.getItem('userToken') || sessionStorage.getItem('userToken');
+    const token = getAuthToken();
 
     grid.innerHTML = filteredFiles.map(file => {
         const isFolder = file.isFolder;
@@ -427,7 +434,7 @@ function renderListView() {
     list.style.display = 'block';
     document.getElementById('filesGrid').style.display = 'none';
 
-    const token = localStorage.getItem('userToken') || sessionStorage.getItem('userToken');
+    const token = getAuthToken();
     const tbody = document.getElementById('filesTableBody');
     tbody.innerHTML = filteredFiles.map(file => {
         const isFolder = file.isFolder;
@@ -570,7 +577,7 @@ function updateGallery() {
     const displayName = currentImage.displayName || currentImage.originalName || currentImage.name;
     
     // Utiliser l'endpoint preview au lieu de l'URL directe du blob
-    const token = localStorage.getItem('userToken') || sessionStorage.getItem('userToken');
+    const token = getAuthToken();
     const imageUrl = token 
         ? `${API_URL}/preview/${encodeURIComponent(currentImage.name)}?token=${encodeURIComponent(token)}`
         : `${API_URL}/preview/${encodeURIComponent(currentImage.name)}`;
@@ -613,7 +620,7 @@ function updateGallery() {
 
 function renderGalleryThumbnails(images) {
     const container = document.getElementById('galleryThumbnails');
-    const token = localStorage.getItem('userToken') || sessionStorage.getItem('userToken');
+    const token = getAuthToken();
     
     container.innerHTML = images.map((img, index) => {
         const thumbnailUrl = token 
@@ -656,7 +663,7 @@ function previewFile(fileName) {
     const file = filteredFiles.find(f => f.name === fileName);
     if (!file || file.isFolder) return;
 
-    const token = localStorage.getItem('userToken') || sessionStorage.getItem('userToken');
+    const token = getAuthToken();
     if (token) {
         window.open(`${API_URL}/preview/${encodeURIComponent(fileName)}?token=${encodeURIComponent(token)}`, '_blank');
     } else {
@@ -668,7 +675,7 @@ function downloadFile(fileName) {
     const file = filteredFiles.find(f => f.name === fileName);
     if (!file || file.isFolder) return;
 
-    const token = localStorage.getItem('userToken') || sessionStorage.getItem('userToken');
+    const token = getAuthToken();
     if (token) {
         window.location.href = `${API_URL}/download/${encodeURIComponent(fileName)}?token=${encodeURIComponent(token)}`;
     } else {
@@ -710,7 +717,7 @@ function handleFileSelect(e) {
 }
 
 async function handleFiles(files) {
-    const token = localStorage.getItem('userToken') || sessionStorage.getItem('userToken');
+    const token = getAuthToken();
     const uploadProgress = document.getElementById('uploadProgress');
     const progressFill = document.getElementById('progressFill');
     const progressText = document.getElementById('progressText');
@@ -804,11 +811,11 @@ function formatDate(dateString) {
 }
 
 function handleLogout() {
-    localStorage.removeItem('userToken');
-    localStorage.removeItem('userData');
-    sessionStorage.removeItem('userToken');
-    sessionStorage.removeItem('userData');
-    window.location.href = '../../login.html';
+    ['authToken', 'adminToken', 'userToken', 'userData', 'adminUser', 'adminUsername'].forEach(key => {
+        localStorage.removeItem(key);
+        sessionStorage.removeItem(key);
+    });
+    window.location.href = 'login.html';
 }
 
 function showError(message) {
@@ -865,7 +872,7 @@ async function handleCreateFolder() {
     }
     
     try {
-        const token = localStorage.getItem('userToken') || sessionStorage.getItem('userToken');
+        const token = getAuthToken();
         const response = await fetch(`${API_URL}/user/folders/create`, {
             method: 'POST',
             headers: {
@@ -979,7 +986,7 @@ async function handleRename() {
     }
     
     try {
-        const token = localStorage.getItem('userToken') || sessionStorage.getItem('userToken');
+        const token = getAuthToken();
         const response = await fetch(`${API_URL}/user/files/rename`, {
             method: 'PUT',
             headers: {
@@ -1039,7 +1046,7 @@ async function handleMove() {
     const destinationPath = document.getElementById('moveDestinationSelect').value;
     
     try {
-        const token = localStorage.getItem('userToken') || sessionStorage.getItem('userToken');
+        const token = getAuthToken();
         const response = await fetch(`${API_URL}/user/files/move`, {
             method: 'PUT',
             headers: {
@@ -1139,7 +1146,7 @@ async function handleGenerateShareLink() {
             requestBody.password = password;
         }
         
-        const token = localStorage.getItem('userToken') || sessionStorage.getItem('userToken');
+        const token = getAuthToken();
         const response = await fetch(`${API_URL}/share/generate`, {
             method: 'POST',
             headers: {
@@ -1249,7 +1256,7 @@ async function handleDelete() {
     if (!confirmed) return;
     
     try {
-        const token = localStorage.getItem('userToken') || sessionStorage.getItem('userToken');
+        const token = getAuthToken();
         const response = await fetch(`${API_URL}/user/files`, {
             method: 'DELETE',
             headers: {
@@ -1293,7 +1300,7 @@ function hideShareLinksSection() {
 
 async function loadShareLinks() {
     try {
-        const token = localStorage.getItem('userToken') || sessionStorage.getItem('userToken');
+        const token = getAuthToken();
         const response = await fetch(`${API_URL}/user/share-links`, {
             headers: {
                 'Authorization': `Bearer ${token}`
@@ -1524,7 +1531,7 @@ async function deleteShareLink(linkId) {
     if (!confirmed) return;
 
     try {
-        const token = localStorage.getItem('userToken') || sessionStorage.getItem('userToken');
+        const token = getAuthToken();
         const response = await fetch(`${API_URL}/user/share-links/${linkId}`, {
             method: 'DELETE',
             headers: {
@@ -1580,7 +1587,7 @@ async function handleCreateGuest() {
     confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Création...';
 
     try {
-        const token = localStorage.getItem('userToken') || sessionStorage.getItem('userToken');
+        const token = getAuthToken();
         const response = await fetch(`${API_URL}/admin/guest-accounts`, {
             method: 'POST',
             headers: {
@@ -1641,4 +1648,118 @@ async function handleCreateGuest() {
         confirmBtn.disabled = false;
         confirmBtn.innerHTML = '<i class="fas fa-user-plus"></i> Créer le compte';
     }
+}
+
+// ============================================
+// Team Files Section (read-only)
+// ============================================
+
+async function loadTeamFilesSection() {
+    // Check if user has teams via userData
+    const userDataStr = localStorage.getItem('userData') || sessionStorage.getItem('userData');
+    if (!userDataStr) return;
+
+    let user;
+    try {
+        user = JSON.parse(userDataStr);
+    } catch (e) { return; }
+
+    const teams = user.teams || [];
+    if (teams.length === 0) return;
+
+    // Show the team files button in header
+    const btn = document.getElementById('teamFilesBtn');
+    if (btn) {
+        btn.style.display = '';
+        btn.addEventListener('click', showTeamFilesSection);
+    }
+
+    const closeBtn = document.getElementById('closeTeamFilesBtn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', hideTeamFilesSection);
+    }
+}
+
+function showTeamFilesSection() {
+    document.getElementById('filesSection').style.display = 'none';
+    const shareSection = document.getElementById('shareLinksSection');
+    if (shareSection) shareSection.style.display = 'none';
+    document.getElementById('teamFilesSection').style.display = 'block';
+    loadTeamFiles();
+}
+
+function hideTeamFilesSection() {
+    document.getElementById('teamFilesSection').style.display = 'none';
+    document.getElementById('filesSection').style.display = 'block';
+}
+
+async function loadTeamFiles() {
+    const container = document.getElementById('teamFilesContainer');
+    container.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Chargement...</p></div>';
+
+    const userDataStr = localStorage.getItem('userData') || sessionStorage.getItem('userData');
+    if (!userDataStr) return;
+
+    let user;
+    try { user = JSON.parse(userDataStr); } catch (e) { return; }
+
+    const teams = user.teams || [];
+    if (teams.length === 0) {
+        container.innerHTML = '<div class="empty-state"><p>Vous n\'etes membre d\'aucune equipe</p></div>';
+        return;
+    }
+
+    let html = '';
+    const token = getAuthToken();
+
+    for (const team of teams) {
+        try {
+            const response = await fetch(`${API_URL}/files?teamId=${team.teamId}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await response.json();
+            const files = data.files || [];
+
+            html += `<div class="team-files-group">
+                <h3 style="margin: 16px 0 12px; color: #003C61;">
+                    <i class="fas fa-users"></i> ${escapeHtml(team.displayName || team.name)}
+                    <span style="color: #999; font-size: 0.85rem; font-weight: 400;"> (${files.length} fichier${files.length !== 1 ? 's' : ''})</span>
+                </h3>`;
+
+            if (files.length === 0) {
+                html += '<p style="color: #999; padding: 8px 0;">Aucun fichier dans cette equipe</p>';
+            } else {
+                html += `<table class="files-table" style="width: 100%; margin-bottom: 16px;">
+                    <thead><tr><th>Nom</th><th>Taille</th><th>Type</th><th>Date</th><th>Actions</th></tr></thead>
+                    <tbody>`;
+
+                files.forEach(file => {
+                    const displayName = file.metadata?.originalName || file.name;
+                    html += `<tr>
+                        <td><div class="file-name-cell">${getFileIcon(file.contentType)} <span>${escapeHtml(displayName)}</span></div></td>
+                        <td>${formatBytes(file.size || 0)}</td>
+                        <td>${getFileType(file.contentType)}</td>
+                        <td>${formatDate(file.lastModified)}</td>
+                        <td><button class="btn-icon" onclick="window.open('${API_URL}/download/${encodeURIComponent(file.name)}', '_blank')" title="Telecharger">
+                            <i class="fas fa-download"></i>
+                        </button></td>
+                    </tr>`;
+                });
+
+                html += '</tbody></table>';
+            }
+            html += '</div>';
+        } catch (e) {
+            html += `<div class="team-files-group">
+                <h3 style="margin: 16px 0 12px; color: #003C61;">
+                    <i class="fas fa-users"></i> ${escapeHtml(team.displayName || team.name)}
+                </h3>
+                <p style="color: #dc3545; padding: 8px 0;">Erreur de chargement</p>
+            </div>`;
+        }
+    }
+
+    container.innerHTML = html;
+    document.getElementById('teamFilesSectionTitle').textContent =
+        `Fichiers d'equipe (${teams.length} equipe${teams.length > 1 ? 's' : ''})`;
 }

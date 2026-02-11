@@ -5,195 +5,129 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ShareAzure - Administration</title>
     <link rel="stylesheet" href="css/admin.css">
-    <link rel="stylesheet" href="css/login.css">
-    <!-- Font Awesome pour les icônes professionnelles -->
+    <!-- Font Awesome pour les icônes -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Chart.js pour les graphiques -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-    <!-- Login Screen -->
-    <div id="loginScreen" class="login-screen">
-        <div class="login-container">
-            <div class="login-header">
-                <svg class="login-logo" viewBox="0 0 559 165" xmlns="http://www.w3.org/2000/svg">
-                    <g fill-rule="evenodd">
-                        <path d="M58.5905 90.33H89.6405C74.3705 56.31 40.2205 34.02 0.560547 34.02V102.78C0.560547 117.89 12.9605 130.43 28.2105 129.97H65.9906C61.0006 120.61 58.5905 109.53 58.5905 97.79V90.33Z" fill="#639E30"/>
-                        <path d="M133.171 164.02C96.971 164.02 68.041 135.72 68.041 99.8H105.101C120.491 99.8 133.181 112.34 133.181 127.88V164.02H133.171Z" fill="#F8AA36"/>
-                        <path d="M472.049 53.44C472.049 48.01 470.049 43.44 466.339 39.45 463.199 36.31 459.199 34.88 454.919 34.31L453.209 34.02V120.55C453.209 125.69 457.489 129.97 462.629 129.97 467.769 129.97 472.049 125.69 472.049 120.55V53.44ZM434.879 34.02H419.739C419.739 34.02 419.739 34.02 419.449 34.02H414.019C400.599 34.02 389.169 38.59 379.749 48.01 370.039 57.43 365.469 68.57 365.469 81.99V129.97L367.179 129.68C371.459 129.11 375.179 127.4 378.599 123.97 382.599 119.97 384.309 115.69 384.309 110.26V81.71C384.309 73.43 387.169 66.29 392.879 60.58 398.589 54.58 405.729 51.73 414.009 51.73H434.859C439.709 51.73 443.709 47.73 443.709 42.88 443.729 37.74 439.729 34.02 434.879 34.02ZM557.739 128.27C557.169 124.27 555.459 120.84 552.599 117.7 548.889 113.99 544.599 112.27 539.459 112.27H530.039C521.759 112.27 514.619 109.13 508.909 103.42 503.199 97.42 500.339 90.28 500.339 82.29V62.87C500.339 62.58 500.339 62.01 500.339 61.44V42.88C500.339 37.74 496.059 33.46 490.919 33.46 486.069 33.46 482.069 37.46 481.499 42.31V66.3C481.499 66.3 481.499 66.3 481.499 66.59V82C481.499 95.42 486.349 106.56 495.779 115.98 505.489 125.4 516.629 129.97 530.049 129.97H558.039L557.739 128.27ZM234.889 48.02C225.179 38.6 213.759 34.03 200.619 34.03 187.199 34.03 176.059 38.6 166.349 48.02 156.639 57.44 152.069 68.87 152.069 82 152.069 95.42 156.919 106.56 166.349 115.98 176.059 125.4 187.199 129.97 200.619 129.97H249.449V82C249.449 68.87 244.599 57.44 234.889 48.02ZM200.619 112.27C192.339 112.27 185.199 109.13 179.489 103.42 173.779 97.71 170.919 90.57 170.919 82.29V82C170.919 73.72 173.779 66.58 179.489 60.58 185.199 54.58 192.339 51.44 200.619 51.44 200.619 51.44 200.619 51.44 200.909 51.44 209.189 51.44 216.329 54.58 222.039 60.58 227.749 66.58 230.609 73.72 230.609 82V112.27H200.619ZM341.72 48.02C332.01 38.6 320.59 34.03 307.45 34.03 294.03 34.03 282.89 38.6 273.18 48.02 263.47 57.44 258.9 68.87 258.9 82V163.96L260.61 163.67C264.89 163.1 268.61 161.39 272.03 157.96 276.03 153.96 277.74 149.39 277.74 143.97V129.98H307.44C320.86 129.41 332.29 124.84 341.71 115.42 351.42 106 355.99 94.86 355.99 81.44 356 68.87 351.14 57.44 341.72 48.02ZM337.15 82C337.15 90.28 334.29 97.42 328.58 103.42 322.87 109.42 315.73 112.27 307.45 112.27H277.46V82.28C277.46 82.28 277.46 82.28 277.46 81.99 277.46 73.71 280.32 66.57 286.03 60.86 291.46 55.15 298.02 52.29 305.45 52.01V52.3L307.16 52.01C315.44 52.01 322.58 55.15 328.29 61.15 334.01 66.58 336.86 73.72 337.15 82Z" fill="#003C61"/>
-                    </g>
-                </svg>
-                <h1>Administration</h1>
-                <p>Connexion sécurisée</p>
-            </div>
-            
-            <form id="loginForm" class="login-form">
-                <div class="form-group">
-                    <label for="username">
-                        <i class="fas fa-user"></i>
-                        Nom d'utilisateur
-                    </label>
-                    <input type="text" id="username" name="username" required autocomplete="username">
-                </div>
-                
-                <div class="form-group">
-                    <label for="password">
-                        <i class="fas fa-lock"></i>
-                        Mot de passe
-                    </label>
-                    <input type="password" id="password" name="password" required autocomplete="current-password">
-                </div>
-                
-                <div class="form-group">
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="rememberMe">
-                        <span>Se souvenir de moi</span>
-                    </label>
-                </div>
-                
-                <button type="submit" class="btn btn-primary btn-block">
-                    <i class="fas fa-sign-in-alt"></i>
-                    Se connecter
-                </button>
-                
-                <div id="loginError" class="login-error" style="display: none;">
-                    <i class="fas fa-exclamation-triangle"></i>
-                    <span id="loginErrorMessage"></span>
-                </div>
-            </form>
-            
-            <div class="login-footer">
-                <p class="login-help">
-                    <i class="fas fa-info-circle"></i>
-                    Identifiants par défaut : admin / admin123
-                </p>
-                <p class="login-note">
-                    En production, utilisez Azure AD B2C
-                </p>
-            </div>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <svg class="sidebar-logo" viewBox="0 0 559 165" xmlns="http://www.w3.org/2000/svg">
+                <g fill-rule="evenodd">
+                    <path d="M58.5905 90.33H89.6405C74.3705 56.31 40.2205 34.02 0.560547 34.02V102.78C0.560547 117.89 12.9605 130.43 28.2105 129.97H65.9906C61.0006 120.61 58.5905 109.53 58.5905 97.79V90.33Z" fill="#639E30"/>
+                    <path d="M133.171 164.02C96.971 164.02 68.041 135.72 68.041 99.8H105.101C120.491 99.8 133.181 112.34 133.181 127.88V164.02H133.171Z" fill="#F8AA36"/>
+                </g>
+            </svg>
+            <p class="sidebar-subtitle">Administration</p>
         </div>
-    </div>
 
-    <!-- Admin Interface (hidden until logged in) -->
-    <div id="adminInterface" style="display: none;">
-        <!-- Sidebar -->
-        <aside class="sidebar">
-            <div class="sidebar-header">
-                <svg class="sidebar-logo" viewBox="0 0 559 165" xmlns="http://www.w3.org/2000/svg">
-                    <g fill-rule="evenodd">
-                        <path d="M58.5905 90.33H89.6405C74.3705 56.31 40.2205 34.02 0.560547 34.02V102.78C0.560547 117.89 12.9605 130.43 28.2105 129.97H65.9906C61.0006 120.61 58.5905 109.53 58.5905 97.79V90.33Z" fill="#639E30"/>
-                        <path d="M133.171 164.02C96.971 164.02 68.041 135.72 68.041 99.8H105.101C120.491 99.8 133.181 112.34 133.181 127.88V164.02H133.171Z" fill="#F8AA36"/>
-                    </g>
-                </svg>
-                <p class="sidebar-subtitle">Administration</p>
+        <nav class="sidebar-nav">
+            <a href="#dashboard" class="nav-item active" data-section="dashboard">
+                <i class="fas fa-chart-line nav-icon"></i>
+                <span class="nav-text">Dashboard</span>
+            </a>
+            <a href="#files" class="nav-item" data-section="files">
+                <i class="fas fa-folder-open nav-icon"></i>
+                <span class="nav-text">Fichiers</span>
+            </a>
+            <a href="#shares" class="nav-item" data-section="shares">
+                <i class="fas fa-share-nodes nav-icon"></i>
+                <span class="nav-text">Partages</span>
+            </a>
+            <a href="#teams" class="nav-item" data-section="teams">
+                <i class="fas fa-users-gear nav-icon"></i>
+                <span class="nav-text">Equipes</span>
+            </a>
+            <a href="#costs" class="nav-item" data-section="costs">
+                <i class="fas fa-dollar-sign nav-icon"></i>
+                <span class="nav-text">Couts</span>
+            </a>
+            <a href="#users" class="nav-item" data-section="users">
+                <i class="fas fa-users nav-icon"></i>
+                <span class="nav-text">Utilisateurs</span>
+            </a>
+            <a href="#guests" class="nav-item" data-section="guests">
+                <i class="fas fa-user-clock nav-icon"></i>
+                <span class="nav-text">Invites</span>
+            </a>
+            <a href="#logs" class="nav-item" data-section="logs">
+                <i class="fas fa-list-ul nav-icon"></i>
+                <span class="nav-text">Logs</span>
+            </a>
+            <a href="#settings" class="nav-item" data-section="settings">
+                <i class="fas fa-cog nav-icon"></i>
+                <span class="nav-text">Parametres</span>
+            </a>
+        </nav>
+
+        <div class="sidebar-footer">
+            <button class="btn btn-secondary btn-small btn-block" id="logoutBtn">
+                <i class="fas fa-sign-out-alt"></i>
+                Deconnexion
+            </button>
+            <p class="version">v3.0.0</p>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Header -->
+        <header class="top-header">
+            <div class="header-left">
+                <h2 id="pageTitle">Dashboard</h2>
+                <p id="pageSubtitle">Vue d'ensemble de l'activite</p>
             </div>
-            
-            <nav class="sidebar-nav">
-                <a href="#dashboard" class="nav-item active" data-section="dashboard">
-                    <i class="fas fa-chart-line nav-icon"></i>
-                    <span class="nav-text">Dashboard</span>
-                </a>
-                <a href="#files" class="nav-item" data-section="files">
-                    <i class="fas fa-folder-open nav-icon"></i>
-                    <span class="nav-text">Fichiers</span>
-                </a>
-                <a href="#shares" class="nav-item" data-section="shares">
-                    <i class="fas fa-share-nodes nav-icon"></i>
-                    <span class="nav-text">Partages</span>
-                </a>
-                <a href="#users" class="nav-item" data-section="users">
-                    <i class="fas fa-users nav-icon"></i>
-                    <span class="nav-text">Utilisateurs</span>
-                </a>
-                <a href="#guests" class="nav-item" data-section="guests">
-                    <i class="fas fa-user-clock nav-icon"></i>
-                    <span class="nav-text">Invités</span>
-                </a>
-                <a href="#logs" class="nav-item" data-section="logs">
-                    <i class="fas fa-list-ul nav-icon"></i>
-                    <span class="nav-text">Logs</span>
-                </a>
-                <a href="#settings" class="nav-item" data-section="settings">
-                    <i class="fas fa-cog nav-icon"></i>
-                    <span class="nav-text">Paramètres</span>
-                </a>
-            </nav>
-
-            <div class="sidebar-footer">
-                <button class="btn btn-secondary btn-small btn-block" id="logoutBtn">
-                    <i class="fas fa-sign-out-alt"></i>
-                    Déconnexion
+            <div class="header-right">
+                <button class="btn btn-icon" id="refreshBtn" title="Rafraichir">
+                    <i class="fas fa-sync-alt"></i>
                 </button>
-                <p class="version">v2.0.0</p>
+                <div class="user-menu">
+                    <img src="https://ui-avatars.com/api/?name=Admin&background=003C61&color=fff" alt="Admin" class="user-avatar">
+                    <span class="user-name" id="currentUserName">Admin</span>
+                </div>
             </div>
-        </aside>
+        </header>
 
-        <!-- Main Content -->
-        <main class="main-content">
-            <!-- Header -->
-            <header class="top-header">
-                <div class="header-left">
-                    <h2 id="pageTitle">Dashboard</h2>
-                    <p id="pageSubtitle">Vue d'ensemble de l'activité</p>
-                </div>
-                <div class="header-right">
-                    <button class="btn btn-icon" id="refreshBtn" title="Rafraîchir">
-                        <i class="fas fa-sync-alt"></i>
-                    </button>
-                    <button class="btn btn-icon" id="notificationsBtn" title="Notifications">
-                        <i class="fas fa-bell"></i>
-                        <span class="badge" id="notificationsBadge">0</span>
-                    </button>
-                    <div class="user-menu">
-                        <img src="https://ui-avatars.com/api/?name=Admin&background=003C61&color=fff" alt="Admin" class="user-avatar">
-                        <span class="user-name" id="currentUserName">Admin</span>
-                    </div>
-                </div>
-            </header>
-
-            <!-- Dashboard Section -->
-            <section id="dashboard" class="content-section active">
-                <!-- Stats Cards -->
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-icon stat-icon-blue">
-                            <i class="fas fa-folder-open"></i>
-                        </div>
-                        <div class="stat-content">
-                            <p class="stat-label">Total Fichiers</p>
-                            <h3 class="stat-value" id="statTotalFiles">0</h3>
-                            <p class="stat-change positive">+12% ce mois</p>
-                        </div>
-                    </div>
-
-                    <div class="stat-card">
-                        <div class="stat-icon stat-icon-green">
-                            <i class="fas fa-database"></i>
-                        </div>
-                        <div class="stat-content">
-                            <p class="stat-label">Stockage Utilisé</p>
-                            <h3 class="stat-value" id="statTotalSize">0 GB</h3>
-                            <p class="stat-change">Sur 100 GB</p>
-                        </div>
-                    </div>
-
-                    <div class="stat-card">
-                        <div class="stat-icon stat-icon-orange">
-                            <i class="fas fa-share-nodes"></i>
-                        </div>
-                    <div class="stat-content">
-                        <p class="stat-label">Liens Actifs</p>
-                        <h3 class="stat-value" id="statActiveShares">0</h3>
-                        <p class="stat-change positive">+5 aujourd'hui</p>
-                    </div>
-                </div>
-
+        <!-- Dashboard Section -->
+        <section id="dashboard" class="content-section active">
+            <!-- Stats Cards -->
+            <div class="stats-grid">
                 <div class="stat-card">
-                    <div class="stat-icon">⬇️</div>
+                    <div class="stat-icon stat-icon-blue">
+                        <i class="fas fa-folder-open"></i>
+                    </div>
                     <div class="stat-content">
-                        <p class="stat-label">Téléchargements</p>
-                        <h3 class="stat-value" id="statDownloads">0</h3>
-                        <p class="stat-change positive">+23% cette semaine</p>
+                        <p class="stat-label">Total Fichiers</p>
+                        <h3 class="stat-value" id="statTotalFiles">0</h3>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon stat-icon-green">
+                        <i class="fas fa-users-gear"></i>
+                    </div>
+                    <div class="stat-content">
+                        <p class="stat-label">Equipes</p>
+                        <h3 class="stat-value" id="statTotalTeams">0</h3>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon stat-icon-orange">
+                        <i class="fas fa-users"></i>
+                    </div>
+                    <div class="stat-content">
+                        <p class="stat-label">Utilisateurs</p>
+                        <h3 class="stat-value" id="statTotalUsers">0</h3>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon stat-icon-red">
+                        <i class="fas fa-dollar-sign"></i>
+                    </div>
+                    <div class="stat-content">
+                        <p class="stat-label">Couts ce mois</p>
+                        <h3 class="stat-value" id="statTotalCosts">$0.00</h3>
                     </div>
                 </div>
             </div>
@@ -201,19 +135,18 @@
             <!-- Charts Row -->
             <div class="charts-row">
                 <div class="chart-card">
-                    <h3>📈 Uploads par jour (7 derniers jours)</h3>
+                    <h3><i class="fas fa-chart-line"></i> Uploads par jour (7 derniers jours)</h3>
                     <canvas id="uploadsChart"></canvas>
                 </div>
-
                 <div class="chart-card">
-                    <h3>📊 Types de fichiers</h3>
+                    <h3><i class="fas fa-chart-pie"></i> Types de fichiers</h3>
                     <canvas id="fileTypesChart"></canvas>
                 </div>
             </div>
 
             <!-- Recent Activity -->
             <div class="activity-card">
-                <h3>🕒 Activité récente</h3>
+                <h3><i class="fas fa-clock"></i> Activite recente</h3>
                 <div class="activity-list" id="recentActivity">
                     <p class="loading">Chargement...</p>
                 </div>
@@ -224,28 +157,28 @@
         <section id="files" class="content-section">
             <div class="section-toolbar">
                 <div class="search-box">
-                    <input type="text" id="fileSearchInput" placeholder="🔍 Rechercher un fichier...">
+                    <input type="text" id="fileSearchInput" placeholder="Rechercher un fichier...">
                 </div>
                 <div class="toolbar-actions">
                     <select id="fileTypeFilter" class="filter-select">
                         <option value="">Tous les types</option>
-                        <option value="image">Images</option>
-                        <option value="pdf">PDF</option>
-                        <option value="video">Vidéos</option>
-                        <option value="audio">Audio</option>
-                        <option value="document">Documents</option>
-                        <option value="other">Autres</option>
+                        <option value="Images">Images</option>
+                        <option value="PDF">PDF</option>
+                        <option value="Vidéos">Videos</option>
+                        <option value="Audio">Audio</option>
+                        <option value="Documents">Documents</option>
+                        <option value="Autres">Autres</option>
                     </select>
                     <select id="fileSortBy" class="filter-select">
-                        <option value="date-desc">Plus récent</option>
+                        <option value="date-desc">Plus recent</option>
                         <option value="date-asc">Plus ancien</option>
                         <option value="size-desc">Plus volumineux</option>
-                        <option value="size-asc">Plus léger</option>
+                        <option value="size-asc">Plus leger</option>
                         <option value="name-asc">Nom (A-Z)</option>
                         <option value="name-desc">Nom (Z-A)</option>
                     </select>
                     <button class="btn btn-danger" id="deleteSelectedBtn" disabled>
-                        🗑️ Supprimer sélection
+                        <i class="fas fa-trash"></i> Supprimer selection
                     </button>
                 </div>
             </div>
@@ -264,15 +197,9 @@
                         </tr>
                     </thead>
                     <tbody id="filesTableBody">
-                        <tr>
-                            <td colspan="7" class="loading">Chargement des fichiers...</td>
-                        </tr>
+                        <tr><td colspan="7" class="loading">Chargement des fichiers...</td></tr>
                     </tbody>
                 </table>
-            </div>
-
-            <div class="pagination" id="filesPagination">
-                <!-- Pagination sera générée dynamiquement -->
             </div>
         </section>
 
@@ -280,16 +207,16 @@
         <section id="shares" class="content-section">
             <div class="section-toolbar">
                 <div class="search-box">
-                    <input type="text" id="shareSearchInput" placeholder="🔍 Rechercher un partage...">
+                    <input type="text" id="shareSearchInput" placeholder="Rechercher un partage...">
                 </div>
                 <div class="toolbar-actions">
                     <select id="shareStatusFilter" class="filter-select">
                         <option value="">Tous les statuts</option>
                         <option value="active">Actifs</option>
-                        <option value="expired">Expirés</option>
+                        <option value="expired">Expires</option>
                     </select>
                     <button class="btn btn-primary" id="exportSharesBtn">
-                        📥 Exporter CSV
+                        <i class="fas fa-download"></i> Exporter CSV
                     </button>
                 </div>
             </div>
@@ -299,33 +226,95 @@
                     <thead>
                         <tr>
                             <th>Fichier</th>
-                            <th>Créé le</th>
+                            <th>Cree le</th>
                             <th>Expire le</th>
                             <th>Statut</th>
-                            <th>Téléchargements</th>
+                            <th>Telechargements</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="sharesTableBody">
-                        <tr>
-                            <td colspan="6" class="loading">Chargement des partages...</td>
-                        </tr>
+                        <tr><td colspan="6" class="loading">Chargement des partages...</td></tr>
                     </tbody>
                 </table>
             </div>
         </section>
 
-        <!-- Users Section -->
-        <section id="users" class="content-section">
-            <div class="info-banner">
-                <p>👥 <strong>Gestion des utilisateurs</strong> - Cette fonctionnalité sera disponible avec Azure AD B2C</p>
+        <!-- Teams Section -->
+        <section id="teams" class="content-section">
+            <div class="section-toolbar">
+                <h3 style="margin: 0;">Gestion des Equipes</h3>
+                <div class="toolbar-actions">
+                    <button class="btn btn-primary" id="createTeamBtn">
+                        <i class="fas fa-plus"></i> Creer une equipe
+                    </button>
+                </div>
+            </div>
+            <div class="table-container" id="teamsList">
+                <p class="loading">Chargement...</p>
+            </div>
+        </section>
+
+        <!-- Costs Section -->
+        <section id="costs" class="content-section">
+            <div class="section-toolbar">
+                <h3 style="margin: 0;">Suivi des Couts</h3>
+                <div class="toolbar-actions">
+                    <select id="costsPeriod" class="filter-select">
+                        <option value="current">Mois actuel</option>
+                        <option value="last">Mois dernier</option>
+                        <option value="year">Annee en cours</option>
+                    </select>
+                    <button class="btn btn-secondary" id="refreshCostsBtn">
+                        <i class="fas fa-sync"></i> Actualiser
+                    </button>
+                </div>
             </div>
 
-            <div class="placeholder-content">
-                <div class="placeholder-icon">🔐</div>
-                <h3>Azure AD B2C</h3>
-                <p>Configurez Azure AD B2C pour activer la gestion des utilisateurs</p>
-                <button class="btn btn-primary">📖 Documentation Azure AD</button>
+            <div class="stats-grid" style="margin-bottom: 2rem;">
+                <div class="stat-card">
+                    <div class="stat-content">
+                        <p class="stat-label">Utilisateurs</p>
+                        <h3 class="stat-value" id="costsUsers">$0.00</h3>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-content">
+                        <p class="stat-label">Equipes</p>
+                        <h3 class="stat-value" id="costsTeams">$0.00</h3>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-content">
+                        <p class="stat-label">Invites</p>
+                        <h3 class="stat-value" id="costsGuests">$0.00</h3>
+                    </div>
+                </div>
+                <div class="stat-card" style="background: linear-gradient(135deg, var(--primary-color), var(--primary-dark)); color: white;">
+                    <div class="stat-content">
+                        <p class="stat-label" style="color: rgba(255,255,255,0.8);">Total</p>
+                        <h3 class="stat-value" id="costsTotal">$0.00</h3>
+                    </div>
+                </div>
+            </div>
+
+            <div class="table-container" id="costsDetails">
+                <p class="loading">Chargement...</p>
+            </div>
+        </section>
+
+        <!-- Users Section -->
+        <section id="users" class="content-section">
+            <div class="section-toolbar">
+                <h3 style="margin: 0;">Gestion des Utilisateurs</h3>
+                <div class="toolbar-actions">
+                    <button class="btn btn-primary" id="createUserBtn">
+                        <i class="fas fa-plus"></i> Creer un utilisateur
+                    </button>
+                </div>
+            </div>
+            <div class="table-container" id="usersList">
+                <p class="loading">Chargement...</p>
             </div>
         </section>
 
@@ -336,69 +325,57 @@
                     <select id="guestStatusFilter" class="filter-select">
                         <option value="">Tous les statuts</option>
                         <option value="active">Actifs</option>
-                        <option value="expired">Expirés</option>
-                        <option value="disabled">Désactivés</option>
+                        <option value="expired">Expires</option>
+                        <option value="disabled">Desactives</option>
                     </select>
                     <button class="btn btn-primary" id="createGuestBtn">
-                        <i class="fas fa-user-plus"></i>
-                        Créer un invité
+                        <i class="fas fa-user-plus"></i> Creer un invite
                     </button>
                 </div>
                 <div class="search-box">
-                    <i class="fas fa-search"></i>
                     <input type="text" id="guestSearch" placeholder="Rechercher par email...">
                 </div>
             </div>
 
-            <!-- Stats Cards -->
             <div class="stats-grid" style="margin-bottom: 2rem;">
-                <div class="stat-card stat-info">
-                    <div class="stat-icon">
-                        <i class="fas fa-users"></i>
-                    </div>
-                    <div class="stat-details">
-                        <p class="stat-label">Total invités</p>
-                        <p class="stat-value" id="totalGuestsCount">0</p>
+                <div class="stat-card">
+                    <div class="stat-icon"><i class="fas fa-users"></i></div>
+                    <div class="stat-content">
+                        <p class="stat-label">Total invites</p>
+                        <h3 class="stat-value" id="totalGuestsCount">0</h3>
                     </div>
                 </div>
-                <div class="stat-card stat-success">
-                    <div class="stat-icon">
-                        <i class="fas fa-check-circle"></i>
-                    </div>
-                    <div class="stat-details">
+                <div class="stat-card">
+                    <div class="stat-icon" style="background: linear-gradient(135deg, #639E30, #4A7523); color: white;"><i class="fas fa-check-circle"></i></div>
+                    <div class="stat-content">
                         <p class="stat-label">Actifs</p>
-                        <p class="stat-value" id="activeGuestsCount">0</p>
+                        <h3 class="stat-value" id="activeGuestsCount">0</h3>
                     </div>
                 </div>
-                <div class="stat-card stat-warning">
-                    <div class="stat-icon">
-                        <i class="fas fa-clock"></i>
-                    </div>
-                    <div class="stat-details">
-                        <p class="stat-label">Expirent bientôt</p>
-                        <p class="stat-value" id="expiringSoonCount">0</p>
+                <div class="stat-card">
+                    <div class="stat-icon" style="background: linear-gradient(135deg, #F8AA36, #E69A26); color: white;"><i class="fas fa-clock"></i></div>
+                    <div class="stat-content">
+                        <p class="stat-label">Expirent bientot</p>
+                        <h3 class="stat-value" id="expiringSoonCount">0</h3>
                     </div>
                 </div>
-                <div class="stat-card stat-danger">
-                    <div class="stat-icon">
-                        <i class="fas fa-ban"></i>
-                    </div>
-                    <div class="stat-details">
-                        <p class="stat-label">Désactivés</p>
-                        <p class="stat-value" id="disabledGuestsCount">0</p>
+                <div class="stat-card">
+                    <div class="stat-icon" style="background: linear-gradient(135deg, #DC2626, #B91C1C); color: white;"><i class="fas fa-ban"></i></div>
+                    <div class="stat-content">
+                        <p class="stat-label">Desactives</p>
+                        <h3 class="stat-value" id="disabledGuestsCount">0</h3>
                     </div>
                 </div>
             </div>
 
-            <!-- Guests Table -->
             <div class="table-container">
                 <table class="data-table">
                     <thead>
                         <tr>
                             <th>Email</th>
-                            <th>Créé par</th>
+                            <th>Cree par</th>
                             <th>Fichiers</th>
-                            <th>Créé le</th>
+                            <th>Cree le</th>
                             <th>Expire le</th>
                             <th>Temps restant</th>
                             <th>Statut</th>
@@ -406,12 +383,7 @@
                         </tr>
                     </thead>
                     <tbody id="guestsTableBody">
-                        <tr>
-                            <td colspan="8" class="table-empty">
-                                <i class="fas fa-user-clock" style="font-size: 3rem; opacity: 0.3;"></i>
-                                <p>Aucun invité trouvé</p>
-                            </td>
-                        </tr>
+                        <tr><td colspan="8" class="loading">Chargement...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -420,44 +392,69 @@
         <!-- Logs Section -->
         <section id="logs" class="content-section">
             <div class="section-toolbar">
+                <div class="search-box">
+                    <input type="text" id="logSearchInput" placeholder="Rechercher dans les logs...">
+                </div>
                 <div class="toolbar-actions">
                     <select id="logLevelFilter" class="filter-select">
                         <option value="">Tous les niveaux</option>
                         <option value="info">Info</option>
+                        <option value="success">Succes</option>
                         <option value="warning">Warning</option>
-                        <option value="error">Error</option>
+                        <option value="error">Erreur</option>
                     </select>
-                    <select id="logOperationFilter" class="filter-select">
-                        <option value="">Toutes les opérations</option>
-                        <option value="upload">Upload</option>
-                        <option value="download">Download</option>
-                        <option value="delete">Delete</option>
-                        <option value="share">Share</option>
+                    <select id="logCategoryFilter" class="filter-select">
+                        <option value="">Toutes les categories</option>
+                        <option value="file">Fichiers</option>
+                        <option value="share">Partages</option>
+                        <option value="domain">Domaines</option>
+                        <option value="user">Utilisateurs</option>
+                        <option value="auth">Authentification</option>
+                        <option value="system">Systeme</option>
                     </select>
                     <button class="btn btn-secondary" id="clearLogsBtn">
-                        🗑️ Effacer les logs
+                        <i class="fas fa-trash"></i> Effacer
                     </button>
                     <button class="btn btn-primary" id="exportLogsBtn">
-                        📥 Exporter
+                        <i class="fas fa-download"></i> Exporter
                     </button>
                 </div>
             </div>
-
-            <div class="logs-container" id="logsContainer">
-                <p class="loading">Chargement des logs...</p>
+            <div class="table-container">
+                <table class="data-table" id="logsTable">
+                    <thead>
+                        <tr>
+                            <th style="width: 160px;">Date</th>
+                            <th style="width: 90px;">Niveau</th>
+                            <th style="width: 110px;">Categorie</th>
+                            <th>Message</th>
+                            <th style="width: 120px;">Utilisateur</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logsTableBody">
+                        <tr><td colspan="5" class="loading">Chargement des logs...</td></tr>
+                    </tbody>
+                </table>
             </div>
-
-            <div class="pagination" id="logsPagination">
-                <!-- Pagination -->
+            <div id="logsPagination" class="logs-pagination" style="display: none;">
+                <span id="logsCount" class="logs-page-info"></span>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <button class="btn btn-secondary btn-small" id="logsPrevBtn" disabled>
+                        <i class="fas fa-chevron-left"></i>
+                    </button>
+                    <span id="logsPageInfo" class="logs-page-info"></span>
+                    <button class="btn btn-secondary btn-small" id="logsNextBtn" disabled>
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
             </div>
         </section>
 
         <!-- Settings Section -->
         <section id="settings" class="content-section">
             <div class="settings-grid">
-                <!-- Stockage -->
                 <div class="settings-card">
-                    <h3>💾 Configuration du Stockage</h3>
+                    <h3><i class="fas fa-database"></i> Configuration du Stockage</h3>
                     <div class="settings-form">
                         <div class="form-group">
                             <label>Taille maximale par fichier (MB)</label>
@@ -473,104 +470,91 @@
                         </div>
                     </div>
                 </div>
-
-                <!-- Partage -->
                 <div class="settings-card">
-                    <h3>🔗 Configuration du Partage</h3>
+                    <h3><i class="fas fa-link"></i> Configuration du Partage</h3>
                     <div class="settings-form">
                         <div class="form-group">
-                            <label>Durée maximale d'expiration (jours)</label>
+                            <label>Duree maximale d'expiration (jours)</label>
                             <input type="number" id="maxShareDays" value="30" min="1" max="365">
                         </div>
                         <div class="form-group">
-                            <label>Durée par défaut (minutes)</label>
+                            <label>Duree par defaut (minutes)</label>
                             <input type="number" id="defaultShareMinutes" value="60" min="15" max="43200">
                         </div>
                         <div class="form-group">
-                            <label>
-                                <input type="checkbox" id="requirePassword">
-                                Exiger un mot de passe pour les partages
-                            </label>
+                            <label><input type="checkbox" id="requirePassword"> Exiger un mot de passe pour les partages</label>
                         </div>
                     </div>
                 </div>
-
-                <!-- Sécurité -->
                 <div class="settings-card">
-                    <h3>🔒 Sécurité</h3>
+                    <h3><i class="fas fa-shield-halved"></i> Securite</h3>
                     <div class="settings-form">
                         <div class="form-group">
-                            <label>Rate limiting (requêtes par 15 min)</label>
+                            <label>Rate limiting (requetes par 15 min)</label>
                             <input type="number" id="rateLimit" value="100" min="10" max="1000">
                         </div>
                         <div class="form-group">
-                            <label>
-                                <input type="checkbox" id="enableLogs" checked>
-                                Activer les logs détaillés
-                            </label>
+                            <label><input type="checkbox" id="enableLogs" checked> Activer les logs detailles</label>
                         </div>
                         <div class="form-group">
-                            <label>
-                                <input type="checkbox" id="enableAudit" checked>
-                                Activer l'audit trail
-                            </label>
+                            <label><input type="checkbox" id="enableAudit" checked> Activer l'audit trail</label>
                         </div>
                     </div>
                 </div>
-
-                <!-- Notifications -->
                 <div class="settings-card">
-                    <h3>🔔 Notifications</h3>
+                    <h3><i class="fas fa-bell"></i> Notifications</h3>
                     <div class="settings-form">
                         <div class="form-group">
-                            <label>
-                                <input type="checkbox" id="notifyUploads">
-                                Notifier les nouveaux uploads
-                            </label>
+                            <label><input type="checkbox" id="notifyUploads"> Notifier les nouveaux uploads</label>
                         </div>
                         <div class="form-group">
-                            <label>
-                                <input type="checkbox" id="notifyShares">
-                                Notifier les nouveaux partages
-                            </label>
+                            <label><input type="checkbox" id="notifyShares"> Notifier les nouveaux partages</label>
                         </div>
                         <div class="form-group">
-                            <label>
-                                <input type="checkbox" id="notifyQuota" checked>
-                                Alerter si quota dépassé
-                            </label>
+                            <label><input type="checkbox" id="notifyQuota" checked> Alerter si quota depasse</label>
                         </div>
                     </div>
                 </div>
-
-                <!-- Domaines d'emails autorisés -->
                 <div class="settings-card">
-                    <h3>📧 Domaines d'emails autorisés</h3>
+                    <h3><i class="fas fa-envelope"></i> Domaines d'emails autorises</h3>
                     <div class="settings-form">
                         <div class="form-group">
                             <label>Ajouter un domaine</label>
                             <div style="display: flex; gap: 10px;">
-                                <input 
-                                    type="text" 
-                                    id="newEmailDomainInput" 
-                                    class="form-input" 
-                                    placeholder="exemple.com"
-                                    style="flex: 1;"
-                                >
+                                <input type="text" id="newEmailDomainInput" class="form-input" placeholder="exemple.com" style="flex: 1;">
                                 <button class="btn btn-primary" id="addEmailDomainBtn">
-                                    <i class="fas fa-plus"></i>
-                                    Ajouter
+                                    <i class="fas fa-plus"></i> Ajouter
                                 </button>
                             </div>
-                            <small style="color: #666; font-size: 0.875rem; display: block; margin-top: 5px;">
-                                Entrez uniquement le domaine (ex: exemple.com, pas email@exemple.com)
-                            </small>
                         </div>
                     </div>
                     <div style="margin-top: 20px;">
-                        <h4 style="margin-bottom: 10px; font-size: 0.9rem; color: #666;">Domaines autorisés</h4>
-                        <div id="emailDomainsList" style="max-height: 300px; overflow-y: auto;">
-                            <p class="loading">Chargement des domaines...</p>
+                        <div class="table-container">
+                            <table class="data-table" id="emailDomainsTable">
+                                <thead>
+                                    <tr>
+                                        <th>Domaine</th>
+                                        <th>Statut</th>
+                                        <th>Date d'ajout</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="emailDomainsTableBody">
+                                    <tr><td colspan="4" class="loading">Chargement des domaines...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div id="emailDomainsPagination" class="domains-pagination" style="display: none;">
+                            <span id="domainsCount" class="domains-page-info"></span>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <button class="btn btn-secondary btn-small" id="domainsPrevBtn" disabled>
+                                    <i class="fas fa-chevron-left"></i>
+                                </button>
+                                <span id="domainsPageInfo" class="domains-page-info"></span>
+                                <button class="btn btn-secondary btn-small" id="domainsNextBtn" disabled>
+                                    <i class="fas fa-chevron-right"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -578,27 +562,25 @@
 
             <div class="settings-actions">
                 <button class="btn btn-primary btn-large" id="saveSettingsBtn">
-                    💾 Enregistrer les paramètres
+                    <i class="fas fa-save"></i> Enregistrer les parametres
                 </button>
                 <button class="btn btn-secondary btn-large" id="resetSettingsBtn">
-                    🔄 Réinitialiser
+                    <i class="fas fa-undo"></i> Reinitialiser
                 </button>
             </div>
         </section>
     </main>
 
     <!-- Modals -->
-    
+
     <!-- File Details Modal -->
     <div class="modal" id="fileDetailsModal" style="display: none;">
         <div class="modal-content modal-large">
             <div class="modal-header">
-                <h3>📄 Détails du fichier</h3>
-                <button class="btn btn-close" id="closeFileDetailsBtn">✕</button>
+                <h3><i class="fas fa-file"></i> Details du fichier</h3>
+                <button class="btn btn-close" id="closeFileDetailsBtn">&times;</button>
             </div>
-            <div class="modal-body" id="fileDetailsBody">
-                <!-- Content will be populated dynamically -->
-            </div>
+            <div class="modal-body" id="fileDetailsBody"></div>
         </div>
     </div>
 
@@ -609,7 +591,7 @@
                 <h3 id="confirmTitle">Confirmer l'action</h3>
             </div>
             <div class="modal-body">
-                <p id="confirmMessage">Êtes-vous sûr de vouloir effectuer cette action ?</p>
+                <p id="confirmMessage">Etes-vous sur de vouloir effectuer cette action ?</p>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-danger" id="confirmYesBtn">Confirmer</button>
@@ -622,56 +604,27 @@
     <div class="modal" id="createGuestModal" style="display: none;">
         <div class="modal-content">
             <div class="modal-header">
-                <h3><i class="fas fa-user-plus"></i> Créer un compte invité</h3>
-                <button class="btn btn-close" id="closeCreateGuestBtn">✕</button>
+                <h3><i class="fas fa-user-plus"></i> Creer un compte invite</h3>
+                <button class="btn btn-close" id="closeCreateGuestBtn">&times;</button>
             </div>
             <div class="modal-body">
                 <form id="createGuestForm">
                     <div class="form-group">
-                        <label for="guestEmail">
-                            <i class="fas fa-envelope"></i>
-                            Email de l'invité
-                        </label>
-                        <input
-                            type="email"
-                            id="guestEmail"
-                            name="email"
-                            required
-                            placeholder="invite@example.com"
-                            autocomplete="email"
-                        >
-                        <small class="form-help">
-                            Un code de vérification sera envoyé à cette adresse
-                        </small>
+                        <label><i class="fas fa-envelope"></i> Email de l'invite</label>
+                        <input type="email" id="guestEmail" name="email" required placeholder="invite@example.com" autocomplete="email">
+                        <small style="color: var(--text-secondary);">Un code de verification sera envoye a cette adresse</small>
                     </div>
-
-                    <div class="info-banner" style="margin-top: 1rem;">
-                        <p>
-                            <i class="fas fa-info-circle"></i>
-                            <strong>À propos des comptes invités :</strong>
-                        </p>
-                        <ul style="margin: 0.5rem 0 0 1.5rem; font-size: 0.9rem;">
-                            <li>Valide pendant 3 jours</li>
-                            <li>Code de vérification expire dans 24h</li>
-                            <li>Peut uniquement uploader des fichiers</li>
-                            <li>Suppression automatique à l'expiration</li>
-                        </ul>
-                    </div>
-
-                    <div id="createGuestError" class="error-message" style="display: none; margin-top: 1rem;">
-                        <i class="fas fa-exclamation-triangle"></i>
+                    <div id="createGuestError" class="error-message" style="display: none; margin-top: 1rem; background: #FEE2E2; border: 1px solid #DC2626; border-radius: 8px; padding: 0.75rem;">
+                        <i class="fas fa-exclamation-triangle" style="color: #DC2626;"></i>
                         <span id="createGuestErrorMessage"></span>
                     </div>
                 </form>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-primary" id="submitCreateGuestBtn">
-                    <i class="fas fa-paper-plane"></i>
-                    Créer et envoyer le code
+                    <i class="fas fa-paper-plane"></i> Creer et envoyer le code
                 </button>
-                <button class="btn btn-secondary" id="cancelCreateGuestBtn">
-                    Annuler
-                </button>
+                <button class="btn btn-secondary" id="cancelCreateGuestBtn">Annuler</button>
             </div>
         </div>
     </div>
@@ -680,11 +633,179 @@
     <div class="modal" id="guestDetailsModal" style="display: none;">
         <div class="modal-content modal-large">
             <div class="modal-header">
-                <h3><i class="fas fa-user-clock"></i> Détails de l'invité</h3>
-                <button class="btn btn-close" id="closeGuestDetailsBtn">✕</button>
+                <h3><i class="fas fa-user-clock"></i> Details de l'invite</h3>
+                <button class="btn btn-close" id="closeGuestDetailsBtn">&times;</button>
             </div>
-            <div class="modal-body" id="guestDetailsBody">
-                <!-- Content will be populated dynamically -->
+            <div class="modal-body" id="guestDetailsBody"></div>
+        </div>
+    </div>
+
+    <!-- Create Team Modal -->
+    <div class="modal" id="createTeamModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-users-gear"></i> Creer une equipe</h3>
+                <button class="btn btn-close" id="closeCreateTeamBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Nom technique *</label>
+                    <input type="text" id="teamName" placeholder="backend" required>
+                    <small style="color: var(--text-secondary);">Minuscules, chiffres et tirets uniquement</small>
+                </div>
+                <div class="form-group">
+                    <label>Nom affiche *</label>
+                    <input type="text" id="teamDisplayName" placeholder="Equipe Backend" required>
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="teamDescription" rows="3" placeholder="Description de l'equipe..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="submitCreateTeam">
+                    <i class="fas fa-plus"></i> Creer
+                </button>
+                <button class="btn btn-secondary" id="cancelCreateTeamBtn">Annuler</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create User Modal -->
+    <div class="modal" id="createUserModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-user-plus"></i> Creer un utilisateur</h3>
+                <button class="btn btn-close" id="closeCreateUserBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Nom d'utilisateur *</label>
+                    <input type="text" id="newUserUsername" placeholder="jean.dupont" required>
+                </div>
+                <div class="form-group">
+                    <label>Nom complet</label>
+                    <input type="text" id="newUserFullName" placeholder="Jean Dupont">
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="newUserEmail" placeholder="jean@example.com">
+                </div>
+                <div class="form-group">
+                    <label>Mot de passe *</label>
+                    <input type="password" id="newUserPassword" placeholder="Mot de passe" required>
+                </div>
+                <div class="form-group">
+                    <label>Role</label>
+                    <select id="newUserRole" class="filter-select" style="width: 100%;">
+                        <option value="user">Utilisateur</option>
+                        <option value="april_user">April User (responsable)</option>
+                        <option value="admin">Administrateur</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="submitCreateUser">
+                    <i class="fas fa-plus"></i> Creer
+                </button>
+                <button class="btn btn-secondary" id="cancelCreateUserBtn">Annuler</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit User Modal -->
+    <div class="modal" id="editUserModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-user-edit"></i> Modifier l'utilisateur</h3>
+                <button class="btn btn-close" id="closeEditUserBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editUserId">
+                <div class="form-group">
+                    <label>Nom d'utilisateur</label>
+                    <input type="text" id="editUserUsername" disabled style="opacity: 0.6;">
+                </div>
+                <div class="form-group">
+                    <label>Nom complet</label>
+                    <input type="text" id="editUserFullName" placeholder="Nom complet">
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="text" id="editUserEmail" disabled style="opacity: 0.6;">
+                </div>
+                <div class="form-group">
+                    <label>Role</label>
+                    <select id="editUserRole" class="filter-select" style="width: 100%;">
+                        <option value="user">Utilisateur</option>
+                        <option value="april_user">April User (responsable)</option>
+                        <option value="admin">Administrateur</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="submitEditUser">
+                    <i class="fas fa-save"></i> Enregistrer
+                </button>
+                <button class="btn btn-secondary" id="cancelEditUserBtn">Annuler</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reset Password Modal -->
+    <div class="modal" id="resetPasswordModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-key"></i> Reinitialiser le mot de passe</h3>
+                <button class="btn btn-close" id="closeResetPasswordBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="resetPasswordUserId">
+                <p style="margin-bottom: 16px; color: var(--text-secondary);">
+                    Utilisateur: <strong id="resetPasswordUsername" style="color: var(--text-primary);"></strong>
+                </p>
+                <div class="form-group">
+                    <label>Nouveau mot de passe *</label>
+                    <input type="password" id="resetPasswordInput" placeholder="Nouveau mot de passe" required>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="submitResetPassword">
+                    <i class="fas fa-key"></i> Reinitialiser
+                </button>
+                <button class="btn btn-secondary" id="cancelResetPasswordBtn">Annuler</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Gestion equipes d'un utilisateur -->
+    <div class="modal" id="userTeamsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="userTeamsTitle">Equipes de l'utilisateur</h3>
+                <button class="modal-close" id="closeUserTeamsBtn">&times;</button>
+            </div>
+            <div class="modal-body" id="userTeamsBody">
+                <p class="loading">Chargement...</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelUserTeamsBtn">Fermer</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Details equipe -->
+    <div class="modal" id="teamDetailModal">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h3 id="teamDetailTitle">Details equipe</h3>
+                <button class="modal-close" id="closeTeamDetailBtn">&times;</button>
+            </div>
+            <div class="modal-body" id="teamDetailBody">
+                <p class="loading">Chargement...</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelTeamDetailBtn">Fermer</button>
             </div>
         </div>
     </div>

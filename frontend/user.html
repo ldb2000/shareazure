@@ -20,6 +20,9 @@
                 <h1 class="header-title">Mon espace de stockage</h1>
             </div>
             <div class="header-right">
+                <button class="btn-icon" id="teamFilesBtn" title="Fichiers d'equipe" style="display: none;">
+                    <i class="fas fa-users"></i>
+                </button>
                 <button class="btn-icon" id="shareLinksBtn" title="Mes liens de partage">
                     <i class="fas fa-link"></i>
                 </button>
@@ -120,6 +123,23 @@
                     <div class="loading-state">
                         <div class="spinner"></div>
                         <p>Chargement de vos liens de partage...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Team Files Section (read-only for team members) -->
+            <div class="team-files-section" id="teamFilesSection" style="display: none;">
+                <div class="section-header">
+                    <h2 id="teamFilesSectionTitle">Fichiers d'equipe</h2>
+                    <button class="btn btn-secondary" id="closeTeamFilesBtn">
+                        <i class="fas fa-times"></i>
+                        Fermer
+                    </button>
+                </div>
+                <div class="team-files-container" id="teamFilesContainer">
+                    <div class="loading-state">
+                        <div class="spinner"></div>
+                        <p>Chargement des fichiers d'equipe...</p>
                     </div>
                 </div>
             </div>

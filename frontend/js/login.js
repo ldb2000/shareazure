@@ -8,11 +8,14 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function checkAuthStatus() {
-    const token = localStorage.getItem('userToken') || sessionStorage.getItem('userToken');
+    // Vérifier authToken (unifié) puis fallback sur les anciens tokens
+    const token = localStorage.getItem('authToken') || sessionStorage.getItem('authToken') ||
+                  localStorage.getItem('adminToken') || sessionStorage.getItem('adminToken') ||
+                  localStorage.getItem('userToken') || sessionStorage.getItem('userToken');
     if (token) {
-        verifyToken(token).then(valid => {
-            if (valid) {
-                window.location.href = 'user.html';
+        verifyToken(token).then(data => {
+            if (data) {
+                redirectUser(data.user);
             }
         }).catch(() => {
             // Token invalide, rester sur la page de login
@@ -49,8 +52,7 @@ async function handleLogin() {
     submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Connexion...';
 
     try {
-        // Essayer d'abord la connexion admin
-        let response = await fetch(`${API_URL}/admin/login`, {
+        const response = await fetch(`${API_URL}/auth/login`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -58,41 +60,29 @@ async function handleLogin() {
             body: JSON.stringify({ username, password })
         });
 
-        let data = await response.json();
-        let isAdmin = false;
-
-        // Si échec admin, essayer connexion utilisateur
-        if (!data.success) {
-            response = await fetch(`${API_URL}/user/login`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ username, password })
-            });
-
-            data = await response.json();
-        } else {
-            isAdmin = true;
-        }
+        const data = await response.json();
 
         if (data.success && data.token) {
-            // Stocker le token
             const storage = rememberMe ? localStorage : sessionStorage;
 
-            if (isAdmin) {
+            // Stocker le token unifié
+            storage.setItem('authToken', data.token);
+            storage.setItem('userData', JSON.stringify(data.user));
+
+            // Fallback pour compatibilité avec les anciennes interfaces
+            if (data.user.role === 'admin') {
                 storage.setItem('adminToken', data.token);
-                storage.setItem('adminUsername', username);
-                // Rediriger vers l'interface admin (à la racine)
+                storage.setItem('adminUsername', data.user.username);
+            }
+            storage.setItem('userToken', data.token);
+
+            // Rediriger selon la réponse du serveur
+            if (data.redirect === '/admin/') {
                 window.location.href = '/admin/';
             } else {
-                storage.setItem('userToken', data.token);
-                storage.setItem('userData', JSON.stringify(data.user));
-                // Rediriger vers l'interface utilisateur
-                window.location.href = 'user.html';
+                window.location.href = data.redirect;
             }
         } else {
-            // Afficher l'erreur
             errorMessage.textContent = data.error || 'Identifiants incorrects';
             errorDiv.style.display = 'flex';
             loginForm.querySelector('input[type="password"]').value = '';
@@ -107,6 +97,16 @@ async function handleLogin() {
     }
 }
 
+function redirectUser(user) {
+    if (user.role === 'admin') {
+        window.location.href = '/admin/';
+    } else if (user.isTeamLeader) {
+        window.location.href = 'team.html';
+    } else {
+        window.location.href = 'user.html';
+    }
+}
+
 async function verifyToken(token) {
     try {
         const response = await fetch(`${API_URL}/user/verify`, {
@@ -118,11 +118,12 @@ async function verifyToken(token) {
         });
 
         const data = await response.json();
-        return data.success === true;
+        if (data.success) {
+            return data;
+        }
+        return null;
     } catch (error) {
         console.error('Erreur vérification token:', error);
-        return false;
+        return null;
     }
 }
-
-
