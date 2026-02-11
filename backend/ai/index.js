@@ -618,6 +618,26 @@ router.post('/transcribe/:blobName(*)', async (req, res) => {
   }
 });
 
+// GET /api/ai/transcription/:blobName/search — Search within transcription
+// NOTE: Must be defined before the generic /transcription/:blobName(*) route
+// because the (*) wildcard would greedily match the /search suffix
+router.get('/transcription/:blobName(*)/search', (req, res) => {
+  try {
+    const { blobName } = req.params;
+    const { q } = req.query;
+
+    if (!q) {
+      return res.status(400).json({ success: false, error: 'Query parameter q is required' });
+    }
+
+    const matches = transcriptionsDb.search(blobName, q);
+    res.json({ success: true, matches, count: matches.length });
+  } catch (error) {
+    console.error('Transcription search error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // GET /api/ai/transcription/:blobName — Get transcription
 router.get('/transcription/:blobName(*)', (req, res) => {
   try {
@@ -637,24 +657,6 @@ router.get('/transcription/:blobName(*)', (req, res) => {
     });
   } catch (error) {
     console.error('Get transcription error:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// GET /api/ai/transcription/:blobName/search — Search within transcription
-router.get('/transcription/:blobName(*)/search', (req, res) => {
-  try {
-    const { blobName } = req.params;
-    const { q } = req.query;
-
-    if (!q) {
-      return res.status(400).json({ success: false, error: 'Query parameter q is required' });
-    }
-
-    const matches = transcriptionsDb.search(blobName, q);
-    res.json({ success: true, matches, count: matches.length });
-  } catch (error) {
-    console.error('Transcription search error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
