@@ -8,8 +8,10 @@ ShareAzure is a web application for uploading, managing, and sharing files via A
 
 **Tech Stack:**
 - Backend: Node.js/Express with Azure Blob Storage SDK
+- AI/Multimedia: OpenAI GPT-4 Vision (semantic analysis), Azure AI Vision (structural detection), Whisper (transcription)
+- Media Processing: sharp (thumbnails/images), fluent-ffmpeg (video frames/audio extraction)
 - Frontend: Vanilla JavaScript (ES6+), HTML5, CSS3
-- Database: SQLite (better-sqlite3) for share links, downloads, settings, and email domains
+- Database: SQLite (better-sqlite3) with FTS5 for full-text search
 - Storage: Azure Blob Storage
 - Security: Helmet.js, CORS, rate limiting, bcrypt for passwords
 
@@ -20,7 +22,18 @@ shareazure/
 ├── backend/           # Express API server
 │   ├── server.js      # Main server with all API endpoints
 │   ├── database.js    # SQLite database schema and helpers
-│   └── test-connection.js  # Azure connection test utility
+│   ├── test-connection.js  # Azure connection test utility
+│   └── ai/            # AI/Multimedia analysis module
+│       ├── index.js              # Express router (mounted on /api/ai and /api/admin/ai)
+│       ├── openaiService.js      # OpenAI GPT-4 Vision: analyzeImage, generateTags, describeScene
+│       ├── azureVisionService.js # Azure AI Vision: detectFaces, detectObjects, ocr
+│       ├── mediaProcessor.js     # sharp (thumbnails), ffmpeg (video frames, audio extraction)
+│       ├── analysisOrchestrator.js # Orchestrates full file analysis (dispatch by type)
+│       ├── searchService.js      # FTS5 search + filters
+│       ├── faceService.js        # Face gallery, grouping, naming
+│       ├── albumService.js       # Smart albums (auto rules + manual)
+│       ├── transcriptionService.js # Whisper API for audio/video
+│       └── jobQueue.js           # p-queue wrapper with metrics
 ├── frontend/          # User interface
 │   ├── index.html     # Main upload page
 │   ├── app.js         # Upload/file management logic
@@ -129,6 +142,16 @@ sqlite3 shareazure.db
 - `MAX_FILE_SIZE_MB` - Max file size, now stored in database settings (default: 100)
 - `APPLICATIONINSIGHTS_CONNECTION_STRING` - Azure monitoring
 
+**AI/Multimedia (optional):**
+- `OPENAI_API_KEY` - OpenAI API key for GPT-4 Vision and Whisper
+- `OPENAI_MODEL` - OpenAI model (default: `gpt-4o`)
+- `OPENAI_WHISPER_MODEL` - Whisper model (default: `whisper-1`)
+- `AZURE_VISION_ENDPOINT` - Azure AI Vision endpoint URL
+- `AZURE_VISION_KEY` - Azure AI Vision API key
+- `FFMPEG_PATH` - Custom ffmpeg path (optional)
+- `AI_MAX_CONCURRENT_JOBS` - Max concurrent AI jobs (default: 3)
+- `AI_AUTO_ANALYZE_ON_UPLOAD` - Auto-analyze on upload (default: false)
+
 ### Settings Database
 
 Many settings are now stored in the SQLite `settings` table rather than environment variables:
@@ -137,6 +160,18 @@ Many settings are now stored in the SQLite `settings` table rather than environm
 - `defaultShareLinkExpiration` - Default expiration for share links
 - `requireEmailForSharing` - Whether email is required for sharing
 - `validateEmailDomains` - Whether to validate email domains
+
+**AI Settings (category `ai`):**
+- `aiEnabled`, `openaiEnabled`, `azureVisionEnabled` - Feature toggles
+- `autoAnalyzeOnUpload` - Auto-analyze uploaded media files
+- `maxConcurrentAnalysis` - Max concurrent AI jobs
+- `openaiModel`, `whisperModel`, `whisperLanguage` - Model configuration
+- `faceRecognitionEnabled`, `faceMinConfidence` - Face detection settings
+- `videoTimelineEnabled`, `videoFrameInterval` - Video analysis settings
+- `transcriptionEnabled` - Audio/video transcription toggle
+- `smartAlbumsEnabled`, `searchEnabled` - Feature toggles
+- `aiMonthlyBudget`, `aiCostAlertThreshold` - Cost management
+- `thumbnailSize`, `thumbnailQuality` - Thumbnail generation settings
 
 ## Code Structure Notes
 
@@ -179,6 +214,53 @@ All defined in `backend/server.js`:
 - `PUT /api/admin/email-domains/:domain/activate` - Activate domain
 - `PUT /api/admin/email-domains/:domain/deactivate` - Deactivate domain
 
+**AI/Multimedia Endpoints (`/api/ai/`):**
+
+*Analysis:*
+- `POST /api/ai/analyze/:blobName` - Launch AI analysis (async, returns jobId)
+- `POST /api/ai/analyze-batch` - Batch analysis of multiple files
+- `GET /api/ai/analysis/:blobName` - Get analysis results
+- `DELETE /api/ai/analysis/:blobName` - Delete analysis data
+- `GET /api/ai/job/:jobId` - Get job status
+
+*Search:*
+- `GET /api/ai/search?q=...` - Semantic search (query, filters: type, date, tags, faces)
+- `GET /api/ai/search/suggestions?q=...` - Auto-complete suggestions
+- `GET /api/ai/tags` - List all tags with counts
+- `GET /api/ai/tags/:tag/files` - Files associated with a tag
+
+*Faces:*
+- `GET /api/ai/faces` - Gallery of face profiles
+- `POST /api/ai/faces` - Create a face profile
+- `PUT /api/ai/faces/:profileId` - Rename a profile
+- `DELETE /api/ai/faces/:profileId` - Delete a profile
+- `POST /api/ai/faces/:profileId/merge` - Merge two profiles
+- `GET /api/ai/faces/:profileId/files` - Files where person appears
+
+*Smart Albums:*
+- `GET /api/ai/albums` - List albums
+- `POST /api/ai/albums` - Create album (manual or with auto rules)
+- `PUT /api/ai/albums/:albumId` - Update album
+- `DELETE /api/ai/albums/:albumId` - Delete album
+- `POST /api/ai/albums/:albumId/items` - Add items
+- `DELETE /api/ai/albums/:albumId/items/:blobName` - Remove item
+- `GET /api/ai/albums/:albumId/items` - List album items
+
+*Video:*
+- `GET /api/ai/video/:blobName/timeline` - Timeline with markers
+- `GET /api/ai/video/:blobName/thumbnail/:timestamp` - Thumbnail at timestamp
+
+*Transcription:*
+- `POST /api/ai/transcribe/:blobName` - Launch transcription (async)
+- `GET /api/ai/transcription/:blobName` - Get transcription
+- `GET /api/ai/transcription/:blobName/search?q=...` - Search within transcription
+
+*Admin AI (`/api/admin/ai/`):*
+- `GET /api/admin/ai/dashboard` - AI stats (analyses, costs, top tags, queue)
+- `GET /api/admin/ai/costs` - Detailed costs by service/model/period
+- `PUT /api/admin/ai/settings` - Configure AI settings
+- `POST /api/admin/ai/reindex` - Rebuild FTS5 search index
+
 ### Database Helpers
 
 Defined in `backend/database.js`:
@@ -210,6 +292,61 @@ allowedEmailDomainsDb.getActive()
 allowedEmailDomainsDb.delete(domain)
 allowedEmailDomainsDb.activate(domain)
 allowedEmailDomainsDb.deactivate(domain)
+
+// AI - Media Analysis
+mediaAnalysisDb.create(data)
+mediaAnalysisDb.getByBlobName(blobName)
+mediaAnalysisDb.update(blobName, data)
+mediaAnalysisDb.delete(blobName)
+mediaAnalysisDb.getAll(limit)
+mediaAnalysisDb.getByStatus(status)
+mediaAnalysisDb.getStats()
+
+// AI - Face Profiles
+faceProfilesDb.create(data)
+faceProfilesDb.getById(id)
+faceProfilesDb.getAll()
+faceProfilesDb.update(id, data)
+faceProfilesDb.delete(id)
+faceProfilesDb.merge(targetId, sourceId)
+
+// AI - Face Occurrences
+faceOccurrencesDb.create(data)
+faceOccurrencesDb.getByBlobName(blobName)
+faceOccurrencesDb.getByProfile(profileId)
+
+// AI - Smart Albums
+smartAlbumsDb.create(data)
+smartAlbumsDb.getById(id)
+smartAlbumsDb.getAll()
+smartAlbumsDb.update(id, data)
+smartAlbumsDb.delete(id)
+smartAlbumsDb.addItem(albumId, blobName, addedBy)
+smartAlbumsDb.removeItem(albumId, blobName)
+smartAlbumsDb.getItems(albumId)
+
+// AI - Transcriptions
+transcriptionsDb.create(data)
+transcriptionsDb.getByBlobName(blobName)
+transcriptionsDb.update(blobName, data)
+transcriptionsDb.delete(blobName)
+transcriptionsDb.search(blobName, query)
+
+// AI - Video Markers
+videoMarkersDb.create(data)
+videoMarkersDb.getByBlobName(blobName)
+videoMarkersDb.deleteByBlobName(blobName)
+
+// AI - Cost Tracking
+aiCostTrackingDb.log(data)
+aiCostTrackingDb.getCostSummary(startDate, endDate)
+aiCostTrackingDb.getMonthlyTotal()
+
+// AI - Search Index (FTS5)
+searchIndexDb.upsert(data)
+searchIndexDb.search(query, limit)
+searchIndexDb.delete(blobName)
+searchIndexDb.rebuild()
 ```
 
 ### Frontend Structure
@@ -371,4 +508,5 @@ L'ensemble des documents doivent etre sous le repertoire docs/
 - **docs/ADMIN_INTERFACE.md** - Admin interface guide
 - **docs/API_EXAMPLES.md** - API curl examples
 - **docs/CUSTOMIZATION.md** - Customization guide
+- **docs/AI_FEATURES.md** - AI/Multimedia features documentation
 - **infrastructure/README.md** - Terraform deployment guide

@@ -552,6 +552,22 @@ app.post('/api/upload', authenticateUserOrGuest, upload.single('file'), validate
       }
     });
 
+    // Auto-analyze with AI if enabled (fire-and-forget)
+    try {
+      const autoAnalyze = settingsDb.get('autoAnalyzeOnUpload');
+      if (autoAnalyze === 'true') {
+        const { isSupported } = require('./ai/mediaProcessor');
+        if (isSupported(req.file.mimetype)) {
+          const analysisOrchestrator = require('./ai/analysisOrchestrator');
+          analysisOrchestrator.analyzeFile(blobName, req.file.mimetype, () => getBlobBufferHelper(blobName))
+            .catch(err => console.error('Auto-analyze error:', err.message));
+        }
+      }
+    } catch (aiErr) {
+      // AI auto-analyze is optional, don't fail the upload
+      console.error('Auto-analyze setup error:', aiErr.message);
+    }
+
   } catch (error) {
     console.error('Erreur upload:', error);
     logOperation('upload_error', { error: error.message });
@@ -1997,6 +2013,30 @@ app.put('/api/admin/email-domains/:domain/deactivate', async (req, res) => {
     });
   }
 });
+
+// ============================================
+// AI / MULTIMEDIA ROUTES
+// ============================================
+const { router: aiRouter, adminRouter: aiAdminRouter, configure: configureAi } = require('./ai');
+
+// Helper to download a blob buffer from Azure
+async function getBlobBufferHelper(blobName) {
+  const containerClient = blobServiceClient.getContainerClient(containerName);
+  const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+  const downloadResponse = await blockBlobClient.download();
+  return streamToBuffer(downloadResponse.readableStreamBody);
+}
+
+configureAi({
+  getBlobBuffer: getBlobBufferHelper,
+  getContainerClient: () => blobServiceClient.getContainerClient(containerName)
+});
+
+app.use('/api/ai', aiRouter);
+app.use('/api/admin/ai', aiAdminRouter);
+
+// Serve AI thumbnails
+app.use('/api/ai/thumbnails', express.static(path.join(__dirname, 'thumbnails')));
 
 // Gestion des erreurs
 app.use((err, req, res, next) => {

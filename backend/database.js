@@ -261,6 +261,131 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_file_tiers_current_tier ON file_tiers(current_tier);
   CREATE INDEX IF NOT EXISTS idx_file_tiers_rehydration_status ON file_tiers(rehydration_status);
 
+  -- Table pour les résultats d'analyse IA par fichier
+  CREATE TABLE IF NOT EXISTS media_analysis (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    blob_name TEXT NOT NULL,
+    analysis_type TEXT NOT NULL CHECK(analysis_type IN ('image', 'video', 'audio')),
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'processing', 'completed', 'failed')),
+    openai_result TEXT,
+    azure_result TEXT,
+    tags TEXT,
+    description TEXT,
+    confidence REAL,
+    thumbnail_path TEXT,
+    error_message TEXT,
+    analyzed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_media_analysis_blob_name ON media_analysis(blob_name);
+  CREATE INDEX IF NOT EXISTS idx_media_analysis_status ON media_analysis(status);
+  CREATE INDEX IF NOT EXISTS idx_media_analysis_type ON media_analysis(analysis_type);
+
+  -- Table pour les profils de visages (galerie)
+  CREATE TABLE IF NOT EXISTS face_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    sample_encoding TEXT,
+    created_by TEXT,
+    photo_count INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_face_profiles_name ON face_profiles(name);
+
+  -- Table pour les occurrences de visages détectés
+  CREATE TABLE IF NOT EXISTS face_occurrences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    blob_name TEXT NOT NULL,
+    face_profile_id INTEGER,
+    bounding_box TEXT,
+    confidence REAL,
+    timestamp REAL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (face_profile_id) REFERENCES face_profiles(id) ON DELETE SET NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_face_occurrences_blob_name ON face_occurrences(blob_name);
+  CREATE INDEX IF NOT EXISTS idx_face_occurrences_profile ON face_occurrences(face_profile_id);
+
+  -- Table pour les albums intelligents
+  CREATE TABLE IF NOT EXISTS smart_albums (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    rules TEXT,
+    type TEXT NOT NULL DEFAULT 'manual' CHECK(type IN ('auto', 'manual')),
+    cover_blob_name TEXT,
+    created_by TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_smart_albums_type ON smart_albums(type);
+
+  -- Table pour les items dans un album
+  CREATE TABLE IF NOT EXISTS smart_album_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    album_id INTEGER NOT NULL,
+    blob_name TEXT NOT NULL,
+    added_at TEXT NOT NULL DEFAULT (datetime('now')),
+    added_by TEXT,
+    FOREIGN KEY (album_id) REFERENCES smart_albums(id) ON DELETE CASCADE,
+    UNIQUE(album_id, blob_name)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_smart_album_items_album ON smart_album_items(album_id);
+  CREATE INDEX IF NOT EXISTS idx_smart_album_items_blob ON smart_album_items(blob_name);
+
+  -- Table pour les transcriptions audio/vidéo
+  CREATE TABLE IF NOT EXISTS transcriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    blob_name TEXT NOT NULL,
+    language TEXT,
+    text TEXT,
+    segments TEXT,
+    duration REAL,
+    model TEXT,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'processing', 'completed', 'failed')),
+    error_message TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_transcriptions_blob_name ON transcriptions(blob_name);
+
+  -- Table pour les marqueurs timeline vidéo
+  CREATE TABLE IF NOT EXISTS video_markers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    blob_name TEXT NOT NULL,
+    timestamp REAL NOT NULL,
+    type TEXT NOT NULL CHECK(type IN ('scene', 'face', 'keyword', 'silence')),
+    label TEXT,
+    thumbnail_path TEXT,
+    data TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_video_markers_blob_name ON video_markers(blob_name);
+  CREATE INDEX IF NOT EXISTS idx_video_markers_type ON video_markers(type);
+
+  -- Table pour le suivi des coûts IA
+  CREATE TABLE IF NOT EXISTS ai_cost_tracking (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    service TEXT NOT NULL CHECK(service IN ('openai', 'azure_vision', 'whisper')),
+    model TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    input_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
+    cost REAL DEFAULT 0,
+    blob_name TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_ai_cost_tracking_service ON ai_cost_tracking(service);
+  CREATE INDEX IF NOT EXISTS idx_ai_cost_tracking_created_at ON ai_cost_tracking(created_at);
+
   -- Insérer les valeurs par défaut si elles n'existent pas
   INSERT OR IGNORE INTO settings (key, value, category, description) VALUES
     ('maxFileSizeMB', '100', 'storage', 'Taille maximale des fichiers en MB'),
@@ -278,7 +403,26 @@ db.exec(`
     ('guestAccountExpirationDays', '3', 'guest', 'Durée d''expiration des comptes invités en jours'),
     ('guestCodeExpirationHours', '24', 'guest', 'Durée d''expiration des codes de vérification en heures'),
     ('guestCodeLength', '6', 'guest', 'Longueur du code de vérification'),
-    ('enableGuestAccounts', 'true', 'guest', 'Activer le système de comptes invités');
+    ('enableGuestAccounts', 'true', 'guest', 'Activer le système de comptes invités'),
+    ('aiEnabled', 'true', 'ai', 'Activer les fonctionnalités IA'),
+    ('openaiEnabled', 'true', 'ai', 'Activer OpenAI GPT-4 Vision'),
+    ('azureVisionEnabled', 'true', 'ai', 'Activer Azure AI Vision'),
+    ('autoAnalyzeOnUpload', 'false', 'ai', 'Analyser automatiquement les fichiers à l''upload'),
+    ('maxConcurrentAnalysis', '3', 'ai', 'Nombre max de jobs IA simultanés'),
+    ('openaiModel', 'gpt-4o', 'ai', 'Modèle OpenAI pour l''analyse d''image'),
+    ('whisperModel', 'whisper-1', 'ai', 'Modèle Whisper pour la transcription'),
+    ('whisperLanguage', 'fr', 'ai', 'Langue par défaut pour la transcription'),
+    ('faceRecognitionEnabled', 'true', 'ai', 'Activer la reconnaissance faciale'),
+    ('faceMinConfidence', '0.7', 'ai', 'Confiance minimale pour la détection faciale'),
+    ('videoTimelineEnabled', 'true', 'ai', 'Activer la timeline vidéo'),
+    ('videoFrameInterval', '5', 'ai', 'Intervalle entre frames extraites (secondes)'),
+    ('transcriptionEnabled', 'true', 'ai', 'Activer la transcription audio/vidéo'),
+    ('smartAlbumsEnabled', 'true', 'ai', 'Activer les albums intelligents'),
+    ('searchEnabled', 'true', 'ai', 'Activer la recherche sémantique'),
+    ('aiMonthlyBudget', '50', 'ai', 'Budget mensuel IA en dollars'),
+    ('aiCostAlertThreshold', '80', 'ai', 'Seuil d''alerte coûts IA (% du budget)'),
+    ('thumbnailSize', '300', 'ai', 'Taille des thumbnails (pixels)'),
+    ('thumbnailQuality', '80', 'ai', 'Qualité des thumbnails (0-100)');
 `);
 
 console.log('✅ Base de données initialisée:', dbPath);
@@ -1430,6 +1574,510 @@ const fileTiersDb = {
   }
 };
 
+// ============================================================================
+// FTS5 Search Index (virtual table)
+// ============================================================================
+try {
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
+      blob_name,
+      tags,
+      description,
+      transcription,
+      ocr_text,
+      faces,
+      content='',
+      tokenize='unicode61'
+    );
+  `);
+} catch (error) {
+  console.error('⚠️  Erreur lors de la création de la table FTS5:', error.message);
+}
+
+// ============================================================================
+// AI Database Helpers
+// ============================================================================
+
+// Media Analysis
+const mediaAnalysisDb = {
+  create: (data) => {
+    const stmt = db.prepare(`
+      INSERT INTO media_analysis (blob_name, analysis_type, status)
+      VALUES (?, ?, 'pending')
+    `);
+    return stmt.run(data.blobName, data.analysisType);
+  },
+
+  getByBlobName: (blobName) => {
+    const stmt = db.prepare(`SELECT * FROM media_analysis WHERE blob_name = ?`);
+    return stmt.get(blobName);
+  },
+
+  update: (blobName, data) => {
+    const fields = [];
+    const values = [];
+    for (const [key, value] of Object.entries(data)) {
+      const col = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+      fields.push(`${col} = ?`);
+      values.push(typeof value === 'object' && value !== null ? JSON.stringify(value) : value);
+    }
+    values.push(blobName);
+    const stmt = db.prepare(`UPDATE media_analysis SET ${fields.join(', ')} WHERE blob_name = ?`);
+    return stmt.run(...values);
+  },
+
+  delete: (blobName) => {
+    const stmt = db.prepare(`DELETE FROM media_analysis WHERE blob_name = ?`);
+    return stmt.run(blobName);
+  },
+
+  getAll: (limit = 100) => {
+    const stmt = db.prepare(`SELECT * FROM media_analysis ORDER BY created_at DESC LIMIT ?`);
+    return stmt.all(limit);
+  },
+
+  getByStatus: (status) => {
+    const stmt = db.prepare(`SELECT * FROM media_analysis WHERE status = ? ORDER BY created_at ASC`);
+    return stmt.all(status);
+  },
+
+  getStats: () => {
+    const stmt = db.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) as processing,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending
+      FROM media_analysis
+    `);
+    return stmt.get();
+  }
+};
+
+// Face Profiles
+const faceProfilesDb = {
+  create: (data) => {
+    const stmt = db.prepare(`
+      INSERT INTO face_profiles (name, sample_encoding, created_by)
+      VALUES (?, ?, ?)
+    `);
+    return stmt.run(data.name, data.sampleEncoding || null, data.createdBy || null);
+  },
+
+  getById: (id) => {
+    const stmt = db.prepare(`SELECT * FROM face_profiles WHERE id = ?`);
+    return stmt.get(id);
+  },
+
+  getAll: () => {
+    const stmt = db.prepare(`SELECT * FROM face_profiles ORDER BY name ASC`);
+    return stmt.all();
+  },
+
+  update: (id, data) => {
+    const stmt = db.prepare(`
+      UPDATE face_profiles SET name = ?, updated_at = datetime('now') WHERE id = ?
+    `);
+    return stmt.run(data.name, id);
+  },
+
+  delete: (id) => {
+    const stmt = db.prepare(`DELETE FROM face_profiles WHERE id = ?`);
+    return stmt.run(id);
+  },
+
+  updatePhotoCount: (id) => {
+    const stmt = db.prepare(`
+      UPDATE face_profiles
+      SET photo_count = (SELECT COUNT(DISTINCT blob_name) FROM face_occurrences WHERE face_profile_id = ?)
+      WHERE id = ?
+    `);
+    return stmt.run(id, id);
+  },
+
+  merge: (targetId, sourceId) => {
+    const transaction = db.transaction(() => {
+      db.prepare(`UPDATE face_occurrences SET face_profile_id = ? WHERE face_profile_id = ?`).run(targetId, sourceId);
+      db.prepare(`DELETE FROM face_profiles WHERE id = ?`).run(sourceId);
+      db.prepare(`
+        UPDATE face_profiles
+        SET photo_count = (SELECT COUNT(DISTINCT blob_name) FROM face_occurrences WHERE face_profile_id = ?),
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).run(targetId, targetId);
+    });
+    return transaction();
+  }
+};
+
+// Face Occurrences
+const faceOccurrencesDb = {
+  create: (data) => {
+    const stmt = db.prepare(`
+      INSERT INTO face_occurrences (blob_name, face_profile_id, bounding_box, confidence, timestamp)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    return stmt.run(
+      data.blobName,
+      data.faceProfileId || null,
+      data.boundingBox ? JSON.stringify(data.boundingBox) : null,
+      data.confidence || null,
+      data.timestamp || null
+    );
+  },
+
+  getByBlobName: (blobName) => {
+    const stmt = db.prepare(`
+      SELECT fo.*, fp.name as face_name
+      FROM face_occurrences fo
+      LEFT JOIN face_profiles fp ON fo.face_profile_id = fp.id
+      WHERE fo.blob_name = ?
+    `);
+    return stmt.all(blobName);
+  },
+
+  getByProfile: (profileId) => {
+    const stmt = db.prepare(`
+      SELECT DISTINCT blob_name FROM face_occurrences WHERE face_profile_id = ? ORDER BY created_at DESC
+    `);
+    return stmt.all(profileId);
+  },
+
+  deleteByBlobName: (blobName) => {
+    const stmt = db.prepare(`DELETE FROM face_occurrences WHERE blob_name = ?`);
+    return stmt.run(blobName);
+  }
+};
+
+// Smart Albums
+const smartAlbumsDb = {
+  create: (data) => {
+    const stmt = db.prepare(`
+      INSERT INTO smart_albums (name, description, rules, type, cover_blob_name, created_by)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    return stmt.run(
+      data.name,
+      data.description || null,
+      data.rules ? JSON.stringify(data.rules) : null,
+      data.type || 'manual',
+      data.coverBlobName || null,
+      data.createdBy || null
+    );
+  },
+
+  getById: (id) => {
+    const stmt = db.prepare(`
+      SELECT sa.*, COUNT(sai.id) as item_count
+      FROM smart_albums sa
+      LEFT JOIN smart_album_items sai ON sa.id = sai.album_id
+      WHERE sa.id = ?
+      GROUP BY sa.id
+    `);
+    return stmt.get(id);
+  },
+
+  getAll: () => {
+    const stmt = db.prepare(`
+      SELECT sa.*, COUNT(sai.id) as item_count
+      FROM smart_albums sa
+      LEFT JOIN smart_album_items sai ON sa.id = sai.album_id
+      GROUP BY sa.id
+      ORDER BY sa.created_at DESC
+    `);
+    return stmt.all();
+  },
+
+  update: (id, data) => {
+    const stmt = db.prepare(`
+      UPDATE smart_albums
+      SET name = ?, description = ?, rules = ?, cover_blob_name = ?, updated_at = datetime('now')
+      WHERE id = ?
+    `);
+    return stmt.run(
+      data.name,
+      data.description || null,
+      data.rules ? JSON.stringify(data.rules) : null,
+      data.coverBlobName || null,
+      id
+    );
+  },
+
+  delete: (id) => {
+    const stmt = db.prepare(`DELETE FROM smart_albums WHERE id = ?`);
+    return stmt.run(id);
+  },
+
+  addItem: (albumId, blobName, addedBy) => {
+    const stmt = db.prepare(`
+      INSERT OR IGNORE INTO smart_album_items (album_id, blob_name, added_by)
+      VALUES (?, ?, ?)
+    `);
+    return stmt.run(albumId, blobName, addedBy || null);
+  },
+
+  removeItem: (albumId, blobName) => {
+    const stmt = db.prepare(`DELETE FROM smart_album_items WHERE album_id = ? AND blob_name = ?`);
+    return stmt.run(albumId, blobName);
+  },
+
+  getItems: (albumId) => {
+    const stmt = db.prepare(`
+      SELECT sai.*, ma.description, ma.tags, ma.thumbnail_path
+      FROM smart_album_items sai
+      LEFT JOIN media_analysis ma ON sai.blob_name = ma.blob_name
+      WHERE sai.album_id = ?
+      ORDER BY sai.added_at DESC
+    `);
+    return stmt.all(albumId);
+  }
+};
+
+// Transcriptions
+const transcriptionsDb = {
+  create: (data) => {
+    const stmt = db.prepare(`
+      INSERT INTO transcriptions (blob_name, language, model, status)
+      VALUES (?, ?, ?, 'pending')
+    `);
+    return stmt.run(data.blobName, data.language || null, data.model || null);
+  },
+
+  getByBlobName: (blobName) => {
+    const stmt = db.prepare(`SELECT * FROM transcriptions WHERE blob_name = ?`);
+    return stmt.get(blobName);
+  },
+
+  update: (blobName, data) => {
+    const fields = [];
+    const values = [];
+    for (const [key, value] of Object.entries(data)) {
+      const col = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+      fields.push(`${col} = ?`);
+      values.push(typeof value === 'object' && value !== null ? JSON.stringify(value) : value);
+    }
+    values.push(blobName);
+    const stmt = db.prepare(`UPDATE transcriptions SET ${fields.join(', ')} WHERE blob_name = ?`);
+    return stmt.run(...values);
+  },
+
+  delete: (blobName) => {
+    const stmt = db.prepare(`DELETE FROM transcriptions WHERE blob_name = ?`);
+    return stmt.run(blobName);
+  },
+
+  search: (blobName, query) => {
+    const transcription = transcriptionsDb.getByBlobName(blobName);
+    if (!transcription || !transcription.segments) return [];
+    const segments = JSON.parse(transcription.segments);
+    const lowerQuery = query.toLowerCase();
+    return segments.filter(s => s.text && s.text.toLowerCase().includes(lowerQuery));
+  }
+};
+
+// Video Markers
+const videoMarkersDb = {
+  create: (data) => {
+    const stmt = db.prepare(`
+      INSERT INTO video_markers (blob_name, timestamp, type, label, thumbnail_path, data)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    return stmt.run(
+      data.blobName,
+      data.timestamp,
+      data.type,
+      data.label || null,
+      data.thumbnailPath || null,
+      data.data ? JSON.stringify(data.data) : null
+    );
+  },
+
+  getByBlobName: (blobName) => {
+    const stmt = db.prepare(`SELECT * FROM video_markers WHERE blob_name = ? ORDER BY timestamp ASC`);
+    return stmt.all(blobName);
+  },
+
+  getByBlobNameAndType: (blobName, type) => {
+    const stmt = db.prepare(`SELECT * FROM video_markers WHERE blob_name = ? AND type = ? ORDER BY timestamp ASC`);
+    return stmt.all(blobName, type);
+  },
+
+  deleteByBlobName: (blobName) => {
+    const stmt = db.prepare(`DELETE FROM video_markers WHERE blob_name = ?`);
+    return stmt.run(blobName);
+  }
+};
+
+// AI Cost Tracking
+const aiCostTrackingDb = {
+  log: (data) => {
+    const stmt = db.prepare(`
+      INSERT INTO ai_cost_tracking (service, model, operation, input_tokens, output_tokens, cost, blob_name)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    return stmt.run(
+      data.service,
+      data.model,
+      data.operation,
+      data.inputTokens || 0,
+      data.outputTokens || 0,
+      data.cost || 0,
+      data.blobName || null
+    );
+  },
+
+  getByPeriod: (startDate, endDate) => {
+    const stmt = db.prepare(`
+      SELECT * FROM ai_cost_tracking
+      WHERE created_at >= ? AND created_at <= ?
+      ORDER BY created_at DESC
+    `);
+    return stmt.all(startDate, endDate);
+  },
+
+  getCostSummary: (startDate, endDate) => {
+    const stmt = db.prepare(`
+      SELECT
+        service,
+        model,
+        COUNT(*) as call_count,
+        SUM(input_tokens) as total_input_tokens,
+        SUM(output_tokens) as total_output_tokens,
+        SUM(cost) as total_cost
+      FROM ai_cost_tracking
+      WHERE created_at >= ? AND created_at <= ?
+      GROUP BY service, model
+    `);
+    return stmt.all(startDate, endDate);
+  },
+
+  getMonthlyTotal: () => {
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+    const stmt = db.prepare(`
+      SELECT COALESCE(SUM(cost), 0) as total_cost
+      FROM ai_cost_tracking
+      WHERE created_at >= ?
+    `);
+    return stmt.get(startOfMonth.toISOString());
+  },
+
+  getTopOperations: (limit = 10) => {
+    const stmt = db.prepare(`
+      SELECT operation, COUNT(*) as count, SUM(cost) as total_cost
+      FROM ai_cost_tracking
+      GROUP BY operation
+      ORDER BY total_cost DESC
+      LIMIT ?
+    `);
+    return stmt.all(limit);
+  }
+};
+
+// Search Index (FTS5)
+const searchIndexDb = {
+  upsert: (data) => {
+    // Delete existing entry first, then insert
+    const transaction = db.transaction(() => {
+      try {
+        db.prepare(`DELETE FROM search_index WHERE blob_name = ?`).run(data.blobName);
+      } catch (e) { /* ignore if not found */ }
+      db.prepare(`
+        INSERT INTO search_index (blob_name, tags, description, transcription, ocr_text, faces)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(
+        data.blobName,
+        data.tags || '',
+        data.description || '',
+        data.transcription || '',
+        data.ocrText || '',
+        data.faces || ''
+      );
+    });
+    return transaction();
+  },
+
+  search: (query, limit = 50) => {
+    const stmt = db.prepare(`
+      SELECT blob_name, rank,
+        snippet(search_index, 1, '<mark>', '</mark>', '...', 30) as tags_match,
+        snippet(search_index, 2, '<mark>', '</mark>', '...', 30) as description_match,
+        snippet(search_index, 3, '<mark>', '</mark>', '...', 30) as transcription_match,
+        snippet(search_index, 4, '<mark>', '</mark>', '...', 30) as ocr_match,
+        snippet(search_index, 5, '<mark>', '</mark>', '...', 30) as faces_match
+      FROM search_index
+      WHERE search_index MATCH ?
+      ORDER BY rank
+      LIMIT ?
+    `);
+    return stmt.all(query, limit);
+  },
+
+  delete: (blobName) => {
+    try {
+      const stmt = db.prepare(`DELETE FROM search_index WHERE blob_name = ?`);
+      return stmt.run(blobName);
+    } catch (e) { /* ignore */ }
+  },
+
+  rebuild: () => {
+    const transaction = db.transaction(() => {
+      // Clear the index
+      try {
+        db.exec(`DELETE FROM search_index`);
+      } catch (e) { /* ignore */ }
+
+      // Re-index all analyzed media
+      const analyses = db.prepare(`SELECT * FROM media_analysis WHERE status = 'completed'`).all();
+      for (const analysis of analyses) {
+        const transcription = db.prepare(`SELECT text FROM transcriptions WHERE blob_name = ?`).get(analysis.blob_name);
+        const faces = db.prepare(`
+          SELECT GROUP_CONCAT(DISTINCT fp.name) as names
+          FROM face_occurrences fo
+          JOIN face_profiles fp ON fo.face_profile_id = fp.id
+          WHERE fo.blob_name = ?
+        `).get(analysis.blob_name);
+
+        let ocrText = '';
+        if (analysis.azure_result) {
+          try {
+            const azureResult = JSON.parse(analysis.azure_result);
+            ocrText = azureResult.ocrText || '';
+          } catch (e) { /* ignore */ }
+        }
+
+        searchIndexDb.upsert({
+          blobName: analysis.blob_name,
+          tags: analysis.tags || '',
+          description: analysis.description || '',
+          transcription: transcription ? transcription.text : '',
+          ocrText,
+          faces: faces ? faces.names : ''
+        });
+      }
+    });
+    return transaction();
+  },
+
+  getSuggestions: (prefix, limit = 10) => {
+    // Search across tags for suggestions
+    const stmt = db.prepare(`
+      SELECT DISTINCT blob_name, tags, description
+      FROM search_index
+      WHERE tags MATCH ? OR description MATCH ?
+      LIMIT ?
+    `);
+    const ftsQuery = `${prefix}*`;
+    try {
+      return stmt.all(ftsQuery, ftsQuery, limit);
+    } catch (e) {
+      return [];
+    }
+  }
+};
+
 module.exports = {
   db,
   shareLinksDb,
@@ -1443,5 +2091,13 @@ module.exports = {
   teamMembersDb,
   costTrackingDb,
   operationLogsDb,
-  fileTiersDb
+  fileTiersDb,
+  mediaAnalysisDb,
+  faceProfilesDb,
+  faceOccurrencesDb,
+  smartAlbumsDb,
+  transcriptionsDb,
+  videoMarkersDb,
+  aiCostTrackingDb,
+  searchIndexDb
 };
