@@ -13,8 +13,8 @@
 
 | Metrique | Valeur |
 |----------|--------|
-| **Test Suites** | **12 passed**, 12 total |
-| **Tests** | **143 passed**, 143 total |
+| **Test Suites** | **15 passed**, 15 total |
+| **Tests** | **235 passed**, 235 total |
 | **Snapshots** | 0 total |
 | **Echecs** | **0** |
 
@@ -225,6 +225,113 @@
 | 19 | Team Workflow — Step 5: Admin removes member | 6 ms | PASS |
 | 20 | Team Workflow — Step 6: Admin deletes team | 6 ms | PASS |
 
+### 13. ai-analysis.test.js — PASS
+
+| # | Test | Statut |
+|---|------|--------|
+| 1 | requireAiEnabled middleware — should return 503 when aiEnabled is false | PASS |
+| 2 | requireAiEnabled middleware — should work when aiEnabled is true | PASS |
+| 3 | requireAiEnabled middleware — should work when aiEnabled is default (true) | PASS |
+| 4 | POST /api/ai/analyze/:blobName — should start analysis with contentType in body | PASS |
+| 5 | POST /api/ai/analyze/:blobName — should fall back to fileOwnership content_type | PASS |
+| 6 | POST /api/ai/analyze/:blobName — should return 400 for unsupported media type | PASS |
+| 7 | POST /api/ai/analyze/:blobName — should return 500 when orchestrator throws | PASS |
+| 8 | POST /api/ai/analyze-batch — should process batch of files | PASS |
+| 9 | POST /api/ai/analyze-batch — should return 400 when files array missing | PASS |
+| 10 | POST /api/ai/analyze-batch — should return 400 when files array empty | PASS |
+| 11 | POST /api/ai/analyze-batch — should return 400 when batch exceeds 20 files | PASS |
+| 12 | GET /api/ai/analysis/:blobName — should return analysis result with parsed JSON fields | PASS |
+| 13 | GET /api/ai/analysis/:blobName — should return 404 when no analysis exists | PASS |
+| 14 | GET /api/ai/analysis/:blobName — should include face occurrences in result | PASS |
+| 15 | GET /api/ai/analysis/:blobName — should include transcription if exists | PASS |
+| 16 | GET /api/ai/analysis/:blobName — should include video markers for video analysis | PASS |
+| 17 | DELETE /api/ai/analysis/:blobName — should successfully delete analysis data | PASS |
+| 18 | DELETE /api/ai/analysis/:blobName — should return 200 even if no data existed (idempotent) | PASS |
+| 19 | GET /api/ai/job/:jobId — should return job status when found | PASS |
+| 20 | GET /api/ai/job/:jobId — should return 404 when job not found | PASS |
+| 21 | GET /api/ai/search — should return search results for query | PASS |
+| 22 | GET /api/ai/search — should return 400 when query missing | PASS |
+| 23 | GET /api/ai/search — should return results with count | PASS |
+| 24 | GET /api/ai/search — should handle type filter | PASS |
+| 25 | GET /api/ai/search/suggestions — should return suggestions for prefix | PASS |
+| 26 | GET /api/ai/search/suggestions — should return empty array when no query | PASS |
+| 27 | GET /api/ai/search/suggestions — should return empty when prefix too short | PASS |
+| 28 | GET /api/ai/tags — should return all tags with counts | PASS |
+| 29 | GET /api/ai/tags — should return tags sorted by count descending | PASS |
+| 30 | GET /api/ai/tags/:tag/files — should return files for a specific tag | PASS |
+| 31 | GET /api/ai/tags/:tag/files — should return empty array for unknown tag | PASS |
+
+### 14. ai-faces-albums.test.js — PASS
+
+| # | Test | Statut |
+|---|------|--------|
+| 1 | GET /api/ai/faces — should return empty array initially | PASS |
+| 2 | GET /api/ai/faces — should return profiles after creation | PASS |
+| 3 | POST /api/ai/faces — should create face profile with name | PASS |
+| 4 | POST /api/ai/faces — should return 400 when name missing | PASS |
+| 5 | POST /api/ai/faces — should return 201 status code | PASS |
+| 6 | PUT /api/ai/faces/:profileId — should rename a profile | PASS |
+| 7 | PUT /api/ai/faces/:profileId — should return 400 when name missing | PASS |
+| 8 | PUT /api/ai/faces/:profileId — should return 404 for nonexistent profile | PASS |
+| 9 | DELETE /api/ai/faces/:profileId — should delete a profile | PASS |
+| 10 | DELETE /api/ai/faces/:profileId — should return 404 for nonexistent profile | PASS |
+| 11 | POST /api/ai/faces/:profileId/merge — should merge source into target | PASS |
+| 12 | POST /api/ai/faces/:profileId/merge — should return 400 when sourceProfileId missing | PASS |
+| 13 | POST /api/ai/faces/:profileId/merge — should return 404 when target not found | PASS |
+| 14 | POST /api/ai/faces/:profileId/merge — should return 404 when source not found | PASS |
+| 15 | GET /api/ai/faces/:profileId/files — should return files for a profile with seeded occurrences | PASS |
+| 16 | GET /api/ai/faces/:profileId/files — should return 404 for nonexistent profile | PASS |
+| 17 | GET /api/ai/albums — should return empty array initially | PASS |
+| 18 | GET /api/ai/albums — should return albums after creation | PASS |
+| 19 | POST /api/ai/albums — should create a manual album | PASS |
+| 20 | POST /api/ai/albums — should create an auto album with rules | PASS |
+| 21 | POST /api/ai/albums — should return 400 when name missing | PASS |
+| 22 | POST /api/ai/albums — should return 201 status code | PASS |
+| 23 | PUT /api/ai/albums/:albumId — should update album name | PASS |
+| 24 | PUT /api/ai/albums/:albumId — should return 404 for nonexistent album | PASS |
+| 25 | PUT /api/ai/albums/:albumId — should preserve existing fields when partial update | PASS |
+| 26 | DELETE /api/ai/albums/:albumId — should delete an album | PASS |
+| 27 | DELETE /api/ai/albums/:albumId — should return 404 for nonexistent album | PASS |
+| 28 | POST /api/ai/albums/:albumId/items — should add items to album | PASS |
+| 29 | POST /api/ai/albums/:albumId/items — should return 400 when blobNames missing | PASS |
+| 30 | POST /api/ai/albums/:albumId/items — should return 400 when blobNames not array | PASS |
+| 31 | POST /api/ai/albums/:albumId/items — should return 404 for nonexistent album | PASS |
+| 32 | DELETE /api/ai/albums/:albumId/items/:blobName — should remove item from album | PASS |
+| 33 | DELETE /api/ai/albums/:albumId/items/:blobName — should return 200 even if item did not exist | PASS |
+| 34 | GET /api/ai/albums/:albumId/items — should return items for album | PASS |
+| 35 | GET /api/ai/albums/:albumId/items — should return 404 for nonexistent album | PASS |
+| 36 | GET /api/ai/albums/:albumId/items — should return empty array for album with no items | PASS |
+
+### 15. ai-video-transcription-admin.test.js — PASS
+
+| # | Test | Statut |
+|---|------|--------|
+| 1 | GET /api/ai/video/:blobName/timeline — should return markers for a blob with seeded data | PASS |
+| 2 | GET /api/ai/video/:blobName/timeline — should return empty markers for unknown blob | PASS |
+| 3 | GET /api/ai/video/:blobName/timeline — should filter markers by type query param | PASS |
+| 4 | GET /api/ai/video/:blobName/thumbnail/:timestamp — should return 500 when AI service not configured | PASS |
+| 5 | POST /api/ai/transcribe/:blobName — should start transcription job for video file | PASS |
+| 6 | POST /api/ai/transcribe/:blobName — should start transcription job for audio file | PASS |
+| 7 | POST /api/ai/transcribe/:blobName — should return 400 for non-audio/video file | PASS |
+| 8 | GET /api/ai/transcription/:blobName — should return transcription with parsed segments | PASS |
+| 9 | GET /api/ai/transcription/:blobName — should return 404 when no transcription exists | PASS |
+| 10 | GET /api/ai/transcription/:blobName — should handle transcription without segments | PASS |
+| 11 | GET /api/ai/transcription/:blobName/search — should return search matches within transcription | PASS |
+| 12 | GET /api/ai/transcription/:blobName/search — should return 400 when query missing | PASS |
+| 13 | GET /api/ai/transcription/:blobName/search — should return empty matches for no results | PASS |
+| 14 | GET /api/admin/ai/dashboard — should return dashboard with all sections | PASS |
+| 15 | GET /api/admin/ai/dashboard — should have correct structure | PASS |
+| 16 | GET /api/admin/ai/dashboard — should work with empty database data | PASS |
+| 17 | GET /api/admin/ai/costs — should return costs with period | PASS |
+| 18 | GET /api/admin/ai/costs — should accept custom date range | PASS |
+| 19 | GET /api/admin/ai/costs — should use defaults when no dates provided | PASS |
+| 20 | PUT /api/admin/ai/settings — should update AI settings | PASS |
+| 21 | PUT /api/admin/ai/settings — should ignore non-AI setting keys | PASS |
+| 22 | PUT /api/admin/ai/settings — should update multiple settings at once | PASS |
+| 23 | PUT /api/admin/ai/settings — should return updated settings map | PASS |
+| 24 | POST /api/admin/ai/reindex — should rebuild search index | PASS |
+| 25 | POST /api/admin/ai/reindex — should return success message | PASS |
+
 ---
 
 ## Couverture par Domaine Fonctionnel
@@ -243,7 +350,10 @@
 | Couts | 10 | PASS |
 | Storage Tiers (archivage/rehydratation) | 12 | PASS |
 | Integration (workflows E2E) | 20 | PASS |
-| **Total** | **143** | **PASS** |
+| AI Analysis / Search / Tags | 31 | PASS |
+| AI Faces / Smart Albums | 36 | PASS |
+| AI Video / Transcription / Admin | 25 | PASS |
+| **Total** | **235** | **PASS** |
 
 ---
 
@@ -269,4 +379,4 @@ Ce rapport a ete genere apres l'ajout du module AI/Multimedia (`backend/ai/`) co
 - 31 nouveaux endpoints API (`/api/ai/` et `/api/admin/ai/`)
 - Hook auto-analyze optionnel sur l'upload de fichiers
 
-**Les 143 tests existants couvrant les 56+ endpoints originaux passent tous sans regression.**
+**Les 235 tests couvrant les 87+ endpoints (56 originaux + 31 AI) passent tous sans regression.**
