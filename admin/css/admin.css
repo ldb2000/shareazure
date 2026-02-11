@@ -1132,6 +1132,28 @@ textarea:focus {
     justify-content: flex-end;
 }
 
+/* Confirm Dialog */
+.confirm-dialog {
+    max-width: 420px;
+}
+
+.confirm-body {
+    text-align: center;
+}
+
+.confirm-icon {
+    font-size: 48px;
+    color: var(--warning-color);
+    margin-bottom: 12px;
+    line-height: 1;
+}
+
+.confirm-body p {
+    font-size: 15px;
+    color: var(--text-secondary);
+    white-space: pre-line;
+}
+
 /* ============================================
    Utility Classes
    ============================================ */

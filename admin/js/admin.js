@@ -433,7 +433,7 @@ function updateSelectedFiles() {
 }
 
 window.deleteFile = async (blobName) => {
-    if (!confirm('Supprimer ce fichier ?')) return;
+    if (!await showConfirmDialog('Supprimer le fichier', 'Supprimer ce fichier ?')) return;
     try {
         await fetch(`${API_URL}/files/${blobName}`, { method: 'DELETE', headers: getAuthHeaders() });
         showNotification('Fichier supprime', 'success');
@@ -442,7 +442,7 @@ window.deleteFile = async (blobName) => {
 };
 
 async function deleteSelectedFiles() {
-    if (!confirm(`Supprimer ${selectedFiles.length} fichier(s) ?`)) return;
+    if (!await showConfirmDialog('Supprimer les fichiers', `Supprimer ${selectedFiles.length} fichier(s) ?`)) return;
     for (const name of selectedFiles) {
         await fetch(`${API_URL}/files/${name}`, { method: 'DELETE', headers: getAuthHeaders() });
     }
@@ -587,7 +587,7 @@ window.viewTeam = async (teamId) => {
 };
 
 window.deleteTeam = async (teamId) => {
-    if (!confirm('Supprimer cette equipe ?')) return;
+    if (!await showConfirmDialog('Supprimer l\'equipe', 'Supprimer cette equipe ?')) return;
     try {
         await apiRequest(`/teams/${teamId}`, 'DELETE');
         showNotification('Equipe supprimee', 'success');
@@ -823,7 +823,7 @@ window.addUserToTeam = async (userId, username) => {
 };
 
 window.removeUserFromTeam = async (userId, teamId, username) => {
-    if (!confirm('Retirer cet utilisateur de l\'equipe ?')) return;
+    if (!await showConfirmDialog('Retirer de l\'equipe', `Retirer ${username} de l'equipe ?`)) return;
     try {
         await apiRequest(`/teams/${teamId}/members/${userId}`, 'DELETE');
         showNotification('Utilisateur retire de l\'equipe', 'success');
@@ -833,7 +833,7 @@ window.removeUserFromTeam = async (userId, teamId, username) => {
 };
 
 window.deactivateUser = async (userId, username) => {
-    if (!confirm(`Desactiver l'utilisateur "${username}" ?`)) return;
+    if (!await showConfirmDialog('Desactiver l\'utilisateur', `Desactiver l'utilisateur "${username}" ?`)) return;
     try {
         await apiRequest(`/admin/users/${userId}`, 'DELETE');
         showNotification('Utilisateur desactive', 'success');
@@ -850,7 +850,7 @@ window.activateUser = async (userId, username) => {
 };
 
 window.deleteUser = async (userId, username) => {
-    if (!confirm(`Supprimer definitivement l'utilisateur "${username}" ?\n\nCette action est irreversible.`)) return;
+    if (!await showConfirmDialog('Supprimer definitivement', `Supprimer definitivement l'utilisateur "${username}" ?\n\nCette action est irreversible.`)) return;
     try {
         await apiRequest(`/admin/users/${userId}/permanent`, 'DELETE');
         showNotification(`Utilisateur "${username}" supprime`, 'success');
@@ -1135,7 +1135,7 @@ window.changeLogsPage = function(delta) {
 };
 
 async function clearLogs() {
-    if (!confirm('Effacer tous les logs ?')) return;
+    if (!await showConfirmDialog('Effacer les logs', 'Effacer tous les logs ?')) return;
     try {
         await apiRequest('/admin/logs', 'DELETE');
         showNotification('Logs effaces', 'success');
@@ -1198,7 +1198,7 @@ async function saveSettings() {
 }
 
 async function resetSettings() {
-    if (!confirm('Reinitialiser les parametres ?')) return;
+    if (!await showConfirmDialog('Reinitialiser', 'Reinitialiser les parametres par defaut ?')) return;
     try {
         await apiRequest('/settings/reset', 'POST');
         await loadSettings();
@@ -1294,7 +1294,7 @@ async function addEmailDomain() {
 }
 
 window.deleteEmailDomain = async (domain) => {
-    if (!confirm(`Supprimer ${domain} ?`)) return;
+    if (!await showConfirmDialog('Supprimer le domaine', `Supprimer le domaine "${domain}" ?`)) return;
     try { await apiRequest(`/admin/email-domains/${encodeURIComponent(domain)}`, 'DELETE'); showNotification('Supprime', 'success'); loadEmailDomains(); }
     catch (e) { showNotification('Erreur', 'error'); }
 };

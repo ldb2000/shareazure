@@ -427,6 +427,24 @@
         <div class="gallery-thumbnails" id="galleryThumbnails"></div>
     </div>
 
+    <!-- Confirm Modal -->
+    <div class="modal-overlay" id="confirmModal" style="display: none;">
+        <div class="modal-content" style="max-width: 420px;">
+            <div class="modal-header">
+                <h3 id="confirmTitle">Confirmer</h3>
+                <button class="modal-close" id="confirmCloseBtn">&times;</button>
+            </div>
+            <div class="modal-body" style="text-align: center;">
+                <div style="font-size: 48px; color: #F8AA36; margin-bottom: 12px;">&#9888;</div>
+                <p id="confirmMessage" style="color: var(--text-secondary); white-space: pre-line;"></p>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" id="confirmNoBtn">Annuler</button>
+                    <button class="btn btn-danger" id="confirmYesBtn">Confirmer</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="js/user.js"></script>
 </body>
 </html>

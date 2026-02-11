@@ -1252,7 +1252,7 @@ async function handleDelete() {
     if (!file) return;
     
     const displayName = file.displayName || file.originalName || contextMenuFile;
-    const confirmed = confirm(`Êtes-vous sûr de vouloir supprimer "${displayName}" ?`);
+    const confirmed = await showConfirmDialog('Supprimer', `Êtes-vous sûr de vouloir supprimer "${displayName}" ?`);
     if (!confirmed) return;
     
     try {
@@ -1527,7 +1527,7 @@ async function regenerateShareLink(link) {
 }
 
 async function deleteShareLink(linkId) {
-    const confirmed = confirm('Êtes-vous sûr de vouloir supprimer ce lien de partage ?');
+    const confirmed = await showConfirmDialog('Supprimer le lien', 'Êtes-vous sûr de vouloir supprimer ce lien de partage ?');
     if (!confirmed) return;
 
     try {
@@ -1762,4 +1762,28 @@ async function loadTeamFiles() {
     container.innerHTML = html;
     document.getElementById('teamFilesSectionTitle').textContent =
         `Fichiers d'equipe (${teams.length} equipe${teams.length > 1 ? 's' : ''})`;
+}
+
+// Confirm dialog (replaces native confirm())
+function showConfirmDialog(title, message) {
+    return new Promise(resolve => {
+        document.getElementById('confirmTitle').textContent = title;
+        document.getElementById('confirmMessage').textContent = message;
+        const modal = document.getElementById('confirmModal');
+        const yes = document.getElementById('confirmYesBtn');
+        const no = document.getElementById('confirmNoBtn');
+        const close = document.getElementById('confirmCloseBtn');
+        const cleanup = () => {
+            yes.removeEventListener('click', onYes);
+            no.removeEventListener('click', onNo);
+            close.removeEventListener('click', onNo);
+            modal.style.display = 'none';
+        };
+        const onYes = () => { cleanup(); resolve(true); };
+        const onNo = () => { cleanup(); resolve(false); };
+        yes.addEventListener('click', onYes);
+        no.addEventListener('click', onNo);
+        close.addEventListener('click', onNo);
+        modal.style.display = 'flex';
+    });
 }

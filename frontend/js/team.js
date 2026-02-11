@@ -385,7 +385,7 @@ window.downloadFile = (blobName) => {
 };
 
 window.deleteFile = async (blobName, source) => {
-    if (!confirm('Supprimer ce fichier ?')) return;
+    if (!await showConfirmDialog('Supprimer le fichier', 'Supprimer ce fichier ?')) return;
     try {
         await fetch(`${API_URL}/files/${blobName}`, { method: 'DELETE', headers: getAuthHeaders() });
         showNotification('Fichier supprime', 'success');
@@ -548,7 +548,7 @@ window.changeMemberRole = async (userId, newRole) => {
 };
 
 window.removeMember = async (userId, username) => {
-    if (!confirm(`Retirer ${username} de l'equipe ?`)) return;
+    if (!await showConfirmDialog('Retirer de l\'equipe', `Retirer ${username} de l'equipe ?`)) return;
     if (!currentTeam) return;
     try {
         await apiRequest(`/teams/${currentTeam.teamId}/members/${userId}`, 'DELETE');
@@ -636,7 +636,7 @@ function showCreateGuestError(msg) {
 }
 
 window.disableGuest = async (guestId, email) => {
-    if (!confirm(`Desactiver ${email} ?`)) return;
+    if (!await showConfirmDialog('Desactiver l\'invite', `Desactiver ${email} ?`)) return;
     try {
         await apiRequest(`/admin/guest-accounts/${guestId}/disable`, 'PUT');
         showNotification('Invite desactive', 'success');
@@ -645,7 +645,7 @@ window.disableGuest = async (guestId, email) => {
 };
 
 window.deleteGuest = async (guestId, email) => {
-    if (!confirm(`Supprimer ${email} et ses fichiers ?`)) return;
+    if (!await showConfirmDialog('Supprimer l\'invite', `Supprimer ${email} et ses fichiers ?`)) return;
     try {
         const res = await apiRequest(`/admin/guest-accounts/${guestId}`, 'DELETE');
         showNotification(`Invite supprime (${res.stats?.filesDeleted || 0} fichier(s))`, 'success');

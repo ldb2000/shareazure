@@ -586,16 +586,17 @@
 
     <!-- Confirmation Modal -->
     <div class="modal" id="confirmModal" style="display: none;">
-        <div class="modal-content">
+        <div class="modal-content confirm-dialog">
             <div class="modal-header">
                 <h3 id="confirmTitle">Confirmer l'action</h3>
             </div>
-            <div class="modal-body">
+            <div class="modal-body confirm-body">
+                <div class="confirm-icon">&#9888;</div>
                 <p id="confirmMessage">Etes-vous sur de vouloir effectuer cette action ?</p>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-danger" id="confirmYesBtn">Confirmer</button>
                 <button class="btn btn-secondary" id="confirmNoBtn">Annuler</button>
+                <button class="btn btn-danger" id="confirmYesBtn">Confirmer</button>
             </div>
         </div>
     </div>
