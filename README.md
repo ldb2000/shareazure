@@ -30,6 +30,19 @@ Application web d'upload de fichiers vers Azure Blob Storage avec interface drag
 - ✅ 📋 **Support de plusieurs emails** : Possibilité de partager à plusieurs destinataires
 - ✅ 🛡️ **Domaines d'emails autorisés** : Contrôle des domaines autorisés par l'administrateur
 
+### Fonctionnalites IA / Multimedia (v3.0+)
+- ✅ **Analyse d'images et videos** via OpenAI GPT-4 Vision et Azure AI Vision
+- ✅ **Transcription audio/video** via OpenAI Whisper
+- ✅ **Extraction de geolocalisation** (EXIF GPS + reverse geocoding Nominatim)
+- ✅ **Recherche semantique** avec FTS5 full-text search
+- ✅ **Albums intelligents** avec regles automatiques
+- ✅ **Reconnaissance faciale** avec galerie de profils
+
+### Section "Decouvrir" (v3.1+)
+- ✅ **Nuage de tags** : navigation par tags IA, taille proportionnelle a la frequence
+- ✅ **Recherche IA** : recherche semantique avec suggestions autocomplete et filtres par type
+- ✅ **Carte interactive** : carte Leaflet.js avec MarkerCluster pour les fichiers geotagues
+
 ### Interface d'Administration 🆕 (v2.0+)
 - ✅ 📊 **Dashboard complet** avec statistiques et graphiques
 - ✅ 📁 **Gestion avancée des fichiers** (recherche, filtres, tri, actions en masse)
@@ -461,6 +474,7 @@ Voir **[docs/README.md](docs/README.md)** pour l'index complet de la documentati
 - **[docs/ADVANCED_FEATURES.md](docs/ADVANCED_FEATURES.md)** - Fonctionnalités avancées v2.0
 - **[docs/GUEST_ACCOUNTS.md](docs/GUEST_ACCOUNTS.md)** - Comptes invités
 - **[docs/ADMIN_INTERFACE.md](docs/ADMIN_INTERFACE.md)** - Interface d'administration
+- **[docs/AI_FEATURES.md](docs/AI_FEATURES.md)** - Fonctionnalites IA et section Decouvrir
 
 ### Configuration et architecture
 - **[docs/AZURE_SETUP.md](docs/AZURE_SETUP.md)** - Configuration Azure détaillée

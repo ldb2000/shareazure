@@ -2,6 +2,36 @@
 
 Toutes les modifications notables de ShareAzure seront documentées dans ce fichier.
 
+## [3.1.0] - 2026-02-12
+
+### Section "Decouvrir" (Dashboard Utilisateur)
+
+Expose les fonctionnalites IA aux utilisateurs via une nouvelle section dans le dashboard.
+
+#### Nouvelles fonctionnalites
+
+- **Bouton Decouvrir** : nouveau bouton boussole dans le header utilisateur
+- **Onglet Par Tags** : nuage de tags dimensionne par frequence, clic sur un tag pour voir les fichiers associes
+- **Onglet Recherche IA** : recherche semantique avec suggestions autocomplete (debounce 300ms), filtre par type de fichier, resultats en grille
+- **Onglet Carte** : carte Leaflet.js avec MarkerCluster pour les fichiers geotagues, popups avec nom/ville/pays/coordonnees
+- **Navigation exclusive** : les sections Fichiers, Partages, Equipe et Decouvrir sont mutuellement exclusives
+- **Gestion d'erreur gracieuse** : messages clairs si les APIs IA ne sont pas activees
+
+#### Fichiers modifies
+
+- `frontend/user.html` : CDN Leaflet/MarkerCluster, bouton header, section HTML complete
+- `frontend/css/user.css` : ~150 lignes de styles (tabs, tag cloud, grille, carte, responsive)
+- `frontend/js/user.js` : ~250 lignes (12 fonctions, event listeners, modifications navigation)
+
+#### Documentation
+
+- **[docs/AI_FEATURES.md](docs/AI_FEATURES.md)** : nouvelle documentation complete des fonctionnalites IA et de la section Decouvrir
+
+#### Notes
+
+- Aucun changement backend : toutes les APIs necessaires existaient deja (`/api/ai/tags`, `/api/ai/search`, `/api/ai/map`)
+- 257 tests passent sans regression
+
 ## [2.1.0] - 2025-01-12
 
 ### 🔒 Sécurité et Améliorations du Partage

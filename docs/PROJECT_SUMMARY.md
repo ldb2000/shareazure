@@ -100,6 +100,11 @@ DELETE /api/files/:blobName     # Supprimer
 - Actions (télécharger/supprimer)
 - Confirmation suppression
 
+✅ **Section Decouvrir (IA)**
+- Nuage de tags avec tailles proportionnelles
+- Recherche semantique avec autocomplete
+- Carte Leaflet.js avec fichiers geotagues (MarkerCluster)
+
 ✅ **UX optimale**
 - Messages de feedback
 - Gestion erreurs

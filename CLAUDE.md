@@ -398,7 +398,12 @@ scanSchedulesDb.getEnabled()
 
 **User Interface (frontend/):**
 - `index.html` + `app.js` - Main upload interface with drag-and-drop
-- `user.html` + `js/user.js` - User dashboard for file management and sharing
+- `user.html` + `js/user.js` + `css/user.css` - User dashboard for file management, sharing, and **Discover section**:
+  - Discover > Par Tags: AI tag cloud with sized tags, click to browse files
+  - Discover > Recherche IA: semantic search with autocomplete suggestions, type filter
+  - Discover > Carte: Leaflet.js map with MarkerCluster for geotagged files
+  - Uses CDN: Leaflet 1.9.4 + MarkerCluster 1.5.3
+  - APIs used: `/api/ai/tags`, `/api/ai/search`, `/api/ai/map`
 - `login.html` + `js/login.js` - Login page (if authentication is enabled)
 
 **Admin Interface (admin/):**
@@ -584,5 +589,5 @@ L'ensemble des documents doivent etre sous le repertoire docs/
 - **docs/ADMIN_INTERFACE.md** - Admin interface guide
 - **docs/API_EXAMPLES.md** - API curl examples
 - **docs/CUSTOMIZATION.md** - Customization guide
-- **docs/AI_FEATURES.md** - AI/Multimedia features documentation
+- **docs/AI_FEATURES.md** - AI/Multimedia features and Discover section documentation
 - **infrastructure/README.md** - Terraform deployment guide

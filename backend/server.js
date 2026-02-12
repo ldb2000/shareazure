@@ -3051,16 +3051,18 @@ app.put('/api/user/files/rename', async (req, res) => {
     }
 
     const containerClient = blobServiceClient.getContainerClient(containerName);
-    
+
     // Construire le nouveau chemin
-    const pathParts = oldPath.split('/');
+    const isFolder = oldPath.endsWith('/');
+    // Pour un dossier "photos/", split donne ["photos", ""] — on retire le vide final
+    const pathParts = oldPath.split('/').filter(p => p);
     pathParts[pathParts.length - 1] = newName;
-    const newPath = pathParts.join('/');
-    
-    if (oldPath.endsWith('/')) {
-      // C'est un dossier
+    const newPath = pathParts.join('/') + (isFolder ? '/' : '');
+
+    if (isFolder) {
+      // C'est un dossier — oldPath et newPath ont deja un trailing /
       const oldFolderPath = oldPath;
-      const newFolderPath = newPath + '/';
+      const newFolderPath = newPath;
       
       // Renommer tous les blobs qui commencent par oldFolderPath
       const blobsToRename = [];

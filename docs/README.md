@@ -32,7 +32,7 @@ Index de toute la documentation du projet.
 | [PREVIEW_FEATURE.md](PREVIEW_FEATURE.md) | Preview de fichiers (images, PDF, video, audio, texte) |
 | [ADVANCED_FEATURES.md](ADVANCED_FEATURES.md) | Fonctionnalites avancees v2.0 |
 | [GUEST_ACCOUNTS.md](GUEST_ACCOUNTS.md) | Systeme de comptes invites |
-| [AI_FEATURES.md](AI_FEATURES.md) | Fonctionnalites IA/Multimedia |
+| [AI_FEATURES.md](AI_FEATURES.md) | Fonctionnalites IA/Multimedia et section Decouvrir |
 
 ## Administration
 

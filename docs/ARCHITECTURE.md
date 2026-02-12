@@ -16,6 +16,7 @@
 │  │  • Drag & Drop UI                                       │    │
 │  │  • Gestion des fichiers                                 │    │
 │  │  • Preview et téléchargement                            │    │
+│  │  • Section Decouvrir (Tags, Recherche IA, Carte)        │    │
 │  └────────────────────────────────────────────────────────┘    │
 └────────────────────────┬────────────────────────────────────────┘
                          │
@@ -28,6 +29,7 @@
 │  │  • Express.js Server                                    │    │
 │  │  • Multer (Upload handling)                             │    │
 │  │  • Azure Storage SDK                                    │    │
+│  │  • Module IA (37 endpoints)                             │    │
 │  │  • Authentication & Security                            │    │
 │  └────────────────────────────────────────────────────────┘    │
 │                                                                   │
