@@ -403,6 +403,42 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_ai_cost_tracking_service ON ai_cost_tracking(service);
   CREATE INDEX IF NOT EXISTS idx_ai_cost_tracking_created_at ON ai_cost_tracking(created_at);
 
+  -- Table pour la géolocalisation des fichiers (EXIF/GPS)
+  CREATE TABLE IF NOT EXISTS geolocation (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    blob_name TEXT UNIQUE NOT NULL,
+    latitude REAL NOT NULL,
+    longitude REAL NOT NULL,
+    altitude REAL,
+    address TEXT,
+    city TEXT,
+    country TEXT,
+    country_code TEXT,
+    raw_exif TEXT,
+    extracted_at TEXT DEFAULT (datetime('now')),
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_geolocation_blob_name ON geolocation(blob_name);
+  CREATE INDEX IF NOT EXISTS idx_geolocation_coords ON geolocation(latitude, longitude);
+
+  -- Table pour les scans planifiés IA
+  CREATE TABLE IF NOT EXISTS scan_schedules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_type TEXT NOT NULL CHECK(scan_type IN ('face_recognition','auto_tagging','geolocation_extraction','full_analysis')),
+    schedule TEXT NOT NULL DEFAULT 'manual' CHECK(schedule IN ('manual','hourly','daily','weekly')),
+    is_enabled INTEGER DEFAULT 1,
+    last_run_at TEXT,
+    last_run_status TEXT,
+    last_run_files_processed INTEGER DEFAULT 0,
+    last_run_error TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_scan_schedules_type ON scan_schedules(scan_type);
+  CREATE INDEX IF NOT EXISTS idx_scan_schedules_enabled ON scan_schedules(is_enabled);
+
   -- Insérer les valeurs par défaut si elles n'existent pas
   INSERT OR IGNORE INTO settings (key, value, category, description) VALUES
     ('maxFileSizeMB', '100', 'storage', 'Taille maximale des fichiers en MB'),
@@ -439,7 +475,16 @@ db.exec(`
     ('aiMonthlyBudget', '50', 'ai', 'Budget mensuel IA en dollars'),
     ('aiCostAlertThreshold', '80', 'ai', 'Seuil d''alerte coûts IA (% du budget)'),
     ('thumbnailSize', '300', 'ai', 'Taille des thumbnails (pixels)'),
-    ('thumbnailQuality', '80', 'ai', 'Qualité des thumbnails (0-100)');
+    ('thumbnailQuality', '80', 'ai', 'Qualité des thumbnails (0-100)'),
+    ('geolocationEnabled', 'true', 'ai', 'Activer l''extraction de géolocalisation EXIF'),
+    ('reverseGeocodingEnabled', 'false', 'ai', 'Activer le reverse geocoding (Nominatim OSM)');
+
+  -- Seed des scans planifiés par défaut
+  INSERT OR IGNORE INTO scan_schedules (scan_type, schedule, is_enabled) VALUES
+    ('face_recognition', 'manual', 1),
+    ('auto_tagging', 'manual', 1),
+    ('geolocation_extraction', 'manual', 1),
+    ('full_analysis', 'manual', 1);
 `);
 
 console.log('✅ Base de données initialisée:', dbPath);
@@ -2141,6 +2186,120 @@ const searchIndexDb = {
   }
 };
 
+// Geolocation
+const geolocationDb = {
+  create: (data) => {
+    const stmt = db.prepare(`
+      INSERT OR REPLACE INTO geolocation (blob_name, latitude, longitude, altitude, address, city, country, country_code, raw_exif)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    return stmt.run(
+      data.blobName,
+      data.latitude,
+      data.longitude,
+      data.altitude || null,
+      data.address || null,
+      data.city || null,
+      data.country || null,
+      data.countryCode || null,
+      data.rawExif ? JSON.stringify(data.rawExif) : null
+    );
+  },
+
+  getByBlobName: (blobName) => {
+    const stmt = db.prepare(`SELECT * FROM geolocation WHERE blob_name = ?`);
+    return stmt.get(blobName);
+  },
+
+  getAll: (limit = 500) => {
+    const stmt = db.prepare(`SELECT * FROM geolocation ORDER BY created_at DESC LIMIT ?`);
+    return stmt.all(limit);
+  },
+
+  delete: (blobName) => {
+    const stmt = db.prepare(`DELETE FROM geolocation WHERE blob_name = ?`);
+    return stmt.run(blobName);
+  },
+
+  getNearby: (lat, lng, radiusKm) => {
+    // Approximate bounding box filter (1 degree ≈ 111 km)
+    const latDelta = radiusKm / 111;
+    const lngDelta = radiusKm / (111 * Math.cos(lat * Math.PI / 180));
+    const stmt = db.prepare(`
+      SELECT * FROM geolocation
+      WHERE latitude BETWEEN ? AND ?
+        AND longitude BETWEEN ? AND ?
+      ORDER BY created_at DESC
+    `);
+    return stmt.all(lat - latDelta, lat + latDelta, lng - lngDelta, lng + lngDelta);
+  },
+
+  getStats: () => {
+    const stmt = db.prepare(`
+      SELECT COUNT(*) as total,
+        COUNT(DISTINCT country) as countries,
+        COUNT(DISTINCT city) as cities
+      FROM geolocation
+    `);
+    return stmt.get();
+  }
+};
+
+// Scan Schedules
+const scanSchedulesDb = {
+  getAll: () => {
+    const stmt = db.prepare(`SELECT * FROM scan_schedules ORDER BY id ASC`);
+    return stmt.all();
+  },
+
+  getByType: (scanType) => {
+    const stmt = db.prepare(`SELECT * FROM scan_schedules WHERE scan_type = ?`);
+    return stmt.get(scanType);
+  },
+
+  getById: (id) => {
+    const stmt = db.prepare(`SELECT * FROM scan_schedules WHERE id = ?`);
+    return stmt.get(id);
+  },
+
+  update: (id, data) => {
+    const fields = [];
+    const values = [];
+    for (const [key, value] of Object.entries(data)) {
+      const col = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+      fields.push(`${col} = ?`);
+      values.push(value);
+    }
+    fields.push(`updated_at = datetime('now')`);
+    values.push(id);
+    const stmt = db.prepare(`UPDATE scan_schedules SET ${fields.join(', ')} WHERE id = ?`);
+    return stmt.run(...values);
+  },
+
+  updateLastRun: (id, data) => {
+    const stmt = db.prepare(`
+      UPDATE scan_schedules
+      SET last_run_at = datetime('now'),
+          last_run_status = ?,
+          last_run_files_processed = ?,
+          last_run_error = ?,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `);
+    return stmt.run(
+      data.status || 'completed',
+      data.filesProcessed || 0,
+      data.error || null,
+      id
+    );
+  },
+
+  getEnabled: () => {
+    const stmt = db.prepare(`SELECT * FROM scan_schedules WHERE is_enabled = 1 AND schedule != 'manual'`);
+    return stmt.all();
+  }
+};
+
 // Fonctions pour les logs d'activité
 const activityLogsDb = {
   log: ({ level = 'info', category = 'system', operation, message, username, details, ip_address }) => {
@@ -2202,5 +2361,7 @@ module.exports = {
   videoMarkersDb,
   aiCostTrackingDb,
   searchIndexDb,
+  geolocationDb,
+  scanSchedulesDb,
   activityLogsDb
 };

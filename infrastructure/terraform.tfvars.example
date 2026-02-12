@@ -1,21 +1,38 @@
-# Exemple de fichier de variables Terraform
-# Copiez ce fichier vers terraform.tfvars et modifiez les valeurs selon vos besoins
+# ======================================================
+# Terraform Variables — ShareAzure
+# ======================================================
+# Copiez ce fichier vers terraform.tfvars et modifiez les valeurs
+#
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# Ne commitez JAMAIS terraform.tfvars (il contient des noms de ressources)
+# ======================================================
 
+# OBLIGATOIRE — nom du Resource Group existant dans Azure
+resource_group_name = "rg-shareazure"
+
+# OBLIGATOIRE — nom unique globalement (minuscules + chiffres, 3-24 chars)
+storage_account_name = "sastshareazure"
+
+# Nom du projet (utilise pour nommer les ressources Azure)
 project_name = "shareazure"
-location     = "francecentral"
 
-# Optionnel : spécifier un nom personnalisé pour le storage account
-# Sinon, un nom unique sera généré automatiquement
-# storage_account_name = "moncomptestorage"
+# Region Azure (doit correspondre au Resource Group)
+location = "francecentral"
 
+# Nom du conteneur blob
 container_name = "uploads"
 
-# Configuration du storage account
-storage_account_tier       = "Standard"
-storage_replication_type   = "LRS"
-allow_blob_public_access   = false
-min_tls_version           = "TLS1_2"
+# Configuration du Storage Account
+storage_account_tier     = "Standard"
+storage_replication_type = "LRS"
+allow_blob_public_access = false
+min_tls_version          = "TLS1_2"
 
-# Options de monitoring
+# Monitoring — Application Insights
 enable_application_insights = true
 
+# IA — Azure Cognitive Services (Computer Vision)
+# Provisionne un service Computer Vision pour la detection faciale, objets, OCR
+enable_cognitive_services = true
+cognitive_services_sku    = "S1"    # F0 = gratuit (20 appels/min), S1 = standard (10 appels/sec)

@@ -2,6 +2,13 @@
 
 Index de toute la documentation du projet.
 
+## Installation
+
+| Document | Description |
+|----------|-------------|
+| [installation/INSTALL.md](installation/INSTALL.md) | **Guide d'installation complet** (Terraform + .env + IA) |
+| [installation/setup.sh](installation/setup.sh) | Script d'installation automatique |
+
 ## Guides
 
 | Document | Description |
@@ -25,6 +32,7 @@ Index de toute la documentation du projet.
 | [PREVIEW_FEATURE.md](PREVIEW_FEATURE.md) | Preview de fichiers (images, PDF, video, audio, texte) |
 | [ADVANCED_FEATURES.md](ADVANCED_FEATURES.md) | Fonctionnalites avancees v2.0 |
 | [GUEST_ACCOUNTS.md](GUEST_ACCOUNTS.md) | Systeme de comptes invites |
+| [AI_FEATURES.md](AI_FEATURES.md) | Fonctionnalites IA/Multimedia |
 
 ## Administration
 

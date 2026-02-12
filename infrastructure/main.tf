@@ -143,6 +143,34 @@ resource "azurerm_application_insights" "main" {
   }
 }
 
+# Azure Cognitive Services — Computer Vision (optionnel)
+variable "enable_cognitive_services" {
+  description = "Créer Azure Cognitive Services (Computer Vision) pour l'IA"
+  type        = bool
+  default     = true
+}
+
+variable "cognitive_services_sku" {
+  description = "SKU pour Cognitive Services (F0 = gratuit, S1 = standard)"
+  type        = string
+  default     = "S1"
+}
+
+resource "azurerm_cognitive_account" "vision" {
+  count               = var.enable_cognitive_services ? 1 : 0
+  name                = "cog-${var.project_name}"
+  location            = data.azurerm_resource_group.main.location
+  resource_group_name = data.azurerm_resource_group.main.name
+  kind                = "ComputerVision"
+  sku_name            = var.cognitive_services_sku
+
+  tags = {
+    environment = "production"
+    project     = var.project_name
+    managed_by  = "terraform"
+  }
+}
+
 # Outputs
 output "resource_group_name" {
   description = "Nom du groupe de ressources utilisé"
@@ -190,5 +218,16 @@ output "application_insights_connection_string" {
 output "application_insights_instrumentation_key" {
   description = "Clé d'instrumentation Application Insights (si créé)"
   value       = var.enable_application_insights ? azurerm_application_insights.main[0].instrumentation_key : null
+  sensitive   = true
+}
+
+output "cognitive_services_endpoint" {
+  description = "Endpoint Azure Cognitive Services Computer Vision (-> AZURE_VISION_ENDPOINT)"
+  value       = var.enable_cognitive_services ? azurerm_cognitive_account.vision[0].endpoint : null
+}
+
+output "cognitive_services_key" {
+  description = "Clé primaire Azure Cognitive Services (-> AZURE_VISION_KEY)"
+  value       = var.enable_cognitive_services ? azurerm_cognitive_account.vision[0].primary_access_key : null
   sensitive   = true
 }

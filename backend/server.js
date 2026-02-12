@@ -4886,9 +4886,20 @@ if (require.main === module) {
           );
         }, 60 * 60 * 1000);
 
+        // Scans IA planifiés (vérification toutes les 60 secondes)
+        setInterval(() => {
+          try {
+            const scanService = require('./ai/scanService');
+            scanService.checkScheduledScans(getBlobBufferHelper);
+          } catch (err) {
+            console.error('Erreur tâche scans IA:', err.message);
+          }
+        }, 60 * 1000);
+
         console.log('✅ Tâches de nettoyage automatique activées');
         console.log('✅ Tâche de calcul des coûts activée (quotidienne à 2h)');
         console.log('✅ Tâche de vérification des réhydratations activée (horaire)');
+        console.log('✅ Tâche de scans IA planifiés activée');
       });
     } catch (error) {
       console.error('❌ Erreur lors du démarrage:', error);

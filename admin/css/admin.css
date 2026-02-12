@@ -1237,3 +1237,192 @@ textarea:focus {
         display: none;
     }
 }
+
+/* ============================================================================
+   AI Section Styles
+   ============================================================================ */
+
+/* AI Sub-tabs */
+.ai-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 24px;
+    background: var(--bg-secondary, #f1f3f5);
+    border-radius: 8px;
+    padding: 4px;
+    overflow-x: auto;
+}
+
+.ai-tab {
+    padding: 10px 20px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary, #6c757d);
+    cursor: pointer;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    transition: all 0.2s;
+}
+
+.ai-tab:hover {
+    background: rgba(0, 60, 97, 0.08);
+    color: var(--text-primary, #212529);
+}
+
+.ai-tab.active {
+    background: #fff;
+    color: var(--primary, #003C61);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* AI Tab Content */
+.ai-tab-content {
+    display: none;
+}
+
+.ai-tab-content.active {
+    display: block;
+}
+
+/* Toggle Switch */
+.toggle-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 48px;
+    height: 26px;
+    flex-shrink: 0;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: 0.3s;
+    border-radius: 26px;
+}
+
+.toggle-slider::before {
+    content: "";
+    position: absolute;
+    height: 20px;
+    width: 20px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: 0.3s;
+    border-radius: 50%;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+    background-color: var(--primary, #003C61);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(22px);
+}
+
+/* Tag Cloud */
+.tag-cloud {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 0;
+}
+
+.tag-cloud .tag {
+    display: inline-block;
+    padding: 4px 12px;
+    background: rgba(0, 60, 97, 0.08);
+    color: var(--primary, #003C61);
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.tag-cloud .tag .count {
+    font-size: 11px;
+    opacity: 0.7;
+    margin-left: 4px;
+}
+
+/* AI Map Container */
+#ai-map-container {
+    height: 500px;
+    border-radius: 8px;
+    border: 1px solid var(--border, #dee2e6);
+    z-index: 1;
+}
+
+/* Scan type labels */
+.scan-type-label {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+.scan-type-label.face_recognition { background: #e8f5e9; color: #2e7d32; }
+.scan-type-label.auto_tagging { background: #e3f2fd; color: #1565c0; }
+.scan-type-label.geolocation_extraction { background: #fff3e0; color: #e65100; }
+.scan-type-label.full_analysis { background: #f3e5f5; color: #7b1fa2; }
+
+/* Scan status badges */
+.scan-status {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.scan-status.completed { background: #e8f5e9; color: #2e7d32; }
+.scan-status.failed { background: #ffebee; color: #c62828; }
+.scan-status.running { background: #fff3e0; color: #e65100; }
+
+/* Cost by service list */
+.cost-service-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.cost-service-list li {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border, #dee2e6);
+    font-size: 14px;
+}
+
+.cost-service-list li:last-child {
+    border-bottom: none;
+}
+
+.cost-service-list .service-name {
+    font-weight: 500;
+}
+
+.cost-service-list .service-cost {
+    font-weight: 600;
+    color: var(--primary, #003C61);
+}

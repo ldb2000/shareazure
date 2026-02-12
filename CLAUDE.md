@@ -8,12 +8,16 @@ ShareAzure is a web application for uploading, managing, and sharing files via A
 
 **Tech Stack:**
 - Backend: Node.js/Express with Azure Blob Storage SDK
-- AI/Multimedia: OpenAI GPT-4 Vision (semantic analysis), Azure AI Vision (structural detection), Whisper (transcription)
+- AI/Multimedia: OpenAI GPT-4 Vision (semantic analysis), Azure AI Vision via `@azure/cognitiveservices-computervision` (structural detection), Whisper (transcription)
+- Geolocation: exifr (EXIF/GPS extraction), Nominatim OSM (reverse geocoding)
 - Media Processing: sharp (thumbnails/images), fluent-ffmpeg (video frames/audio extraction)
 - Frontend: Vanilla JavaScript (ES6+), HTML5, CSS3
+- Maps: Leaflet.js + MarkerCluster (OpenStreetMap tiles, no API key)
 - Database: SQLite (better-sqlite3) with FTS5 for full-text search
 - Storage: Azure Blob Storage
+- Infrastructure: Terraform (Storage Account, Application Insights, Cognitive Services)
 - Security: Helmet.js, CORS, rate limiting, bcrypt for passwords
+- Testing: Jest + Supertest (18 suites, 257 tests)
 
 ## Architecture
 
@@ -23,12 +27,14 @@ shareazure/
 │   ├── server.js      # Main server with all API endpoints
 │   ├── database.js    # SQLite database schema and helpers
 │   ├── test-connection.js  # Azure connection test utility
-│   └── ai/            # AI/Multimedia analysis module
-│       ├── index.js              # Express router (mounted on /api/ai and /api/admin/ai)
+│   └── ai/            # AI/Multimedia analysis module (12 files)
+│       ├── index.js              # Express router (37 endpoints, mounted on /api/ai and /api/admin/ai)
 │       ├── openaiService.js      # OpenAI GPT-4 Vision: analyzeImage, generateTags, describeScene
 │       ├── azureVisionService.js # Azure AI Vision: detectFaces, detectObjects, ocr
 │       ├── mediaProcessor.js     # sharp (thumbnails), ffmpeg (video frames, audio extraction)
-│       ├── analysisOrchestrator.js # Orchestrates full file analysis (dispatch by type)
+│       ├── analysisOrchestrator.js # Orchestrates full file analysis (dispatch by type + geoloc)
+│       ├── geolocationService.js # EXIF GPS extraction (exifr) + Nominatim reverse geocoding
+│       ├── scanService.js        # Scheduled scans (face, tagging, geoloc, full analysis)
 │       ├── searchService.js      # FTS5 search + filters
 │       ├── faceService.js        # Face gallery, grouping, naming
 │       ├── albumService.js       # Smart albums (auto rules + manual)
@@ -46,13 +52,16 @@ shareazure/
 ```
 
 **Key architectural points:**
-- The backend is a monolithic Express server in `backend/server.js` (~2000 lines)
-- All API endpoints are defined in the single server.js file (no route separation)
-- SQLite database tables: `share_links`, `download_logs`, `settings`, `allowed_email_domains`
+- The backend is a monolithic Express server in `backend/server.js` (~4900 lines)
+- Core API endpoints are in server.js (56 endpoints); AI endpoints are in `backend/ai/index.js` (37 endpoints)
+- SQLite database with 15 tables: `share_links`, `download_logs`, `settings`, `allowed_email_domains`, `users`, `guest_accounts`, `media_analysis`, `face_profiles`, `face_occurrences`, `smart_albums`, `smart_album_items`, `transcriptions`, `video_markers`, `ai_cost_tracking`, `geolocation`, `scan_schedules` + FTS5 virtual table `search_index`
 - Frontend uses vanilla JavaScript with Fetch API - no frameworks
 - Files are uploaded to Azure Blob Storage with UUID-based naming
 - Share links use Azure SAS tokens for temporary access
 - Admin interface is separate HTML/JS/CSS in the `admin/` directory
+- AI module (`backend/ai/`) with 12 service files, mounted on `/api/ai` and `/api/admin/ai`
+- Scheduled scans run via `setInterval` (60s) in server.js, checking `scan_schedules` table
+- `getBlobBufferHelper()` in server.js passes blob download capability to AI module
 
 ## Common Commands
 
@@ -109,13 +118,23 @@ curl -X POST http://localhost:3000/api/upload -F "file=@test.pdf"
 ```bash
 # Deploy Azure infrastructure with Terraform
 cd infrastructure
+cp terraform.tfvars.example terraform.tfvars  # Edit with your values
 terraform init
 terraform plan
 terraform apply
 
 # Get connection string
 terraform output -raw storage_account_primary_connection_string
+
+# Get Cognitive Services (AI) credentials
+terraform output -raw cognitive_services_endpoint   # -> AZURE_VISION_ENDPOINT
+terraform output -raw cognitive_services_key         # -> AZURE_VISION_KEY
+
+# Get App Insights connection string
+terraform output -raw application_insights_connection_string
 ```
+
+Terraform provisions: Storage Account + Container, Application Insights (optional), Cognitive Services / Computer Vision (optional).
 
 ### Database
 
@@ -172,6 +191,8 @@ Many settings are now stored in the SQLite `settings` table rather than environm
 - `smartAlbumsEnabled`, `searchEnabled` - Feature toggles
 - `aiMonthlyBudget`, `aiCostAlertThreshold` - Cost management
 - `thumbnailSize`, `thumbnailQuality` - Thumbnail generation settings
+- `geolocationEnabled` - EXIF GPS extraction toggle
+- `reverseGeocodingEnabled` - Nominatim reverse geocoding toggle
 
 ## Code Structure Notes
 
@@ -255,11 +276,19 @@ All defined in `backend/server.js`:
 - `GET /api/ai/transcription/:blobName` - Get transcription
 - `GET /api/ai/transcription/:blobName/search?q=...` - Search within transcription
 
+*Geolocation:*
+- `GET /api/ai/geolocation/:blobName` - Get geolocation data for a file
+- `GET /api/ai/map` - All geotagged files (lat, lng, blobName, address, city, country)
+- `POST /api/ai/geolocation/:blobName` - Manual EXIF GPS extraction
+
 *Admin AI (`/api/admin/ai/`):*
 - `GET /api/admin/ai/dashboard` - AI stats (analyses, costs, top tags, queue)
 - `GET /api/admin/ai/costs` - Detailed costs by service/model/period
 - `PUT /api/admin/ai/settings` - Configure AI settings
 - `POST /api/admin/ai/reindex` - Rebuild FTS5 search index
+- `GET /api/admin/ai/scans` - List all scan schedules
+- `PUT /api/admin/ai/scans/:id` - Update scan schedule/enabled
+- `POST /api/admin/ai/scans/:id/run` - Run a scan manually
 
 ### Database Helpers
 
@@ -347,6 +376,22 @@ searchIndexDb.upsert(data)
 searchIndexDb.search(query, limit)
 searchIndexDb.delete(blobName)
 searchIndexDb.rebuild()
+
+// AI - Geolocation
+geolocationDb.create(data)
+geolocationDb.getByBlobName(blobName)
+geolocationDb.getAll(limit)
+geolocationDb.delete(blobName)
+geolocationDb.getNearby(lat, lng, radiusKm)
+geolocationDb.getStats()
+
+// AI - Scan Schedules
+scanSchedulesDb.getAll()
+scanSchedulesDb.getByType(scanType)
+scanSchedulesDb.getById(id)
+scanSchedulesDb.update(id, data)
+scanSchedulesDb.updateLastRun(id, data)
+scanSchedulesDb.getEnabled()
 ```
 
 ### Frontend Structure
@@ -357,13 +402,19 @@ searchIndexDb.rebuild()
 - `login.html` + `js/login.js` - Login page (if authentication is enabled)
 
 **Admin Interface (admin/):**
-- `index.html` + `js/admin.js` - Full admin dashboard with tabs:
+- `index.html` + `js/admin.js` + `css/admin.css` - Full admin dashboard with tabs:
   - Dashboard: Statistics and charts (Chart.js)
   - Files: Advanced file management with search/filters
   - Shares: Share link history with export
   - Logs: System logs with filters
   - Settings: Configurable parameters
   - Email Domains: Manage allowed domains
+  - **IA**: AI management with 5 sub-tabs:
+    - Dashboard: stat cards (analyses, cost, budget, queue) + top tags + cost by service
+    - Services: toggle switches for each AI service (OpenAI, Azure Vision, Whisper, faces, geo, search, albums, video, auto-analyze, reverse geocoding)
+    - Parametres: model config, thresholds, budget, concurrent jobs
+    - Scans: 4 scan types (face_recognition, auto_tagging, geolocation_extraction, full_analysis) with schedule dropdown, enable toggle, manual run
+    - Carte: Leaflet.js map with geotagged files (MarkerCluster)
 
 ## Development Patterns
 
@@ -443,8 +494,31 @@ settingsDb.set('myKey', 'myValue');
 
 ## Testing Notes
 
+### Jest Unit Tests
+
+```bash
+# Run all tests
+cd backend && npx jest --forceExit
+
+# Run a specific test file
+npx jest --forceExit __tests__/ai-geolocation.test.js
+
+# Run tests with coverage
+npx jest --forceExit --coverage
+```
+
+- **18 test suites, 257 tests** covering all 93+ API endpoints (56 core + 37 AI)
+- Jest + Supertest with Azure SDK mocks in `backend/__tests__/setup.js`
+- `cleanTestDb()` must be called at top of each test file before requiring server
+- server.js IIFE wrapped in `if (require.main === module)` for testable import
+- `--forceExit` needed due to `setInterval` cleanup tasks in database.js
+- Mock gotchas: `blockBlobClient.exists()` defaults to false (mock with `mockResolvedValueOnce(true)`), stream mock needs real `Readable` for `.pipe()`, `BlobSASPermissions` must be constructable with `new`
+
+### Manual Testing
+
 - Use `test-connection.js` to verify Azure Storage connectivity before running the app
 - The `scripts/` directory contains test scripts for various features
+- `scripts/test-all-endpoints.sh` — master bash test script (requires running server)
 - For local development, ensure both backend (port 3000) and frontend (port 8080) are running
 - Admin interface runs on the same port as frontend (typically 8080)
 
@@ -497,6 +571,8 @@ L'ensemble des documents doivent etre sous le repertoire docs/
 - **README.md** - Main documentation and feature overview
 - **CHANGELOG.md** - Version history
 - **docs/README.md** - Documentation index
+- **docs/installation/INSTALL.md** - Complete installation guide (Terraform + .env + AI)
+- **docs/installation/setup.sh** - Automated installation script
 - **docs/GETTING_STARTED.md** - Quick start guide
 - **docs/PROJECT_SUMMARY.md** - Project summary and metrics
 - **docs/ARCHITECTURE.md** - Architecture diagrams

@@ -3,13 +3,15 @@ const router = express.Router();
 const fs = require('fs');
 const path = require('path');
 
-const { mediaAnalysisDb, transcriptionsDb, videoMarkersDb, aiCostTrackingDb, searchIndexDb, settingsDb } = require('../database');
+const { mediaAnalysisDb, transcriptionsDb, videoMarkersDb, aiCostTrackingDb, searchIndexDb, settingsDb, scanSchedulesDb } = require('../database');
 const analysisOrchestrator = require('./analysisOrchestrator');
 const searchService = require('./searchService');
 const faceService = require('./faceService');
 const albumService = require('./albumService');
 const transcriptionService = require('./transcriptionService');
 const mediaProcessor = require('./mediaProcessor');
+const geolocationService = require('./geolocationService');
+const scanService = require('./scanService');
 const jobQueue = require('./jobQueue');
 
 // Helper: get blob buffer from Azure (injected from server.js)
@@ -662,6 +664,78 @@ router.get('/transcription/:blobName(*)', (req, res) => {
 });
 
 // ============================================================================
+// GEOLOCATION ENDPOINTS
+// ============================================================================
+
+// GET /api/ai/geolocation/:blobName — Get geolocation data for a file
+router.get('/geolocation/:blobName(*)', (req, res) => {
+  try {
+    const { blobName } = req.params;
+    const geo = geolocationService.getByBlobName(blobName);
+
+    if (!geo) {
+      return res.status(404).json({ success: false, error: 'No geolocation data found for this file' });
+    }
+
+    res.json({
+      success: true,
+      geolocation: {
+        ...geo,
+        raw_exif: geo.raw_exif ? JSON.parse(geo.raw_exif) : null
+      }
+    });
+  } catch (error) {
+    console.error('Get geolocation error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/ai/map — All geotagged files (for map display)
+router.get('/map', (req, res) => {
+  try {
+    const { limit } = req.query;
+    const files = geolocationService.getAllGeotagged(limit ? parseInt(limit) : 500);
+
+    const mapData = files.map(f => ({
+      blobName: f.blob_name,
+      latitude: f.latitude,
+      longitude: f.longitude,
+      address: f.address,
+      city: f.city,
+      country: f.country
+    }));
+
+    res.json({ success: true, files: mapData, count: mapData.length });
+  } catch (error) {
+    console.error('Map data error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/ai/geolocation/:blobName — Manual geolocation extraction
+router.post('/geolocation/:blobName(*)', async (req, res) => {
+  try {
+    const { blobName } = req.params;
+
+    if (!getBlobBuffer) {
+      return res.status(500).json({ success: false, error: 'AI service not configured' });
+    }
+
+    const buffer = await getBlobBuffer(blobName);
+    const geoData = await geolocationService.extractGeolocation(buffer, blobName);
+
+    if (!geoData) {
+      return res.status(404).json({ success: false, error: 'No GPS data found in file EXIF metadata' });
+    }
+
+    res.json({ success: true, geolocation: geoData });
+  } catch (error) {
+    console.error('Extract geolocation error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============================================================================
 // ADMIN AI ENDPOINTS (mounted at /api/admin/ai/)
 // ============================================================================
 
@@ -742,7 +816,8 @@ adminRouter.put('/settings', (req, res) => {
       'transcriptionEnabled',
       'smartAlbumsEnabled', 'searchEnabled',
       'aiMonthlyBudget', 'aiCostAlertThreshold',
-      'thumbnailSize', 'thumbnailQuality'
+      'thumbnailSize', 'thumbnailQuality',
+      'geolocationEnabled', 'reverseGeocodingEnabled'
     ];
 
     const updated = {};
@@ -767,6 +842,72 @@ adminRouter.post('/reindex', (req, res) => {
     res.json({ success: true, message: 'Search index rebuilt successfully' });
   } catch (error) {
     console.error('Reindex error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/admin/ai/scans — List all scan schedules
+adminRouter.get('/scans', (req, res) => {
+  try {
+    const scans = scanSchedulesDb.getAll();
+    res.json({ success: true, scans });
+  } catch (error) {
+    console.error('Get scans error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT /api/admin/ai/scans/:id — Update scan schedule/enabled
+adminRouter.put('/scans/:id', (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { schedule, isEnabled } = req.body;
+
+    const existing = scanSchedulesDb.getById(id);
+    if (!existing) {
+      return res.status(404).json({ success: false, error: 'Scan not found' });
+    }
+
+    const updateData = {};
+    if (schedule !== undefined) {
+      const validSchedules = ['manual', 'hourly', 'daily', 'weekly'];
+      if (!validSchedules.includes(schedule)) {
+        return res.status(400).json({ success: false, error: `Invalid schedule. Must be one of: ${validSchedules.join(', ')}` });
+      }
+      updateData.schedule = schedule;
+    }
+    if (isEnabled !== undefined) {
+      updateData.isEnabled = isEnabled ? 1 : 0;
+    }
+
+    scanSchedulesDb.update(id, updateData);
+    const updated = scanSchedulesDb.getById(id);
+    res.json({ success: true, scan: updated });
+  } catch (error) {
+    console.error('Update scan error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/admin/ai/scans/:id/run — Run a scan manually
+adminRouter.post('/scans/:id/run', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const existing = scanSchedulesDb.getById(id);
+
+    if (!existing) {
+      return res.status(404).json({ success: false, error: 'Scan not found' });
+    }
+
+    if (!getBlobBuffer) {
+      return res.status(500).json({ success: false, error: 'AI service not configured' });
+    }
+
+    // Run scan asynchronously
+    const result = await scanService.runScan(existing.scan_type, getBlobBuffer);
+    res.json({ success: true, result });
+  } catch (error) {
+    console.error('Run scan error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

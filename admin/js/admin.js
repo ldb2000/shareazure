@@ -112,7 +112,8 @@ function switchSection(section) {
         users: { title: 'Gestion des utilisateurs', subtitle: 'Tous les comptes utilisateurs' },
         guests: { title: 'Gestion des invites', subtitle: 'Comptes temporaires' },
         logs: { title: 'Logs systeme', subtitle: 'Historique des operations' },
-        settings: { title: 'Parametres', subtitle: 'Configuration de l\'application' }
+        settings: { title: 'Parametres', subtitle: 'Configuration de l\'application' },
+        ai: { title: 'Intelligence Artificielle', subtitle: 'Configuration et pilotage de l\'IA' }
     };
 
     const t = titles[section] || { title: section, subtitle: '' };
@@ -134,6 +135,7 @@ function loadSectionData(section) {
         case 'guests': loadGuests(); break;
         case 'logs': loadLogs(); break;
         case 'settings': loadSettings(); loadEmailDomains(); break;
+        case 'ai': loadAI(); break;
     }
 }
 
@@ -1412,3 +1414,399 @@ function downloadText(text, filename) {
 const style = document.createElement('style');
 style.textContent = `@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }`;
 document.head.appendChild(style);
+
+// ============================================
+// AI SECTION
+// ============================================
+
+let aiMapInstance = null;
+
+function loadAI() {
+    initAITabs();
+    loadAIDashboard();
+}
+
+function initAITabs() {
+    document.querySelectorAll('.ai-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.ai-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.ai-tab-content').forEach(c => c.classList.remove('active'));
+            tab.classList.add('active');
+            const target = tab.dataset.aiTab;
+            document.getElementById(target).classList.add('active');
+
+            switch (target) {
+                case 'ai-dashboard': loadAIDashboard(); break;
+                case 'ai-services': loadAIServices(); break;
+                case 'ai-params': loadAISettings(); break;
+                case 'ai-scans': loadAIScans(); break;
+                case 'ai-map': loadAIMap(); break;
+            }
+        });
+    });
+
+    // Service save button
+    document.getElementById('saveAIServicesBtn')?.addEventListener('click', saveAIServices);
+    // Params save button
+    document.getElementById('saveAIParamsBtn')?.addEventListener('click', saveAIParams);
+    // Reindex button
+    document.getElementById('reindexBtn')?.addEventListener('click', async () => {
+        try {
+            const resp = await fetch(`${API_BASE_URL}/admin/ai/reindex`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${authToken}` }
+            });
+            const data = await resp.json();
+            if (data.success) {
+                showNotification('Index de recherche reconstruit', 'success');
+            } else {
+                showNotification(data.error || 'Erreur', 'error');
+            }
+        } catch (e) {
+            showNotification('Erreur de connexion', 'error');
+        }
+    });
+}
+
+async function loadAIDashboard() {
+    try {
+        const resp = await fetch(`${API_BASE_URL}/admin/ai/dashboard`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await resp.json();
+
+        if (!data.success) return;
+        const d = data.dashboard;
+
+        document.getElementById('aiAnalysisCount').textContent = d.analysis ? d.analysis.total : '0';
+        document.getElementById('aiMonthlyCost').textContent = `$${(d.costs.monthlyTotal || 0).toFixed(2)}`;
+        document.getElementById('aiBudgetUsed').textContent = `${d.costs.budgetUsedPercent || 0}%`;
+        document.getElementById('aiQueueSize').textContent = d.queue ? (d.queue.pending || 0) : '0';
+
+        // Top tags
+        const tagsEl = document.getElementById('aiTopTags');
+        if (d.tags && d.tags.length > 0) {
+            tagsEl.innerHTML = d.tags.map(t =>
+                `<span class="tag">${t.tag || t.name || t}<span class="count">${t.count || ''}</span></span>`
+            ).join('');
+        } else {
+            tagsEl.innerHTML = '<em>Aucun tag</em>';
+        }
+
+        // Cost by service
+        const costEl = document.getElementById('aiCostByService');
+        if (d.costs.topOperations && d.costs.topOperations.length > 0) {
+            costEl.innerHTML = `<ul class="cost-service-list">${d.costs.topOperations.map(op =>
+                `<li><span class="service-name">${op.operation}</span><span class="service-cost">$${(op.total_cost || 0).toFixed(4)}</span></li>`
+            ).join('')}</ul>`;
+        } else {
+            costEl.innerHTML = '<em>Aucune donnee de cout</em>';
+        }
+    } catch (e) {
+        console.error('AI dashboard error:', e);
+    }
+}
+
+async function loadAIServices() {
+    try {
+        const resp = await fetch(`${API_BASE_URL}/admin/settings`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await resp.json();
+        if (!data.success) return;
+
+        const settings = data.settings;
+        const toggleKeys = [
+            'aiEnabled', 'openaiEnabled', 'azureVisionEnabled', 'transcriptionEnabled',
+            'faceRecognitionEnabled', 'geolocationEnabled', 'searchEnabled',
+            'smartAlbumsEnabled', 'videoTimelineEnabled', 'autoAnalyzeOnUpload',
+            'reverseGeocodingEnabled'
+        ];
+
+        for (const key of toggleKeys) {
+            const el = document.getElementById(`aiSvc_${key}`);
+            if (el && settings[key]) {
+                el.checked = settings[key].value === 'true';
+            }
+        }
+    } catch (e) {
+        console.error('Load AI services error:', e);
+    }
+}
+
+async function saveAIServices() {
+    const toggleKeys = [
+        'aiEnabled', 'openaiEnabled', 'azureVisionEnabled', 'transcriptionEnabled',
+        'faceRecognitionEnabled', 'geolocationEnabled', 'searchEnabled',
+        'smartAlbumsEnabled', 'videoTimelineEnabled', 'autoAnalyzeOnUpload',
+        'reverseGeocodingEnabled'
+    ];
+
+    const payload = {};
+    for (const key of toggleKeys) {
+        const el = document.getElementById(`aiSvc_${key}`);
+        if (el) {
+            payload[key] = el.checked ? 'true' : 'false';
+        }
+    }
+
+    try {
+        const resp = await fetch(`${API_BASE_URL}/admin/ai/settings`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showNotification('Services IA mis a jour', 'success');
+        } else {
+            showNotification(data.error || 'Erreur', 'error');
+        }
+    } catch (e) {
+        showNotification('Erreur de connexion', 'error');
+    }
+}
+
+async function loadAISettings() {
+    try {
+        const resp = await fetch(`${API_BASE_URL}/admin/settings`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await resp.json();
+        if (!data.success) return;
+
+        const settings = data.settings;
+        const paramKeys = [
+            'openaiModel', 'whisperModel', 'whisperLanguage',
+            'faceMinConfidence', 'videoFrameInterval',
+            'thumbnailSize', 'thumbnailQuality', 'maxConcurrentAnalysis',
+            'aiMonthlyBudget', 'aiCostAlertThreshold'
+        ];
+
+        for (const key of paramKeys) {
+            const el = document.getElementById(`aiParam_${key}`);
+            if (el && settings[key]) {
+                el.value = settings[key].value;
+            }
+        }
+    } catch (e) {
+        console.error('Load AI settings error:', e);
+    }
+}
+
+async function saveAIParams() {
+    const paramKeys = [
+        'openaiModel', 'whisperModel', 'whisperLanguage',
+        'faceMinConfidence', 'videoFrameInterval',
+        'thumbnailSize', 'thumbnailQuality', 'maxConcurrentAnalysis',
+        'aiMonthlyBudget', 'aiCostAlertThreshold'
+    ];
+
+    const payload = {};
+    for (const key of paramKeys) {
+        const el = document.getElementById(`aiParam_${key}`);
+        if (el) {
+            payload[key] = el.value;
+        }
+    }
+
+    try {
+        const resp = await fetch(`${API_BASE_URL}/admin/ai/settings`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showNotification('Parametres IA enregistres', 'success');
+        } else {
+            showNotification(data.error || 'Erreur', 'error');
+        }
+    } catch (e) {
+        showNotification('Erreur de connexion', 'error');
+    }
+}
+
+const SCAN_TYPE_LABELS = {
+    face_recognition: 'Reconnaissance faciale',
+    auto_tagging: 'Tagging automatique',
+    geolocation_extraction: 'Extraction geolocalisation',
+    full_analysis: 'Analyse complete'
+};
+
+async function loadAIScans() {
+    try {
+        const resp = await fetch(`${API_BASE_URL}/admin/ai/scans`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await resp.json();
+        if (!data.success) return;
+
+        const tbody = document.getElementById('aiScansTableBody');
+        if (!data.scans || data.scans.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7">Aucun scan configure</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = data.scans.map(scan => `
+            <tr>
+                <td><span class="scan-type-label ${scan.scan_type}">${SCAN_TYPE_LABELS[scan.scan_type] || scan.scan_type}</span></td>
+                <td>
+                    <select onchange="updateScanSchedule(${scan.id}, this.value)" class="form-select-small">
+                        ${['manual', 'hourly', 'daily', 'weekly'].map(s =>
+                            `<option value="${s}" ${scan.schedule === s ? 'selected' : ''}>${s}</option>`
+                        ).join('')}
+                    </select>
+                </td>
+                <td>
+                    <label class="toggle-switch">
+                        <input type="checkbox" ${scan.is_enabled ? 'checked' : ''} onchange="updateScanEnabled(${scan.id}, this.checked)">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </td>
+                <td>${scan.last_run_at ? new Date(scan.last_run_at).toLocaleString('fr-FR') : '-'}</td>
+                <td>${scan.last_run_status ? `<span class="scan-status ${scan.last_run_status}">${scan.last_run_status}</span>` : '-'}</td>
+                <td>${scan.last_run_files_processed || '-'}</td>
+                <td>
+                    <button class="btn btn-primary btn-small" onclick="runScanNow(${scan.id})">
+                        <i class="fas fa-play"></i> Lancer
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (e) {
+        console.error('Load scans error:', e);
+    }
+}
+
+async function updateScanSchedule(scanId, schedule) {
+    try {
+        const resp = await fetch(`${API_BASE_URL}/admin/ai/scans/${scanId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ schedule })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showNotification('Planification mise a jour', 'success');
+        } else {
+            showNotification(data.error || 'Erreur', 'error');
+        }
+    } catch (e) {
+        showNotification('Erreur de connexion', 'error');
+    }
+}
+
+async function updateScanEnabled(scanId, enabled) {
+    try {
+        const resp = await fetch(`${API_BASE_URL}/admin/ai/scans/${scanId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ isEnabled: enabled })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showNotification(`Scan ${enabled ? 'active' : 'desactive'}`, 'success');
+        } else {
+            showNotification(data.error || 'Erreur', 'error');
+        }
+    } catch (e) {
+        showNotification('Erreur de connexion', 'error');
+    }
+}
+
+async function runScanNow(scanId) {
+    try {
+        showNotification('Scan en cours de lancement...', 'info');
+        const resp = await fetch(`${API_BASE_URL}/admin/ai/scans/${scanId}/run`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showNotification(`Scan termine: ${data.result.filesProcessed} fichiers traites`, 'success');
+            loadAIScans();
+        } else {
+            showNotification(data.error || 'Erreur', 'error');
+        }
+    } catch (e) {
+        showNotification('Erreur de connexion', 'error');
+    }
+}
+
+async function loadAIMap() {
+    const container = document.getElementById('ai-map-container');
+
+    // Initialize map if not already done
+    if (!aiMapInstance) {
+        aiMapInstance = L.map('ai-map-container').setView([46.603354, 1.888334], 6); // France center
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors',
+            maxZoom: 19
+        }).addTo(aiMapInstance);
+
+        // Try to center on user position
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(pos => {
+                aiMapInstance.setView([pos.coords.latitude, pos.coords.longitude], 10);
+            }, () => { /* keep default */ });
+        }
+    }
+
+    // Invalidate size (needed when map is in a hidden tab)
+    setTimeout(() => aiMapInstance.invalidateSize(), 100);
+
+    // Load geotagged files
+    try {
+        const resp = await fetch(`${API_BASE_URL}/ai/map`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await resp.json();
+        if (!data.success) return;
+
+        // Clear existing markers
+        if (aiMapInstance._markerCluster) {
+            aiMapInstance.removeLayer(aiMapInstance._markerCluster);
+        }
+
+        const markers = L.markerClusterGroup();
+
+        for (const file of data.files) {
+            const marker = L.marker([file.latitude, file.longitude]);
+            const popupContent = `
+                <div style="min-width: 150px;">
+                    <strong>${file.blobName}</strong><br>
+                    ${file.city ? `<em>${file.city}</em><br>` : ''}
+                    ${file.country ? file.country : ''}
+                    <br><small>${file.latitude.toFixed(4)}, ${file.longitude.toFixed(4)}</small>
+                </div>
+            `;
+            marker.bindPopup(popupContent);
+            markers.addLayer(marker);
+        }
+
+        aiMapInstance._markerCluster = markers;
+        aiMapInstance.addLayer(markers);
+
+        if (data.files.length > 0) {
+            const bounds = markers.getBounds();
+            if (bounds.isValid()) {
+                aiMapInstance.fitBounds(bounds, { padding: [20, 20] });
+            }
+        }
+    } catch (e) {
+        console.error('Load AI map error:', e);
+    }
+}

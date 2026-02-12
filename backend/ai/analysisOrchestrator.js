@@ -7,6 +7,7 @@ const mediaProcessor = require('./mediaProcessor');
 const transcriptionService = require('./transcriptionService');
 const faceService = require('./faceService');
 const searchService = require('./searchService');
+const geolocationService = require('./geolocationService');
 const jobQueue = require('./jobQueue');
 
 async function analyzeFile(blobName, contentType, getBufferFn) {
@@ -139,6 +140,21 @@ async function analyzeImage(blobName, getBufferFn) {
       }
     } catch (e) {
       console.error(`Azure Vision analysis failed for ${blobName}:`, e.message);
+    }
+  }
+
+  // Geolocation extraction (EXIF GPS)
+  if (geolocationService.isEnabled()) {
+    try {
+      const geoData = await geolocationService.extractGeolocation(buffer, blobName);
+      if (geoData) {
+        result.geolocation = geoData;
+        if (!result.tags.includes('geotagged')) {
+          result.tags.push('geotagged');
+        }
+      }
+    } catch (e) {
+      console.error(`Geolocation extraction failed for ${blobName}:`, e.message);
     }
   }
 
@@ -276,6 +292,21 @@ async function analyzeVideo(blobName, getBufferFn) {
         }
       } catch (e) {
         console.error(`Video transcription failed for ${blobName}:`, e.message);
+      }
+    }
+
+    // Geolocation extraction (video EXIF/GPS metadata)
+    if (geolocationService.isEnabled()) {
+      try {
+        const geoData = await geolocationService.extractGeolocation(buffer, blobName);
+        if (geoData) {
+          result.geolocation = geoData;
+          if (!result.tags.includes('geotagged')) {
+            result.tags.push('geotagged');
+          }
+        }
+      } catch (e) {
+        console.error(`Video geolocation extraction failed for ${blobName}:`, e.message);
       }
     }
 

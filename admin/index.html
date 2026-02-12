@@ -9,6 +9,12 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Chart.js pour les graphiques -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Leaflet.js pour la carte -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 </head>
 <body>
     <!-- Sidebar -->
@@ -55,6 +61,10 @@
             <a href="#logs" class="nav-item" data-section="logs">
                 <i class="fas fa-list-ul nav-icon"></i>
                 <span class="nav-text">Logs</span>
+            </a>
+            <a href="#ai" class="nav-item" data-section="ai">
+                <i class="fas fa-brain nav-icon"></i>
+                <span class="nav-text">IA</span>
             </a>
             <a href="#settings" class="nav-item" data-section="settings">
                 <i class="fas fa-cog nav-icon"></i>
@@ -446,6 +456,268 @@
                     <button class="btn btn-secondary btn-small" id="logsNextBtn" disabled>
                         <i class="fas fa-chevron-right"></i>
                     </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- AI Section -->
+        <section id="ai" class="content-section">
+            <!-- AI Sub-tabs -->
+            <div class="ai-tabs">
+                <button class="ai-tab active" data-ai-tab="ai-dashboard">Dashboard</button>
+                <button class="ai-tab" data-ai-tab="ai-services">Services</button>
+                <button class="ai-tab" data-ai-tab="ai-params">Parametres</button>
+                <button class="ai-tab" data-ai-tab="ai-scans">Scans</button>
+                <button class="ai-tab" data-ai-tab="ai-map">Carte</button>
+            </div>
+
+            <!-- AI Dashboard Sub-tab -->
+            <div id="ai-dashboard" class="ai-tab-content active">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-image"></i></div>
+                        <div class="stat-info">
+                            <h3 id="aiAnalysisCount">0</h3>
+                            <p>Analyses</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-dollar-sign"></i></div>
+                        <div class="stat-info">
+                            <h3 id="aiMonthlyCost">$0.00</h3>
+                            <p>Cout mensuel</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-chart-pie"></i></div>
+                        <div class="stat-info">
+                            <h3 id="aiBudgetUsed">0%</h3>
+                            <p>Budget utilise</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-spinner"></i></div>
+                        <div class="stat-info">
+                            <h3 id="aiQueueSize">0</h3>
+                            <p>File d'attente</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="stats-grid" style="margin-top: 20px;">
+                    <div class="card">
+                        <h3>Top Tags</h3>
+                        <div id="aiTopTags" class="tag-cloud">Chargement...</div>
+                    </div>
+                    <div class="card">
+                        <h3>Couts par service</h3>
+                        <div id="aiCostByService">Chargement...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI Services Sub-tab -->
+            <div id="ai-services" class="ai-tab-content">
+                <div class="settings-grid">
+                    <div class="settings-card">
+                        <h3><i class="fas fa-power-off"></i> Services IA</h3>
+                        <div class="settings-form">
+                            <div class="form-group toggle-row">
+                                <label>IA globale</label>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="aiSvc_aiEnabled">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="form-group toggle-row">
+                                <label>OpenAI GPT-4 Vision</label>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="aiSvc_openaiEnabled">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="form-group toggle-row">
+                                <label>Azure AI Vision</label>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="aiSvc_azureVisionEnabled">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="form-group toggle-row">
+                                <label>Whisper (transcription)</label>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="aiSvc_transcriptionEnabled">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="form-group toggle-row">
+                                <label>Reconnaissance faciale</label>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="aiSvc_faceRecognitionEnabled">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="form-group toggle-row">
+                                <label>Geolocalisation</label>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="aiSvc_geolocationEnabled">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="form-group toggle-row">
+                                <label>Recherche semantique</label>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="aiSvc_searchEnabled">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="form-group toggle-row">
+                                <label>Albums intelligents</label>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="aiSvc_smartAlbumsEnabled">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="form-group toggle-row">
+                                <label>Timeline video</label>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="aiSvc_videoTimelineEnabled">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="form-group toggle-row">
+                                <label>Auto-analyse a l'upload</label>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="aiSvc_autoAnalyzeOnUpload">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="form-group toggle-row">
+                                <label>Reverse geocoding (Nominatim)</label>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="aiSvc_reverseGeocodingEnabled">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary" id="saveAIServicesBtn" style="margin-top: 15px;">
+                            <i class="fas fa-save"></i> Enregistrer
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI Parameters Sub-tab -->
+            <div id="ai-params" class="ai-tab-content">
+                <div class="settings-grid">
+                    <div class="settings-card">
+                        <h3><i class="fas fa-robot"></i> Modeles</h3>
+                        <div class="settings-form">
+                            <div class="form-group">
+                                <label>Modele OpenAI</label>
+                                <select id="aiParam_openaiModel">
+                                    <option value="gpt-4o">GPT-4o</option>
+                                    <option value="gpt-4o-mini">GPT-4o Mini</option>
+                                    <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Modele Whisper</label>
+                                <select id="aiParam_whisperModel">
+                                    <option value="whisper-1">Whisper-1</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Langue transcription</label>
+                                <select id="aiParam_whisperLanguage">
+                                    <option value="fr">Francais</option>
+                                    <option value="en">English</option>
+                                    <option value="es">Espanol</option>
+                                    <option value="de">Deutsch</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="settings-card">
+                        <h3><i class="fas fa-sliders"></i> Seuils et parametres</h3>
+                        <div class="settings-form">
+                            <div class="form-group">
+                                <label>Confiance faciale min (0-1)</label>
+                                <input type="number" id="aiParam_faceMinConfidence" step="0.05" min="0" max="1" value="0.7">
+                            </div>
+                            <div class="form-group">
+                                <label>Intervalle frames video (sec)</label>
+                                <input type="number" id="aiParam_videoFrameInterval" min="1" max="60" value="5">
+                            </div>
+                            <div class="form-group">
+                                <label>Taille thumbnails (px)</label>
+                                <input type="number" id="aiParam_thumbnailSize" min="50" max="800" value="300">
+                            </div>
+                            <div class="form-group">
+                                <label>Qualite thumbnails (0-100)</label>
+                                <input type="number" id="aiParam_thumbnailQuality" min="10" max="100" value="80">
+                            </div>
+                            <div class="form-group">
+                                <label>Jobs simultanes max</label>
+                                <input type="number" id="aiParam_maxConcurrentAnalysis" min="1" max="10" value="3">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="settings-card">
+                        <h3><i class="fas fa-wallet"></i> Budget IA</h3>
+                        <div class="settings-form">
+                            <div class="form-group">
+                                <label>Budget mensuel ($)</label>
+                                <input type="number" id="aiParam_aiMonthlyBudget" min="0" max="10000" value="50">
+                            </div>
+                            <div class="form-group">
+                                <label>Seuil alerte (% du budget)</label>
+                                <input type="number" id="aiParam_aiCostAlertThreshold" min="0" max="100" value="80">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="settings-actions">
+                    <button class="btn btn-primary btn-large" id="saveAIParamsBtn">
+                        <i class="fas fa-save"></i> Enregistrer les parametres IA
+                    </button>
+                </div>
+            </div>
+
+            <!-- AI Scans Sub-tab -->
+            <div id="ai-scans" class="ai-tab-content">
+                <div class="card">
+                    <h3><i class="fas fa-radar"></i> Scans planifies</h3>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Type</th>
+                                    <th>Planification</th>
+                                    <th>Actif</th>
+                                    <th>Derniere execution</th>
+                                    <th>Statut</th>
+                                    <th>Fichiers traites</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="aiScansTableBody">
+                                <tr><td colspan="7" class="loading">Chargement...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div style="margin-top: 20px;">
+                    <button class="btn btn-secondary" id="reindexBtn">
+                        <i class="fas fa-sync"></i> Reindexer la recherche
+                    </button>
+                </div>
+            </div>
+
+            <!-- AI Map Sub-tab -->
+            <div id="ai-map" class="ai-tab-content">
+                <div class="card">
+                    <h3><i class="fas fa-map-marked-alt"></i> Carte des fichiers geotagues</h3>
+                    <div id="ai-map-container"></div>
                 </div>
             </div>
         </section>
