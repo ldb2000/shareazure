@@ -10,6 +10,11 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 </head>
 <body>
     <!-- Header -->
@@ -25,6 +30,9 @@
                 </button>
                 <button class="btn-icon" id="shareLinksBtn" title="Mes liens de partage">
                     <i class="fas fa-link"></i>
+                </button>
+                <button class="btn-icon" id="discoverBtn" title="Decouvrir">
+                    <i class="fas fa-compass"></i>
                 </button>
                 <button class="btn-icon" id="createGuestBtn" title="Créer un compte invité">
                     <i class="fas fa-user-plus"></i>
@@ -141,6 +149,73 @@
                         <div class="spinner"></div>
                         <p>Chargement des fichiers d'equipe...</p>
                     </div>
+                </div>
+            </div>
+
+            <!-- Discover Section -->
+            <div class="discover-section" id="discoverSection" style="display: none;">
+                <div class="section-header">
+                    <h2><i class="fas fa-compass"></i> Decouvrir</h2>
+                    <button class="btn btn-secondary" id="closeDiscoverBtn">
+                        <i class="fas fa-times"></i>
+                        Fermer
+                    </button>
+                </div>
+                <div class="discover-tabs">
+                    <button class="discover-tab active" data-tab="tags">
+                        <i class="fas fa-tags"></i> Par Tags
+                    </button>
+                    <button class="discover-tab" data-tab="search">
+                        <i class="fas fa-brain"></i> Recherche IA
+                    </button>
+                    <button class="discover-tab" data-tab="map">
+                        <i class="fas fa-map-marked-alt"></i> Carte
+                    </button>
+                </div>
+
+                <!-- Tab: Tags -->
+                <div class="discover-tab-content" id="discoverTabTags">
+                    <div class="discover-tag-cloud" id="discoverTagCloud">
+                        <div class="loading-state">
+                            <div class="spinner"></div>
+                            <p>Chargement des tags...</p>
+                        </div>
+                    </div>
+                    <div class="discover-tag-results" id="discoverTagResults" style="display: none;">
+                        <button class="btn btn-secondary btn-sm" id="discoverBackToTags">
+                            <i class="fas fa-arrow-left"></i> Retour aux tags
+                        </button>
+                        <h3 id="discoverTagResultsTitle" style="margin: 1rem 0;"></h3>
+                        <div class="discover-results-grid" id="discoverTagFilesGrid"></div>
+                    </div>
+                </div>
+
+                <!-- Tab: Search -->
+                <div class="discover-tab-content" id="discoverTabSearch" style="display: none;">
+                    <div class="discover-search-bar">
+                        <div class="discover-search-input-wrapper">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="discoverSearchInput" placeholder="Rechercher par description, tags, contenu...">
+                            <div class="discover-suggestions" id="discoverSuggestions" style="display: none;"></div>
+                        </div>
+                        <select id="discoverSearchType" class="filter-select">
+                            <option value="">Tous les types</option>
+                            <option value="image">Images</option>
+                            <option value="video">Videos</option>
+                            <option value="audio">Audio</option>
+                            <option value="document">Documents</option>
+                        </select>
+                        <button class="btn btn-primary" id="discoverSearchBtn">
+                            <i class="fas fa-search"></i> Rechercher
+                        </button>
+                    </div>
+                    <div class="discover-results-grid" id="discoverSearchResultsGrid"></div>
+                </div>
+
+                <!-- Tab: Map -->
+                <div class="discover-tab-content" id="discoverTabMap" style="display: none;">
+                    <div id="discover-map"></div>
+                    <p class="discover-map-counter" id="discoverMapCounter"></p>
                 </div>
             </div>
 

@@ -9,6 +9,9 @@ let currentPath = '';
 let imageFiles = [];
 let currentImageIndex = 0;
 let userTeamFiles = [];
+let discoverMapInstance = null;
+let discoverCurrentTab = 'tags';
+let discoverSuggestionTimeout = null;
 
 // Initialisation
 document.addEventListener('DOMContentLoaded', () => {
@@ -60,6 +63,34 @@ function initializeEventListeners() {
     document.getElementById('createGuestBtn')?.addEventListener('click', showCreateGuestModal);
     document.getElementById('shareLinksBtn')?.addEventListener('click', showShareLinksSection);
     document.getElementById('closeShareLinksBtn')?.addEventListener('click', hideShareLinksSection);
+    document.getElementById('discoverBtn')?.addEventListener('click', showDiscoverSection);
+    document.getElementById('closeDiscoverBtn')?.addEventListener('click', hideDiscoverSection);
+    document.querySelectorAll('.discover-tab').forEach(tab => {
+        tab.addEventListener('click', () => switchDiscoverTab(tab.dataset.tab));
+    });
+    document.getElementById('discoverSearchBtn')?.addEventListener('click', handleDiscoverSearch);
+    document.getElementById('discoverSearchInput')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') handleDiscoverSearch();
+    });
+    document.getElementById('discoverSearchInput')?.addEventListener('input', (e) => {
+        clearTimeout(discoverSuggestionTimeout);
+        const query = e.target.value.trim();
+        if (query.length >= 2) {
+            discoverSuggestionTimeout = setTimeout(() => loadDiscoverSuggestions(query), 300);
+        } else {
+            document.getElementById('discoverSuggestions').style.display = 'none';
+        }
+    });
+    document.getElementById('discoverBackToTags')?.addEventListener('click', () => {
+        document.getElementById('discoverTagResults').style.display = 'none';
+        document.getElementById('discoverTagCloud').style.display = 'flex';
+    });
+    document.addEventListener('click', (e) => {
+        const suggestions = document.getElementById('discoverSuggestions');
+        if (suggestions && !e.target.closest('.discover-search-input-wrapper')) {
+            suggestions.style.display = 'none';
+        }
+    });
     document.getElementById('logoutBtn').addEventListener('click', handleLogout);
 
     // View buttons
@@ -1290,6 +1321,8 @@ async function handleDelete() {
 function showShareLinksSection() {
     document.getElementById('filesSection').style.display = 'none';
     document.getElementById('shareLinksSection').style.display = 'block';
+    document.getElementById('discoverSection').style.display = 'none';
+    document.getElementById('teamFilesSection').style.display = 'none';
     loadShareLinks();
 }
 
@@ -1682,8 +1715,8 @@ async function loadTeamFilesSection() {
 
 function showTeamFilesSection() {
     document.getElementById('filesSection').style.display = 'none';
-    const shareSection = document.getElementById('shareLinksSection');
-    if (shareSection) shareSection.style.display = 'none';
+    document.getElementById('shareLinksSection').style.display = 'none';
+    document.getElementById('discoverSection').style.display = 'none';
     document.getElementById('teamFilesSection').style.display = 'block';
     loadTeamFiles();
 }
@@ -1762,6 +1795,349 @@ async function loadTeamFiles() {
     container.innerHTML = html;
     document.getElementById('teamFilesSectionTitle').textContent =
         `Fichiers d'equipe (${teams.length} equipe${teams.length > 1 ? 's' : ''})`;
+}
+
+// ============================================
+// Discover Section
+// ============================================
+
+function showDiscoverSection() {
+    document.getElementById('filesSection').style.display = 'none';
+    document.getElementById('shareLinksSection').style.display = 'none';
+    document.getElementById('teamFilesSection').style.display = 'none';
+    document.getElementById('discoverSection').style.display = 'block';
+
+    // Load current tab data
+    if (discoverCurrentTab === 'tags') {
+        loadDiscoverTags();
+    } else if (discoverCurrentTab === 'search') {
+        // Search tab: nothing to pre-load
+    } else if (discoverCurrentTab === 'map') {
+        loadDiscoverMap();
+    }
+}
+
+function hideDiscoverSection() {
+    document.getElementById('discoverSection').style.display = 'none';
+    document.getElementById('filesSection').style.display = 'block';
+}
+
+function switchDiscoverTab(tabName) {
+    discoverCurrentTab = tabName;
+
+    // Update tab buttons
+    document.querySelectorAll('.discover-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.tab === tabName);
+    });
+
+    // Show/hide tab content
+    document.getElementById('discoverTabTags').style.display = tabName === 'tags' ? '' : 'none';
+    document.getElementById('discoverTabSearch').style.display = tabName === 'search' ? '' : 'none';
+    document.getElementById('discoverTabMap').style.display = tabName === 'map' ? '' : 'none';
+
+    // Load data
+    if (tabName === 'tags') {
+        loadDiscoverTags();
+    } else if (tabName === 'map') {
+        loadDiscoverMap();
+    }
+}
+
+async function loadDiscoverTags() {
+    const container = document.getElementById('discoverTagCloud');
+    container.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Chargement des tags...</p></div>';
+    container.style.display = 'flex';
+    document.getElementById('discoverTagResults').style.display = 'none';
+
+    try {
+        const token = getAuthToken();
+        const response = await fetch(`${API_URL}/ai/tags`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (response.status === 503 || response.status === 404) {
+            showDiscoverEmpty(container, 'La fonctionnalite IA n\'est pas activee sur ce serveur.');
+            return;
+        }
+        if (response.status === 401) { handleLogout(); return; }
+
+        const data = await response.json();
+        const tags = data.tags || data || [];
+
+        if (!Array.isArray(tags) || tags.length === 0) {
+            showDiscoverEmpty(container, 'Aucun tag disponible. Analysez des fichiers pour generer des tags.');
+            return;
+        }
+
+        // Determine min/max counts for sizing
+        const counts = tags.map(t => t.count || 1);
+        const maxCount = Math.max(...counts);
+        const minCount = Math.min(...counts);
+        const range = maxCount - minCount || 1;
+
+        container.innerHTML = tags.map(tag => {
+            const relative = (tag.count - minCount) / range;
+            let sizeClass = 'discover-tag-sm';
+            if (relative > 0.66) sizeClass = 'discover-tag-lg';
+            else if (relative > 0.33) sizeClass = 'discover-tag-md';
+
+            return `<button class="discover-tag ${sizeClass}" data-tag="${escapeHtml(tag.tag || tag.name)}">
+                ${escapeHtml(tag.tag || tag.name)}
+                <span class="tag-count">${tag.count}</span>
+            </button>`;
+        }).join('');
+
+        // Add click events
+        container.querySelectorAll('.discover-tag').forEach(btn => {
+            btn.addEventListener('click', () => loadDiscoverTagFiles(btn.dataset.tag));
+        });
+    } catch (error) {
+        console.error('Erreur chargement tags:', error);
+        showDiscoverEmpty(container, 'Erreur lors du chargement des tags.');
+    }
+}
+
+async function loadDiscoverTagFiles(tag) {
+    document.getElementById('discoverTagCloud').style.display = 'none';
+    const resultsSection = document.getElementById('discoverTagResults');
+    resultsSection.style.display = 'block';
+    document.getElementById('discoverTagResultsTitle').textContent = `Fichiers avec le tag "${tag}"`;
+    const grid = document.getElementById('discoverTagFilesGrid');
+    grid.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Chargement...</p></div>';
+
+    try {
+        const token = getAuthToken();
+        const response = await fetch(`${API_URL}/ai/tags/${encodeURIComponent(tag)}/files`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (response.status === 401) { handleLogout(); return; }
+        const data = await response.json();
+        const files = data.files || data || [];
+
+        if (!Array.isArray(files) || files.length === 0) {
+            grid.innerHTML = '<div class="discover-empty"><i class="fas fa-folder-open"></i><p>Aucun fichier trouve pour ce tag.</p></div>';
+            return;
+        }
+
+        grid.innerHTML = files.map(file => renderDiscoverFileCard(file)).join('');
+        grid.querySelectorAll('.discover-file-card').forEach(card => {
+            card.addEventListener('click', () => handleDiscoverFileClick(card.dataset.blobName));
+        });
+    } catch (error) {
+        console.error('Erreur chargement fichiers tag:', error);
+        grid.innerHTML = '<div class="discover-empty"><i class="fas fa-exclamation-circle"></i><p>Erreur lors du chargement.</p></div>';
+    }
+}
+
+async function handleDiscoverSearch() {
+    const query = document.getElementById('discoverSearchInput').value.trim();
+    if (!query) return;
+
+    document.getElementById('discoverSuggestions').style.display = 'none';
+    const typeFilter = document.getElementById('discoverSearchType').value;
+    const grid = document.getElementById('discoverSearchResultsGrid');
+    grid.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Recherche en cours...</p></div>';
+
+    try {
+        const token = getAuthToken();
+        let url = `${API_URL}/ai/search?q=${encodeURIComponent(query)}`;
+        if (typeFilter) url += `&type=${encodeURIComponent(typeFilter)}`;
+
+        const response = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (response.status === 503 || response.status === 404) {
+            grid.innerHTML = '<div class="discover-empty"><i class="fas fa-robot"></i><p>La fonctionnalite de recherche IA n\'est pas activee.</p></div>';
+            return;
+        }
+        if (response.status === 401) { handleLogout(); return; }
+
+        const data = await response.json();
+        const results = data.results || data || [];
+
+        if (!Array.isArray(results) || results.length === 0) {
+            grid.innerHTML = '<div class="discover-empty"><i class="fas fa-search"></i><p>Aucun resultat pour "' + escapeHtml(query) + '".</p></div>';
+            return;
+        }
+
+        grid.innerHTML = results.map(file => renderDiscoverFileCard(file)).join('');
+        grid.querySelectorAll('.discover-file-card').forEach(card => {
+            card.addEventListener('click', () => handleDiscoverFileClick(card.dataset.blobName));
+        });
+    } catch (error) {
+        console.error('Erreur recherche:', error);
+        grid.innerHTML = '<div class="discover-empty"><i class="fas fa-exclamation-circle"></i><p>Erreur lors de la recherche.</p></div>';
+    }
+}
+
+async function loadDiscoverSuggestions(query) {
+    try {
+        const token = getAuthToken();
+        const response = await fetch(`${API_URL}/ai/search/suggestions?q=${encodeURIComponent(query)}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!response.ok) {
+            document.getElementById('discoverSuggestions').style.display = 'none';
+            return;
+        }
+
+        const data = await response.json();
+        const suggestions = data.suggestions || data || [];
+        const container = document.getElementById('discoverSuggestions');
+
+        if (!Array.isArray(suggestions) || suggestions.length === 0) {
+            container.style.display = 'none';
+            return;
+        }
+
+        container.innerHTML = suggestions.map(s => {
+            const text = typeof s === 'string' ? s : s.text || s.suggestion || '';
+            return `<div class="discover-suggestion-item">${escapeHtml(text)}</div>`;
+        }).join('');
+        container.style.display = 'block';
+
+        container.querySelectorAll('.discover-suggestion-item').forEach(item => {
+            item.addEventListener('click', () => {
+                document.getElementById('discoverSearchInput').value = item.textContent;
+                container.style.display = 'none';
+                handleDiscoverSearch();
+            });
+        });
+    } catch (error) {
+        console.error('Erreur suggestions:', error);
+        document.getElementById('discoverSuggestions').style.display = 'none';
+    }
+}
+
+async function loadDiscoverMap() {
+    const container = document.getElementById('discover-map');
+    const counter = document.getElementById('discoverMapCounter');
+
+    // Initialize map only once
+    if (!discoverMapInstance) {
+        discoverMapInstance = L.map('discover-map').setView([46.6, 1.9], 5);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(discoverMapInstance);
+    }
+
+    // Invalidate size in case container was hidden
+    setTimeout(() => discoverMapInstance.invalidateSize(), 200);
+
+    try {
+        const token = getAuthToken();
+        const response = await fetch(`${API_URL}/ai/map`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (response.status === 503 || response.status === 404) {
+            counter.textContent = 'La fonctionnalite de geolocalisation n\'est pas activee.';
+            return;
+        }
+        if (response.status === 401) { handleLogout(); return; }
+
+        const data = await response.json();
+        const files = data.files || data || [];
+
+        // Remove existing markers
+        discoverMapInstance.eachLayer(layer => {
+            if (layer instanceof L.Marker || layer instanceof L.MarkerClusterGroup) {
+                discoverMapInstance.removeLayer(layer);
+            }
+        });
+
+        if (!Array.isArray(files) || files.length === 0) {
+            counter.textContent = 'Aucun fichier geotague.';
+            return;
+        }
+
+        const markers = L.markerClusterGroup();
+
+        files.forEach(file => {
+            const lat = parseFloat(file.lat || file.latitude);
+            const lng = parseFloat(file.lng || file.longitude);
+            if (isNaN(lat) || isNaN(lng)) return;
+
+            const displayName = file.originalName || file.blobName || file.blob_name || '';
+            const city = file.city || '';
+            const country = file.country || '';
+            const location = [city, country].filter(Boolean).join(', ');
+
+            const popup = `
+                <div style="min-width: 180px;">
+                    <strong>${escapeHtml(displayName)}</strong>
+                    ${location ? `<br><i class="fas fa-map-marker-alt"></i> ${escapeHtml(location)}` : ''}
+                    <br><small>${lat.toFixed(5)}, ${lng.toFixed(5)}</small>
+                    <br><a href="#" onclick="handleDiscoverFileClick('${escapeHtml(file.blobName || file.blob_name)}'); return false;">Voir le fichier</a>
+                </div>
+            `;
+
+            const marker = L.marker([lat, lng]).bindPopup(popup);
+            markers.addLayer(marker);
+        });
+
+        discoverMapInstance.addLayer(markers);
+
+        if (files.length > 0) {
+            const bounds = markers.getBounds();
+            if (bounds.isValid()) {
+                discoverMapInstance.fitBounds(bounds, { padding: [30, 30] });
+            }
+        }
+
+        counter.textContent = `${files.length} fichier${files.length > 1 ? 's' : ''} geotague${files.length > 1 ? 's' : ''}`;
+    } catch (error) {
+        console.error('Erreur chargement carte:', error);
+        counter.textContent = 'Erreur lors du chargement de la carte.';
+    }
+}
+
+function renderDiscoverFileCard(file) {
+    const blobName = file.blobName || file.blob_name || file.name || '';
+    const displayName = file.originalName || file.original_name || file.displayName || blobName;
+    const tags = file.tags || [];
+    const contentType = file.contentType || file.content_type || '';
+    const isImage = contentType.startsWith('image/');
+
+    let thumbHtml;
+    if (isImage) {
+        const thumbUrl = getDiscoverThumbnailUrl(blobName);
+        thumbHtml = `<img src="${thumbUrl}" alt="${escapeHtml(displayName)}" class="discover-file-card-thumb" loading="lazy">`;
+    } else {
+        thumbHtml = `<div class="discover-file-card-icon">${getFileIcon(contentType)}</div>`;
+    }
+
+    const tagsHtml = Array.isArray(tags) && tags.length > 0
+        ? `<div class="discover-file-card-tags">${tags.slice(0, 4).map(t => `<span class="mini-tag">${escapeHtml(typeof t === 'string' ? t : t.tag || '')}</span>`).join('')}</div>`
+        : '';
+
+    return `<div class="discover-file-card" data-blob-name="${escapeHtml(blobName)}">
+        ${thumbHtml}
+        <div class="discover-file-card-info">
+            <div class="discover-file-card-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</div>
+            ${tagsHtml}
+        </div>
+    </div>`;
+}
+
+function getDiscoverThumbnailUrl(blobName) {
+    const token = getAuthToken();
+    const url = `${API_URL}/preview/${encodeURIComponent(blobName)}`;
+    return token ? `${url}?token=${encodeURIComponent(token)}` : url;
+}
+
+function handleDiscoverFileClick(blobName) {
+    if (!blobName) return;
+    const token = getAuthToken();
+    const previewUrl = `${API_URL}/preview/${encodeURIComponent(blobName)}`;
+    window.open(token ? `${previewUrl}?token=${encodeURIComponent(token)}` : previewUrl, '_blank');
+}
+
+function showDiscoverEmpty(container, message) {
+    container.innerHTML = `<div class="discover-empty"><i class="fas fa-compass"></i><p>${message}</p></div>`;
 }
 
 // Confirm dialog (replaces native confirm())
