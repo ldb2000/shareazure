@@ -591,3 +591,16 @@ L'ensemble des documents doivent etre sous le repertoire docs/
 - **docs/CUSTOMIZATION.md** - Customization guide
 - **docs/AI_FEATURES.md** - AI/Multimedia features and Discover section documentation
 - **infrastructure/README.md** - Terraform deployment guide
+
+
+
+## Skills available in this repo
+- skills/azure-enterprise-ctocoach.skills.md
+- skills/azure-architecture-optimized.skills.md
+- skills/azure-finops-advanced.skills.md
+- skills/azure-landingzone-finops-governance.skills.md
+
+## Default behaviour
+If the user asks for enterprise-level architecture + cost governance:
+- activate azure-enterprise-ctocoach
+
