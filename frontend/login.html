@@ -20,6 +20,19 @@
                 <p>Connexion à votre espace de stockage</p>
             </div>
             
+            <!-- Microsoft SSO Button (hidden by default, shown via JS) -->
+            <div id="entraLoginSection" style="display: none;">
+                <button type="button" id="entraLoginBtn" style="width: 100%; padding: 12px 16px; background: #fff; color: #333; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 15px; font-weight: 500; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; font-family: inherit; transition: background-color 0.2s, box-shadow 0.2s;" onmouseover="this.style.background='#f5f5f5';this.style.boxShadow='0 2px 4px rgba(0,0,0,0.1)'" onmouseout="this.style.background='#fff';this.style.boxShadow='none'">
+                    <svg width="20" height="20" viewBox="0 0 21 21"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
+                    Se connecter avec Microsoft
+                </button>
+                <div id="entraDivider" style="display: flex; align-items: center; gap: 12px; margin: 16px 0; color: #999;">
+                    <hr style="flex: 1; border: none; border-top: 1px solid #ddd;">
+                    <span style="font-size: 13px;">ou</span>
+                    <hr style="flex: 1; border: none; border-top: 1px solid #ddd;">
+                </div>
+            </div>
+
             <form id="loginForm" class="login-form">
                 <div class="form-group">
                     <label for="username">
@@ -58,7 +71,7 @@
             <div class="login-footer">
                 <p class="login-help">
                     <i class="fas fa-info-circle"></i>
-                    Identifiants par défaut : user / user123
+                    Contactez votre administrateur en cas de problème de connexion
                 </p>
             </div>
         </div>

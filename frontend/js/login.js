@@ -1,11 +1,90 @@
-// Configuration
-const API_URL = 'http://localhost:3000/api';
+// Configuration - API relative au domaine actuel
+const API_URL = window.location.origin + '/api';
 
 // Initialisation
 document.addEventListener('DOMContentLoaded', () => {
+    // Check for token from Entra callback
+    const params = new URLSearchParams(window.location.search);
+    const callbackToken = params.get('token');
+    const callbackError = params.get('error');
+
+    if (callbackToken) {
+        // Store token from Entra SSO callback
+        localStorage.setItem('authToken', callbackToken);
+        localStorage.setItem('userToken', callbackToken);
+        // Clean URL
+        window.history.replaceState({}, '', window.location.pathname);
+        // Verify and redirect
+        verifyToken(callbackToken).then(data => {
+            if (data) {
+                localStorage.setItem('userData', JSON.stringify(data.user));
+                if (data.user.role === 'admin') {
+                    localStorage.setItem('adminToken', callbackToken);
+                    localStorage.setItem('adminUsername', data.user.username);
+                }
+                redirectUser(data.user);
+            } else {
+                showLoginError('Token invalide. Veuillez réessayer.');
+            }
+        }).catch(() => showLoginError('Erreur de vérification du token.'));
+        return;
+    }
+
+    if (callbackError) {
+        window.history.replaceState({}, '', window.location.pathname);
+        const errorMessages = {
+            'invalid_state': 'Session expirée. Veuillez réessayer.',
+            'token_exchange_failed': 'Échec d\'échange de token Microsoft.',
+            'no_email': 'Aucun email trouvé dans votre compte Microsoft.',
+            'user_creation_failed': 'Impossible de créer votre compte.',
+            'server_error': 'Erreur serveur.',
+            'callback_error': 'Erreur lors du retour Microsoft.'
+        };
+        showLoginError(errorMessages[callbackError] || `Erreur: ${callbackError}`);
+    }
+
     checkAuthStatus();
     initializeLogin();
+    loadAuthMode();
 });
+
+function showLoginError(msg) {
+    const errorDiv = document.getElementById('loginError');
+    const errorMessage = document.getElementById('loginErrorMessage');
+    if (errorDiv && errorMessage) {
+        errorMessage.textContent = msg;
+        errorDiv.style.display = 'flex';
+    }
+}
+
+async function loadAuthMode() {
+    try {
+        const response = await fetch(`${API_URL}/settings/auth`);
+        const data = await response.json();
+        if (!data.success) return;
+
+        const mode = data.auth.authMode;
+        const entraSection = document.getElementById('entraLoginSection');
+        const loginForm = document.getElementById('loginForm');
+        const divider = document.getElementById('entraDivider');
+        const entraBtn = document.getElementById('entraLoginBtn');
+
+        if (mode === 'entra' || mode === 'hybrid') {
+            entraSection.style.display = 'block';
+            entraBtn.addEventListener('click', () => {
+                window.location.href = `${API_URL}/auth/entra/login`;
+            });
+        }
+
+        if (mode === 'entra') {
+            // Entra only: hide local form
+            loginForm.style.display = 'none';
+            divider.style.display = 'none';
+        }
+    } catch (e) {
+        console.error('Error loading auth mode:', e);
+    }
+}
 
 function checkAuthStatus() {
     // Vérifier authToken (unifié) puis fallback sur les anciens tokens

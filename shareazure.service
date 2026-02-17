@@ -1,0 +1,15 @@
+[Unit]
+Description=ShareAzure Backend
+After=network.target
+
+[Service]
+Type=simple
+User=debian
+WorkingDirectory=/home/debian/.openclaw/workspace/shareazure/backend
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

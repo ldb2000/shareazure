@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ShareAzure — Dépôt de fichiers</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #003C61 0%, #00507a 50%, #003C61 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            color: #333;
+        }
+        .header {
+            width: 100%;
+            background: #003C61;
+            padding: 1rem 2rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+        .header h1 {
+            color: white;
+            font-size: 1.4rem;
+            font-weight: 600;
+        }
+        .header .subtitle {
+            color: rgba(255,255,255,0.7);
+            font-size: 0.85rem;
+        }
+        .container {
+            max-width: 600px;
+            width: 100%;
+            padding: 2rem 1rem;
+        }
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 2rem;
+            box-shadow: 0 15px 50px rgba(0,0,0,0.2);
+            margin-bottom: 1.5rem;
+        }
+        .card h2 {
+            color: #003C61;
+            font-size: 1.3rem;
+            margin-bottom: 0.5rem;
+        }
+        .card .desc {
+            color: #666;
+            font-size: 0.9rem;
+            margin-bottom: 1.5rem;
+            line-height: 1.5;
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 0.85rem;
+        }
+        .info-row .label { color: #888; }
+        .info-row .value { color: #003C61; font-weight: 500; }
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        .form-group label {
+            display: block;
+            font-size: 0.85rem;
+            color: #555;
+            margin-bottom: 0.4rem;
+            font-weight: 500;
+        }
+        input[type="email"] {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 1rem;
+            transition: border-color 0.2s;
+            outline: none;
+        }
+        input[type="email"]:focus {
+            border-color: #003C61;
+        }
+        .btn {
+            display: inline-block;
+            padding: 0.75rem 1.5rem;
+            background: #003C61;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+            width: 100%;
+            text-align: center;
+        }
+        .btn:hover { background: #00507a; }
+        .btn:active { transform: scale(0.98); }
+        .btn:disabled { background: #aaa; cursor: not-allowed; }
+        .drop-zone {
+            border: 3px dashed #c0d0e0;
+            border-radius: 16px;
+            padding: 3rem 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            margin-bottom: 1rem;
+        }
+        .drop-zone:hover, .drop-zone.dragover {
+            border-color: #003C61;
+            background: #f0f6fb;
+        }
+        .drop-zone .icon { font-size: 3rem; margin-bottom: 0.5rem; }
+        .drop-zone .text { color: #666; font-size: 0.95rem; }
+        .drop-zone .text strong { color: #003C61; }
+        .file-list { list-style: none; }
+        .file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.7rem 0;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 0.85rem;
+        }
+        .file-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #333; }
+        .file-item .size { color: #888; margin: 0 0.5rem; white-space: nowrap; }
+        .file-item .status { min-width: 24px; text-align: center; }
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: #e0e0e0;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 0.3rem;
+        }
+        .progress-bar .fill {
+            height: 100%;
+            background: #003C61;
+            border-radius: 2px;
+            transition: width 0.3s;
+        }
+        .alert {
+            padding: 0.8rem 1rem;
+            border-radius: 10px;
+            font-size: 0.85rem;
+            margin-bottom: 1rem;
+        }
+        .alert-error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+        .alert-success { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+        .hidden { display: none; }
+        .expire-badge {
+            display: inline-block;
+            background: #fff3cd;
+            color: #856404;
+            padding: 0.2rem 0.6rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .footer {
+            text-align: center;
+            color: rgba(255,255,255,0.5);
+            font-size: 0.75rem;
+            padding: 2rem 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>📁 ShareAzure</h1>
+            <div class="subtitle">Portail de dépôt sécurisé</div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Error state -->
+        <div id="error-view" class="card hidden">
+            <h2>❌ Lien invalide</h2>
+            <p class="desc" id="error-message">Ce lien de dépôt est invalide ou a expiré.</p>
+        </div>
+
+        <!-- Loading -->
+        <div id="loading-view" class="card">
+            <p class="desc" style="text-align:center;">Chargement...</p>
+        </div>
+
+        <!-- Step 1: Request info + email verification -->
+        <div id="step-email" class="card hidden">
+            <h2 id="request-title"></h2>
+            <p class="desc" id="request-description"></p>
+            <div id="request-info"></div>
+            <div style="margin-top:1.5rem;">
+                <div id="email-error" class="alert alert-error hidden"></div>
+                <div class="form-group">
+                    <label for="email">Votre adresse email professionnelle</label>
+                    <input type="email" id="email" placeholder="prenom.nom@entreprise.com" autocomplete="email">
+                </div>
+                <button class="btn" id="btn-verify" onclick="verifyEmail()">Vérifier mon email</button>
+            </div>
+        </div>
+
+        <!-- Step 2: Upload zone -->
+        <div id="step-upload" class="card hidden">
+            <h2>📤 Déposer vos fichiers</h2>
+            <p class="desc" id="upload-info"></p>
+            <div id="upload-error" class="alert alert-error hidden"></div>
+            <div id="upload-success" class="alert alert-success hidden"></div>
+            <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+                <div class="icon">📎</div>
+                <div class="text">Glissez-déposez vos fichiers ici<br>ou <strong>cliquez pour parcourir</strong></div>
+            </div>
+            <input type="file" id="file-input" multiple class="hidden">
+            <ul class="file-list" id="file-list"></ul>
+            <button class="btn hidden" id="btn-upload" onclick="uploadFiles()">Envoyer les fichiers</button>
+        </div>
+
+        <!-- Step 3: Done -->
+        <div id="step-done" class="card hidden">
+            <div style="text-align:center;">
+                <div style="font-size:3rem;margin-bottom:1rem;">✅</div>
+                <h2>Dépôt terminé !</h2>
+                <p class="desc">Vos fichiers ont été déposés avec succès. Vous pouvez fermer cette page.</p>
+                <div id="uploaded-summary"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">ShareAzure — Plateforme de partage sécurisé</div>
+
+    <script>
+    const requestId = window.location.pathname.split('/upload/')[1];
+    let uploadToken = null;
+    let requestData = null;
+    let selectedFiles = [];
+
+    function show(id) { document.getElementById(id).classList.remove('hidden'); }
+    function hide(id) { document.getElementById(id).classList.add('hidden'); }
+    function formatSize(bytes) {
+        if (bytes < 1024) return bytes + ' o';
+        if (bytes < 1048576) return (bytes/1024).toFixed(1) + ' Ko';
+        return (bytes/1048576).toFixed(1) + ' Mo';
+    }
+
+    async function loadRequest() {
+        try {
+            const res = await fetch(`/api/public/upload/${requestId}`);
+            if (!res.ok) {
+                const err = await res.json();
+                hide('loading-view');
+                document.getElementById('error-message').textContent = err.error || 'Lien invalide ou expiré';
+                show('error-view');
+                return;
+            }
+            requestData = await res.json();
+            document.getElementById('request-title').textContent = requestData.title;
+            document.getElementById('request-description').textContent = requestData.description || '';
+
+            let infoHtml = '';
+            if (requestData.maxFiles) infoHtml += `<div class="info-row"><span class="label">Fichiers max</span><span class="value">${requestData.maxFiles}</span></div>`;
+            if (requestData.maxFileSizeMb) infoHtml += `<div class="info-row"><span class="label">Taille max par fichier</span><span class="value">${requestData.maxFileSizeMb} Mo</span></div>`;
+            if (requestData.allowedExtensions) infoHtml += `<div class="info-row"><span class="label">Extensions acceptées</span><span class="value">${requestData.allowedExtensions}</span></div>`;
+            const exp = new Date(requestData.expiresAt);
+            infoHtml += `<div class="info-row"><span class="label">Expire le</span><span class="value">${exp.toLocaleDateString('fr-FR')} à ${exp.toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'})}</span></div>`;
+            document.getElementById('request-info').innerHTML = infoHtml;
+
+            hide('loading-view');
+            show('step-email');
+        } catch (e) {
+            hide('loading-view');
+            document.getElementById('error-message').textContent = 'Erreur de connexion au serveur';
+            show('error-view');
+        }
+    }
+
+    async function verifyEmail() {
+        const email = document.getElementById('email').value.trim();
+        if (!email) { showEmailError('Veuillez saisir votre email'); return; }
+        hide('email-error');
+        const btn = document.getElementById('btn-verify');
+        btn.disabled = true;
+        btn.textContent = 'Vérification...';
+
+        try {
+            const res = await fetch(`/api/public/upload/${requestId}/verify`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ email })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                showEmailError(data.error || 'Erreur de vérification');
+                btn.disabled = false;
+                btn.textContent = 'Vérifier mon email';
+                return;
+            }
+            uploadToken = data.token;
+            const remaining = requestData.maxFiles - (requestData.uploadCount || 0);
+            document.getElementById('upload-info').textContent = `Vous pouvez déposer jusqu'à ${remaining} fichier(s) (max ${requestData.maxFileSizeMb} Mo chacun)`;
+            hide('step-email');
+            show('step-upload');
+        } catch (e) {
+            showEmailError('Erreur de connexion');
+            btn.disabled = false;
+            btn.textContent = 'Vérifier mon email';
+        }
+    }
+
+    function showEmailError(msg) {
+        const el = document.getElementById('email-error');
+        el.textContent = msg;
+        show('email-error');
+    }
+
+    // Drag & drop
+    const dropZone = document.getElementById('drop-zone');
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('dragover'); });
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        addFiles(e.dataTransfer.files);
+    });
+    document.getElementById('file-input').addEventListener('change', (e) => { addFiles(e.target.files); });
+    document.getElementById('email').addEventListener('keydown', (e) => { if (e.key === 'Enter') verifyEmail(); });
+
+    function addFiles(fileListObj) {
+        const remaining = requestData.maxFiles - (requestData.uploadCount || 0) - selectedFiles.length;
+        for (let i = 0; i < fileListObj.length && selectedFiles.length < requestData.maxFiles; i++) {
+            if (selectedFiles.length >= remaining + selectedFiles.length) break;
+            selectedFiles.push(fileListObj[i]);
+        }
+        renderFileList();
+        if (selectedFiles.length > 0) show('btn-upload');
+    }
+
+    function renderFileList() {
+        const ul = document.getElementById('file-list');
+        ul.innerHTML = selectedFiles.map((f, i) => `
+            <li class="file-item" id="file-${i}">
+                <span class="name">📄 ${f.name}</span>
+                <span class="size">${formatSize(f.size)}</span>
+                <span class="status" id="status-${i}">⏳</span>
+            </li>
+        `).join('');
+    }
+
+    async function uploadFiles() {
+        const btn = document.getElementById('btn-upload');
+        btn.disabled = true;
+        btn.textContent = 'Envoi en cours...';
+        hide('upload-error');
+        hide('upload-success');
+
+        let successCount = 0;
+        let lastError = null;
+
+        for (let i = 0; i < selectedFiles.length; i++) {
+            const statusEl = document.getElementById(`status-${i}`);
+            statusEl.textContent = '⏳';
+            try {
+                const formData = new FormData();
+                formData.append('file', selectedFiles[i]);
+                const res = await fetch(`/api/public/upload/${requestId}/file`, {
+                    method: 'POST',
+                    headers: { 'X-Upload-Token': uploadToken },
+                    body: formData
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    statusEl.textContent = '✅';
+                    successCount++;
+                } else {
+                    statusEl.textContent = '❌';
+                    lastError = data.error;
+                }
+            } catch (e) {
+                statusEl.textContent = '❌';
+                lastError = 'Erreur réseau';
+            }
+        }
+
+        if (successCount === selectedFiles.length) {
+            hide('step-upload');
+            document.getElementById('uploaded-summary').innerHTML = `<p style="color:#666;font-size:0.9rem;margin-top:1rem;">${successCount} fichier(s) déposé(s)</p>`;
+            show('step-done');
+        } else if (successCount > 0) {
+            const el = document.getElementById('upload-success');
+            el.textContent = `${successCount}/${selectedFiles.length} fichier(s) envoyé(s)`;
+            show('upload-success');
+            if (lastError) {
+                document.getElementById('upload-error').textContent = lastError;
+                show('upload-error');
+            }
+            btn.disabled = false;
+            btn.textContent = 'Réessayer';
+        } else {
+            document.getElementById('upload-error').textContent = lastError || 'Erreur lors de l\'envoi';
+            show('upload-error');
+            btn.disabled = false;
+            btn.textContent = 'Réessayer';
+        }
+    }
+
+    loadRequest();
+    </script>
+</body>
+</html>

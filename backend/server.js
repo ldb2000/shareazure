@@ -10,12 +10,16 @@ const QRCode = require('qrcode');
 const bcrypt = require('bcrypt');
 const fs = require('fs');
 const path = require('path');
-const { db, shareLinksDb, downloadLogsDb, settingsDb, allowedEmailDomainsDb, usersDb, guestAccountsDb, fileOwnershipDb, teamsDb, teamMembersDb, costTrackingDb, operationLogsDb, fileTiersDb, activityLogsDb } = require('./database');
+const { db, shareLinksDb, downloadLogsDb, settingsDb, allowedEmailDomainsDb, usersDb, guestAccountsDb, fileOwnershipDb, teamsDb, teamMembersDb, costTrackingDb, operationLogsDb, fileTiersDb, activityLogsDb, uploadRequestsDb, teamQuotasDb, rolePermissionsDb, entraRoleMappingsDb, tieringPoliciesDb } = require('./database');
+const crypto = require('crypto');
 const { migrateHardcodedUsers } = require('./migrateUsers');
 const emailService = require('./emailService');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Trust proxy (Cloudflare tunnel)
+app.set('trust proxy', 1);
 
 // Middleware de sécurité
 app.use(helmet({
@@ -93,6 +97,67 @@ function validateFileSize(req, res, next) {
   }
   
   next();
+}
+
+// Vérification des quotas utilisateur
+function checkQuota(userId, fileSize) {
+  const membership = db.prepare(`
+    SELECT tm.team_id FROM team_members tm WHERE tm.user_id = ? AND tm.is_active = 1 LIMIT 1
+  `).get(userId);
+
+  let quotas;
+  if (membership) {
+    quotas = teamQuotasDb.get(membership.team_id);
+  }
+  if (!quotas) {
+    quotas = teamQuotasDb.getDefaults();
+  }
+
+  // Check file size
+  if (fileSize && quotas.max_file_size_mb && fileSize > quotas.max_file_size_mb * 1024 * 1024) {
+    return { allowed: false, error: `Fichier trop volumineux (max ${quotas.max_file_size_mb} Mo)` };
+  }
+
+  // Check total storage and file count
+  const usage = db.prepare(`
+    SELECT COALESCE(SUM(file_size), 0) as total_bytes, COUNT(*) as file_count
+    FROM file_ownership WHERE uploaded_by_user_id = ?
+  `).get(userId);
+
+  if (quotas.max_storage_gb && (usage.total_bytes + (fileSize || 0)) > quotas.max_storage_gb * 1024 * 1024 * 1024) {
+    return { allowed: false, error: `Quota de stockage dépassé (max ${quotas.max_storage_gb} Go)` };
+  }
+
+  if (quotas.max_files && usage.file_count >= quotas.max_files) {
+    return { allowed: false, error: `Nombre maximum de fichiers atteint (${quotas.max_files})` };
+  }
+
+  return { allowed: true, quotas, usage };
+}
+
+function checkShareQuota(userId) {
+  const membership = db.prepare(`
+    SELECT tm.team_id FROM team_members tm WHERE tm.user_id = ? AND tm.is_active = 1 LIMIT 1
+  `).get(userId);
+
+  let quotas;
+  if (membership) {
+    quotas = teamQuotasDb.get(membership.team_id);
+  }
+  if (!quotas) {
+    quotas = teamQuotasDb.getDefaults();
+  }
+
+  // Count active shares
+  const shareCount = db.prepare(`
+    SELECT COUNT(*) as count FROM share_links WHERE created_by = (SELECT username FROM users WHERE id = ?) AND is_active = 1
+  `).get(userId);
+
+  if (quotas.max_shares_per_user && shareCount.count >= quotas.max_shares_per_user) {
+    return { allowed: false, error: `Nombre maximum de partages atteint (${quotas.max_shares_per_user})` };
+  }
+
+  return { allowed: true, quotas, maxDurationDays: quotas.max_share_duration_days };
 }
 
 // Initialisation du client Azure Blob Storage
@@ -262,7 +327,7 @@ const logOperation = (operation, details = {}) => {
 // ============================================
 
 /**
- * Middleware pour authentifier un utilisateur (admin, april_user, user)
+ * Middleware pour authentifier un utilisateur (admin, com, user)
  * Le token doit être dans le format: "user:userId:username:timestamp"
  * Charge les infos utilisateur dans req.user
  */
@@ -465,6 +530,23 @@ function requireRole(...roles) {
   };
 }
 
+/**
+ * Middleware pour vérifier une permission spécifique via la table role_permissions
+ * @param {string} permission - La permission requise
+ */
+function requirePermission(permission) {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ success: false, error: 'Non authentifié' });
+    }
+    const { rolePermissionsDb } = require('./database');
+    if (rolePermissionsDb.hasPermission(req.user.role, permission)) {
+      return next();
+    }
+    return res.status(403).json({ success: false, error: `Permission insuffisante : ${permission}` });
+  };
+}
+
 // Route de santé
 app.get('/api/health', (req, res) => {
   res.json({
@@ -519,6 +601,14 @@ app.post('/api/upload', authenticateUserOrGuest, upload.single('file'), validate
       return res.status(400).json({ error: 'Aucun fichier fourni' });
     }
 
+    // Vérification des quotas pour les utilisateurs
+    if (req.user) {
+      const quotaCheck = checkQuota(req.user.id, req.file.size);
+      if (!quotaCheck.allowed) {
+        return res.status(403).json({ success: false, error: quotaCheck.error });
+      }
+    }
+
     const containerClient = blobServiceClient.getContainerClient(containerName);
 
     // Support pour upload dans une équipe
@@ -561,9 +651,28 @@ app.post('/api/upload', authenticateUserOrGuest, upload.single('file'), validate
       const userPrefix = `users/${req.user.id}/`;
       folderPath = userPrefix + (folderPath || '');
     } else if (req.guest) {
-      // Upload guest
-      const guestPrefix = `guests/${req.guest.id}/`;
+      // Upload guest - use email as folder name for readability
+      const guestEmail = req.guest.email || `guest-${req.guest.id}`;
+      const guestPrefix = `guests/${guestEmail}/`;
       folderPath = guestPrefix + (folderPath || '');
+    }
+
+    // Scan antivirus avant upload
+    const virusScanService = require('./ai/virusScanService');
+    if (virusScanService.isEnabled()) {
+      try {
+        const scanResult = await virusScanService.scanBuffer(req.file.buffer, req.file.originalname);
+        if (!scanResult.clean) {
+          virusScanService.quarantine(req.file.originalname, req.file.buffer, scanResult.virus);
+          console.warn(`🦠 Virus detected in ${req.file.originalname}: ${scanResult.virus}`);
+          return res.status(400).json({
+            success: false,
+            error: `Fichier rejeté : menace détectée (${scanResult.virus})`
+          });
+        }
+      } catch (scanErr) {
+        console.error('Virus scan failed:', scanErr.message);
+      }
     }
 
     // Utiliser le nom original du fichier au lieu d'un UUID
@@ -705,6 +814,20 @@ app.post('/api/upload/multiple', authenticateUserOrGuest, upload.array('files', 
       : `guest:${req.guest.email}`;
 
     for (const file of req.files) {
+      // Scan antivirus
+      if (virusScanService.isEnabled()) {
+        try {
+          const scanResult = await virusScanService.scanBuffer(file.buffer, file.originalname);
+          if (!scanResult.clean) {
+            virusScanService.quarantine(file.originalname, file.buffer, scanResult.virus);
+            console.warn(`🦠 Virus detected in ${file.originalname}: ${scanResult.virus}`);
+            continue; // Skip this file
+          }
+        } catch (scanErr) {
+          console.error('Virus scan failed:', scanErr.message);
+        }
+      }
+
       // Utiliser le nom original du fichier
       let fileName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
       let blobName = folderPath ? `${folderPath}${fileName}` : fileName;
@@ -816,7 +939,7 @@ app.get('/api/files', authenticateUserOrGuest, async (req, res) => {
                u.role as user_role
         FROM file_ownership fo
         LEFT JOIN users u ON fo.uploaded_by_user_id = u.id
-        WHERE fo.team_id = ?
+        WHERE fo.team_id = ? AND (fo.is_trashed = 0 OR fo.is_trashed IS NULL)
         ORDER BY fo.uploaded_at DESC
       `);
       fileOwnershipRecords = stmt.all(teamIdInt);
@@ -829,7 +952,7 @@ app.get('/api/files', authenticateUserOrGuest, async (req, res) => {
       if (req.user.role === 'admin') {
         // Admin voit tous les fichiers
         fileOwnershipRecords = fileOwnershipDb.getAllWithOwners();
-      } else if (req.user.role === 'april_user') {
+      } else if (req.user.role === 'com') {
         // April_user voit ses fichiers + fichiers de ses invités
         fileOwnershipRecords = fileOwnershipDb.getAccessibleByAprilUser(req.user.id);
       } else {
@@ -863,6 +986,9 @@ app.get('/api/files', authenticateUserOrGuest, async (req, res) => {
           uploadedBy: record.user_owner || record.guest_owner,
           ownerType: record.user_owner ? 'user' : 'guest',
           ownerRole: record.user_role || null,
+          teamId: record.team_id || null,
+          teamName: record.team_name || null,
+          tier: properties.accessTier || 'Hot',
           metadata: properties.metadata
         });
       } catch (error) {
@@ -1017,12 +1143,12 @@ app.delete('/api/files/:blobName', authenticateUser, async (req, res) => {
       // Fichier d'équipe - vérifier les permissions équipe
       const membership = teamMembersDb.getByTeamAndUser(fileOwnership.team_id, req.user.id);
       canDelete = membership && ['owner', 'member'].includes(membership.role);
-    } else if (req.user.role === 'april_user') {
+    } else if (req.user.role === 'com') {
       // April_user peut supprimer ses fichiers + fichiers de ses invités
       if (fileOwnership.uploaded_by_user_id === req.user.id) {
         canDelete = true;
       } else if (fileOwnership.uploaded_by_guest_id) {
-        // Vérifier si l'invité a été créé par cet april_user
+        // Vérifier si l'invité a été créé par cet com
         const guest = guestAccountsDb.getByGuestId(fileOwnership.guest_id);
         if (guest && guest.created_by_user_id === req.user.id) {
           canDelete = true;
@@ -1155,6 +1281,24 @@ app.post('/api/share/generate', async (req, res) => {
     // Extraire le username du token (optionnel, pour enregistrer qui a créé le lien)
     const username = extractUserFromToken(req);
 
+    // Vérification des quotas de partage
+    if (username) {
+      const user = usersDb.getByUsername(username);
+      if (user) {
+        const shareQuotaCheck = checkShareQuota(user.id);
+        if (!shareQuotaCheck.allowed) {
+          return res.status(403).json({ success: false, error: shareQuotaCheck.error });
+        }
+        // Vérifier la durée max de partage
+        if (shareQuotaCheck.maxDurationDays && expiresInMinutes > shareQuotaCheck.maxDurationDays * 24 * 60) {
+          return res.status(403).json({
+            success: false,
+            error: `Durée de partage trop longue (max ${shareQuotaCheck.maxDurationDays} jours)`
+          });
+        }
+      }
+    }
+
     // Vérifier que le fichier existe
     const containerClient = blobServiceClient.getContainerClient(containerName);
     const blockBlobClient = containerClient.getBlockBlobClient(blobName);
@@ -1198,11 +1342,11 @@ app.post('/api/share/generate', async (req, res) => {
     // Générer un ID unique pour le lien
     const linkId = uuidv4();
 
-    // Hasher le mot de passe si fourni
-    let passwordHash = null;
-    if (password && password.trim()) {
-      passwordHash = await bcrypt.hash(password.trim(), 10);
+    // Mot de passe obligatoire
+    if (!password || !password.trim()) {
+      return res.status(400).json({ error: 'Un mot de passe est obligatoire pour tout partage de fichier' });
     }
+    const passwordHash = await bcrypt.hash(password.trim(), 10);
 
     // URL accessible via notre API (avec protection par mot de passe)
     // Utiliser BACKEND_URL si disponible, sinon construire depuis la requête
@@ -1216,7 +1360,7 @@ app.post('/api/share/generate', async (req, res) => {
       originalName: properties.metadata?.originalName || blobName,
       contentType: properties.contentType,
       fileSize: properties.contentLength,
-      shareUrl: passwordHash ? protectedUrl : sasUrl, // URL protégée si mot de passe
+      shareUrl: protectedUrl, // Toujours URL protégée par mot de passe
       passwordHash,
       recipientEmail: emailList.join(','), // Stocker tous les emails séparés par des virgules
       expiresAt: expiresOn.toISOString(),
@@ -1224,8 +1368,8 @@ app.post('/api/share/generate', async (req, res) => {
       createdBy: username || null
     });
 
-    // Générer le QR Code
-    const qrCodeDataUrl = await QRCode.toDataURL(passwordHash ? protectedUrl : sasUrl);
+    // Générer le QR Code (toujours URL protégée)
+    const qrCodeDataUrl = await QRCode.toDataURL(protectedUrl);
 
     logOperation('share_link_generated', {
       linkId,
@@ -1235,15 +1379,27 @@ app.post('/api/share/generate', async (req, res) => {
       hasPassword: !!passwordHash
     });
 
+    // Envoyer les notifications email aux destinataires
+    if (emailService.isEnabled()) {
+      for (const recipientAddr of emailList) {
+        emailService.sendShareNotification(recipientAddr, {
+          senderName: username || 'Un utilisateur',
+          fileName: properties.metadata?.originalName || blobName,
+          shareUrl: protectedUrl,
+          expiresAt: expiresOn.toISOString()
+        }).catch(err => console.error('Share email error:', err));
+      }
+    }
+
     res.json({
       success: true,
       linkId,
-      shareLink: passwordHash ? protectedUrl : sasUrl,
-      directLink: sasUrl, // Lien SAS direct (pour usage interne)
+      shareLink: protectedUrl,
+      directLink: null, // SAS jamais exposé côté client
       expiresAt: expiresOn.toISOString(),
       expiresInMinutes,
       qrCode: qrCodeDataUrl,
-      hasPassword: !!passwordHash,
+      hasPassword: true,
       file: {
         blobName,
         originalName: properties.metadata?.originalName || blobName,
@@ -1256,6 +1412,56 @@ app.post('/api/share/generate', async (req, res) => {
     console.error('Erreur génération lien de partage:', error);
     logOperation('share_generation_error', { error: error.message });
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Route pour envoyer le lien de partage par email
+app.post('/api/share/send-email', async (req, res) => {
+  try {
+    const { linkId, recipientEmails, fileName, shareLink } = req.body;
+    if (!linkId || !recipientEmails || !shareLink) {
+      return res.status(400).json({ success: false, error: 'Paramètres manquants' });
+    }
+
+    const emailService = require('./emailService');
+    const emails = recipientEmails.split(',').map(e => e.trim()).filter(e => e);
+    
+    for (const email of emails) {
+      try {
+        await emailService.sendEmail({
+          to: email,
+          subject: `Fichier partagé : ${fileName || 'Document'}`,
+          html: `
+            <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+              <div style="background:#1565C0;color:white;padding:20px;border-radius:8px 8px 0 0;text-align:center;">
+                <h2 style="margin:0;">📎 ShareAzure</h2>
+              </div>
+              <div style="background:#f5f7fa;padding:24px;border-radius:0 0 8px 8px;">
+                <p>Bonjour,</p>
+                <p>Un fichier a été partagé avec vous :</p>
+                <div style="background:white;border:1px solid #e0e0e0;border-radius:8px;padding:16px;margin:16px 0;">
+                  <strong>📄 ${fileName || 'Document'}</strong>
+                </div>
+                <p>Cliquez sur le bouton ci-dessous pour y accéder :</p>
+                <div style="text-align:center;margin:24px 0;">
+                  <a href="${shareLink}" style="background:#1565C0;color:white;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">
+                    Accéder au fichier
+                  </a>
+                </div>
+                <p style="color:#888;font-size:0.85rem;">Un mot de passe vous sera demandé pour télécharger le fichier.</p>
+              </div>
+            </div>
+          `
+        });
+      } catch (emailErr) {
+        console.error(`Erreur envoi email à ${email}:`, emailErr.message);
+      }
+    }
+
+    res.json({ success: true, message: `Email envoyé à ${emails.length} destinataire(s)` });
+  } catch (e) {
+    console.error('Send share email error:', e);
+    res.status(500).json({ success: false, error: e.message });
   }
 });
 
@@ -1876,6 +2082,90 @@ app.delete('/api/share/:linkId', async (req, res) => {
 });
 
 // ============================================
+// API Settings Auth (must be before /api/settings/:key)
+// ============================================
+
+// GET /api/settings/auth - retourne la config auth (sans le secret)
+app.get('/api/settings/auth', (req, res) => {
+  try {
+    const authMode = settingsDb.get('authMode') || 'local';
+    const entraTenantId = settingsDb.get('entraTenantId') || '';
+    const entraClientId = settingsDb.get('entraClientId') || '';
+    const entraClientSecret = settingsDb.get('entraClientSecret') || '';
+    const entraRedirectUri = settingsDb.get('entraRedirectUri') || '';
+
+    res.json({
+      success: true,
+      auth: {
+        authMode,
+        entraTenantId,
+        entraClientId,
+        entraClientSecretSet: entraClientSecret.length > 0,
+        entraRedirectUri
+      }
+    });
+  } catch (error) {
+    console.error('Erreur get auth settings:', error);
+    res.status(500).json({ success: false, error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/settings/auth - sauvegarde la config auth (admin only)
+app.put('/api/settings/auth', authenticateUser, requireRole('admin'), (req, res) => {
+  try {
+    const { authMode, entraTenantId, entraClientId, entraClientSecret, entraRedirectUri } = req.body;
+
+    if (authMode) settingsDb.update('authMode', authMode);
+    if (entraTenantId !== undefined) settingsDb.update('entraTenantId', entraTenantId);
+    if (entraClientId !== undefined) settingsDb.update('entraClientId', entraClientId);
+    if (entraClientSecret !== undefined && entraClientSecret !== '') {
+      settingsDb.update('entraClientSecret', entraClientSecret);
+    }
+    if (entraRedirectUri !== undefined) settingsDb.update('entraRedirectUri', entraRedirectUri);
+
+    res.json({ success: true, message: 'Configuration auth sauvegardée' });
+  } catch (error) {
+    console.error('Erreur save auth settings:', error);
+    res.status(500).json({ success: false, error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/settings/auth/test - teste la connexion Entra
+app.post('/api/settings/auth/test', authenticateUser, requireRole('admin'), async (req, res) => {
+  try {
+    const tenantId = req.body.entraTenantId || settingsDb.get('entraTenantId');
+    const clientId = req.body.entraClientId || settingsDb.get('entraClientId');
+    const clientSecret = req.body.entraClientSecret || settingsDb.get('entraClientSecret');
+
+    if (!tenantId || !clientId || !clientSecret) {
+      return res.status(400).json({ success: false, error: 'Tenant ID, Client ID et Client Secret requis' });
+    }
+
+    const postData = new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      scope: 'https://graph.microsoft.com/.default',
+      grant_type: 'client_credentials'
+    }).toString();
+
+    const result = await httpsRequest(
+      `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+      { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(postData) } },
+      postData
+    );
+
+    if (result.status === 200 && result.data.access_token) {
+      res.json({ success: true, message: 'Connexion réussie ! Configuration valide.' });
+    } else {
+      res.json({ success: false, error: result.data.error_description || result.data.error || 'Échec de connexion' });
+    }
+  } catch (error) {
+    console.error('Erreur test auth Entra:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============================================
 // API Settings (Paramètres)
 // ============================================
 
@@ -2027,6 +2317,69 @@ app.get('/api/admin/email-domains', async (req, res) => {
   }
 });
 
+// Helper: RDAP lookup pour obtenir la date de création d'un domaine
+const dns = require('dns');
+function rdapLookup(domain) {
+  const { execFile } = require('child_process');
+  return new Promise((resolve) => {
+    execFile('whois', [domain], { timeout: 10000 }, (err, stdout) => {
+      if (err) { resolve(null); return; }
+      // Chercher "Creation Date:" ou "created:" dans la sortie whois
+      const match = stdout.match(/(?:Creation Date|created|Registration Date|domain_dateregistered):\s*(.+)/i);
+      if (match) {
+        const dateStr = match[1].trim();
+        const date = new Date(dateStr);
+        if (!isNaN(date.getTime())) {
+          resolve(date.toISOString());
+          return;
+        }
+      }
+      resolve(null);
+    });
+  });
+}
+
+// Helper: Vérification DMARC via DNS
+function checkDmarc(domain) {
+  return new Promise((resolve) => {
+    dns.resolveTxt('_dmarc.' + domain, (err, records) => {
+      if (err) { resolve(0); return; }
+      const hasDmarc = records.some(r => r.join('').includes('v=DMARC1'));
+      resolve(hasDmarc ? 1 : 0);
+    });
+  });
+}
+
+// Helper: Check BIMI record for a domain — returns SVG logo URL or null
+function checkBimi(domain) {
+  return new Promise((resolve) => {
+    dns.resolveTxt('default._bimi.' + domain, (err, records) => {
+      if (err) { resolve(null); return; }
+      const bimi = records.map(r => r.join('')).find(r => r.includes('v=BIMI1'));
+      if (!bimi) { resolve(null); return; }
+      const match = bimi.match(/l=([^;\s]+)/);
+      resolve(match ? match[1] : null);
+    });
+  });
+}
+
+// Helper: Get favicon URL for a domain (Google Favicon API as fallback)
+function getFaviconUrl(domain) {
+  return `https://icons.duckduckgo.com/ip3/${encodeURIComponent(domain)}.ico`;
+}
+
+// Helper: Effectuer les vérifications RDAP + DMARC + BIMI pour un domaine et mettre à jour la DB
+async function performDomainChecks(domain) {
+  const [creationDate, hasDmarc, bimiLogo] = await Promise.all([
+    rdapLookup(domain),
+    checkDmarc(domain),
+    checkBimi(domain)
+  ]);
+  const logoUrl = bimiLogo || getFaviconUrl(domain);
+  allowedEmailDomainsDb.updateChecks(domain, creationDate || null, hasDmarc, bimiLogo || null);
+  return { creationDate: creationDate || null, hasDmarc, logoUrl, bimiLogo: bimiLogo || null };
+}
+
 // POST /api/admin/email-domains - Ajouter un domaine autorisé
 app.post('/api/admin/email-domains', async (req, res) => {
   try {
@@ -2055,6 +2408,9 @@ app.post('/api/admin/email-domains', async (req, res) => {
       allowedEmailDomainsDb.add(domain.trim(), username || null);
       logOperation('email_domain_added', { domain: domain.trim(), username });
       
+      // Lancer les vérifications RDAP + DMARC en arrière-plan
+      performDomainChecks(domain.trim()).catch(e => console.error('Domain checks error:', e));
+
       res.json({
         success: true,
         message: 'Domaine ajouté avec succès'
@@ -2074,6 +2430,62 @@ app.post('/api/admin/email-domains', async (req, res) => {
       success: false,
       error: 'Erreur lors de l\'ajout du domaine'
     });
+  }
+});
+
+// POST /api/admin/email-domains/bulk - Import en masse de domaines
+app.post('/api/admin/email-domains/bulk', async (req, res) => {
+  try {
+    const { domains } = req.body;
+    if (!Array.isArray(domains) || domains.length === 0) {
+      return res.status(400).json({ success: false, error: 'Liste de domaines requise' });
+    }
+    if (domains.length > 100) {
+      return res.status(400).json({ success: false, error: 'Maximum 100 domaines par import' });
+    }
+
+    const username = extractUserFromToken(req);
+    const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/;
+    let imported = 0, skipped = 0;
+
+    for (const d of domains) {
+      const domain = (d || '').trim().toLowerCase();
+      if (!domain || !domainRegex.test(domain)) { skipped++; continue; }
+      try {
+        allowedEmailDomainsDb.add(domain, username || null);
+        imported++;
+        // Lancer les vérifications en arrière-plan
+        performDomainChecks(domain).catch(e => console.error('Domain checks error:', e));
+      } catch (error) {
+        if (error.message && error.message.includes('UNIQUE constraint')) {
+          skipped++;
+        } else {
+          skipped++;
+        }
+      }
+    }
+
+    logOperation('email_domain_added', { bulk: true, imported, skipped, username });
+    res.json({ success: true, imported, skipped });
+  } catch (error) {
+    console.error('Erreur bulk import domaines:', error);
+    res.status(500).json({ success: false, error: 'Erreur lors de l\'import' });
+  }
+});
+
+// POST /api/admin/email-domains/:id/recheck - Relancer les vérifications RDAP + DMARC
+app.post('/api/admin/email-domains/:id/recheck', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const domainRecord = allowedEmailDomainsDb.getById(id);
+    if (!domainRecord) {
+      return res.status(404).json({ success: false, error: 'Domaine non trouvé' });
+    }
+    const result = await performDomainChecks(domainRecord.domain);
+    res.json({ success: true, domain: domainRecord.domain, ...result });
+  } catch (error) {
+    console.error('Erreur recheck domaine:', error);
+    res.status(500).json({ success: false, error: 'Erreur lors de la vérification' });
   }
 });
 
@@ -2279,7 +2691,7 @@ app.post('/api/auth/login', async (req, res) => {
       displayName: m.display_name,
       role: m.role
     }));
-    const isTeamLeader = user.role === 'april_user' || teams.some(t => t.role === 'owner');
+    const isTeamLeader = user.role === 'com' || teams.some(t => t.role === 'owner');
 
     // Déterminer la redirection
     let redirect;
@@ -2314,6 +2726,238 @@ app.post('/api/auth/login', async (req, res) => {
       success: false,
       error: 'Erreur serveur'
     });
+  }
+});
+
+// ============================================
+// Auth Entra ID (SSO) Routes
+// ============================================
+
+// https already required at top of file
+// crypto already required at top of file
+
+// Helper: make HTTPS request returning a promise
+function httpsRequest(url, options = {}, postData = null) {
+  return new Promise((resolve, reject) => {
+    const req = https.request(url, options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try { resolve({ status: res.statusCode, data: JSON.parse(data) }); }
+        catch (e) { resolve({ status: res.statusCode, data }); }
+      });
+    });
+    req.on('error', reject);
+    if (postData) req.write(postData);
+    req.end();
+  });
+}
+
+// Helper: decode JWT payload (no verification - token comes from Microsoft)
+function decodeJwtPayload(token) {
+  const parts = token.split('.');
+  if (parts.length !== 3) throw new Error('Invalid JWT');
+  const payload = Buffer.from(parts[1], 'base64url').toString('utf-8');
+  return JSON.parse(payload);
+}
+
+// Fetch user's group memberships from Microsoft Graph API
+async function getUserGroups(accessToken) {
+  try {
+    const result = await httpsRequest(
+      'https://graph.microsoft.com/v1.0/me/memberOf?$select=id,displayName,@odata.type',
+      { method: 'GET', headers: { 'Authorization': `Bearer ${accessToken}` } }
+    );
+    if (result.status === 200 && result.data && result.data.value) {
+      return result.data.value
+        .filter(v => v['@odata.type'] === '#microsoft.graph.group')
+        .map(g => ({ id: g.id, displayName: g.displayName }));
+    }
+    return [];
+  } catch (e) {
+    console.error('Error fetching user groups:', e.message);
+    return [];
+  }
+}
+
+// Get app-level token using client credentials flow (for admin Graph API calls)
+async function getAppToken() {
+  const tenantId = process.env.AZURE_TENANT_ID || settingsDb.get('entraTenantId');
+  const clientId = process.env.AZURE_CLIENT_ID || settingsDb.get('entraClientId');
+  const clientSecret = process.env.AZURE_CLIENT_SECRET || settingsDb.get('entraClientSecret');
+  if (!tenantId || !clientId || !clientSecret) return null;
+  try {
+    const postData = `grant_type=client_credentials&client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}&scope=https://graph.microsoft.com/.default`;
+    const result = await httpsRequest(
+      `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+      { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(postData) } },
+      postData
+    );
+    return (result.status === 200 && result.data.access_token) ? result.data.access_token : null;
+  } catch (e) {
+    console.error('Error getting app token:', e.message);
+    return null;
+  }
+}
+
+// Store for OAuth state parameters
+const oauthStates = new Map();
+
+// GET /api/auth/entra/login - redirige vers Microsoft login
+app.get('/api/auth/entra/login', (req, res) => {
+  try {
+    const authMode = settingsDb.get('authMode') || 'local';
+    if (authMode === 'local') {
+      return res.status(400).json({ success: false, error: 'Authentification Entra non activée' });
+    }
+
+    const tenantId = settingsDb.get('entraTenantId');
+    const clientId = settingsDb.get('entraClientId');
+    const redirectUri = settingsDb.get('entraRedirectUri');
+
+    if (!tenantId || !clientId || !redirectUri) {
+      return res.status(500).json({ success: false, error: 'Configuration Entra incomplète' });
+    }
+
+    const state = crypto.randomBytes(32).toString('hex');
+    oauthStates.set(state, { timestamp: Date.now() });
+    // Clean old states (>10min)
+    for (const [k, v] of oauthStates) {
+      if (Date.now() - v.timestamp > 600000) oauthStates.delete(k);
+    }
+
+    const authorizeUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize?` +
+      new URLSearchParams({
+        client_id: clientId,
+        response_type: 'code',
+        redirect_uri: redirectUri,
+        response_mode: 'query',
+        scope: 'openid profile email User.Read GroupMember.Read.All',
+        state
+      }).toString();
+
+    res.redirect(authorizeUrl);
+  } catch (error) {
+    console.error('Erreur Entra login redirect:', error);
+    res.redirect('/login.html?error=server_error');
+  }
+});
+
+// GET /api/auth/callback - callback OAuth2
+app.get('/api/auth/callback', async (req, res) => {
+  try {
+    const { code, state, error: oauthError } = req.query;
+
+    if (oauthError) {
+      return res.redirect(`/login.html?error=${encodeURIComponent(oauthError)}`);
+    }
+
+    if (!code || !state || !oauthStates.has(state)) {
+      return res.redirect('/login.html?error=invalid_state');
+    }
+    oauthStates.delete(state);
+
+    const tenantId = settingsDb.get('entraTenantId');
+    const clientId = settingsDb.get('entraClientId');
+    const clientSecret = settingsDb.get('entraClientSecret');
+    const redirectUri = settingsDb.get('entraRedirectUri');
+
+    // Exchange code for token
+    const postData = new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      code,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+      scope: 'openid profile email User.Read GroupMember.Read.All'
+    }).toString();
+
+    const tokenResult = await httpsRequest(
+      `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+      { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(postData) } },
+      postData
+    );
+
+    if (tokenResult.status !== 200 || !tokenResult.data.id_token) {
+      console.error('Token exchange failed:', tokenResult.data);
+      return res.redirect('/login.html?error=token_exchange_failed');
+    }
+
+    // Decode id_token
+    const claims = decodeJwtPayload(tokenResult.data.id_token);
+    const email = claims.email || claims.preferred_username || claims.upn || '';
+    const name = claims.name || '';
+    const oid = claims.oid || claims.sub || '';
+
+    if (!email) {
+      return res.redirect('/login.html?error=no_email');
+    }
+
+    // Fetch user groups and map to role (if sync enabled)
+    const groupSyncEnabled = settingsDb.get('entraGroupSyncEnabled') !== 'false';
+    let mappedRole = settingsDb.get('entraDefaultRole') || 'viewer';
+    let userGroups = [];
+    if (groupSyncEnabled && tokenResult.data.access_token) {
+      userGroups = await getUserGroups(tokenResult.data.access_token);
+      const groupIds = userGroups.map(g => g.id);
+      mappedRole = entraRoleMappingsDb.getRoleForGroups(groupIds);
+    }
+
+    // Find or create user
+    let user = usersDb.getByEntraOid(oid);
+    if (!user) {
+      user = usersDb.getByEmail(email);
+    }
+
+    if (user) {
+      // Update Entra fields
+      try {
+        db.prepare(`UPDATE users SET entra_oid = ?, entra_email = ?, auth_provider = CASE WHEN auth_provider = 'local' THEN 'hybrid' ELSE auth_provider END WHERE id = ?`)
+          .run(oid, email, user.id);
+      } catch (e) { /* ignore */ }
+      // Update role from group mapping on each login (if sync enabled)
+      if (groupSyncEnabled && userGroups.length > 0) {
+        try {
+          usersDb.updateRole(user.id, mappedRole);
+        } catch (e) { /* ignore */ }
+      }
+      usersDb.updateLastLogin(user.id);
+      // Refresh user object after updates
+      user = usersDb.getById(user.id);
+    } else {
+      // Create new user
+      const username = email.split('@')[0].replace(/[^a-zA-Z0-9._-]/g, '_');
+      let uniqueUsername = username;
+      let counter = 1;
+      while (usersDb.getByUsername(uniqueUsername)) {
+        uniqueUsername = `${username}_${counter++}`;
+      }
+
+      usersDb.createEntra({
+        username: uniqueUsername,
+        email,
+        passwordHash: '',
+        role: mappedRole,
+        fullName: name,
+        entraOid: oid,
+        entraEmail: email
+      });
+      user = usersDb.getByEmail(email);
+    }
+
+    if (!user) {
+      return res.redirect('/login.html?error=user_creation_failed');
+    }
+
+    const token = Buffer.from(`user:${user.id}:${user.username}:${Date.now()}`).toString('base64');
+    logOperation('auth_login', { username: user.username, role: user.role, provider: 'entra' });
+
+    // Redirect to login page which will store token and redirect appropriately
+    res.redirect(`/login.html?token=${encodeURIComponent(token)}`);
+
+  } catch (error) {
+    console.error('Erreur auth callback:', error);
+    res.redirect('/login.html?error=callback_error');
   }
 });
 
@@ -2490,7 +3134,7 @@ app.post('/api/user/verify', authenticateUser, (req, res) => {
       displayName: m.display_name,
       role: m.role
     }));
-    const isTeamLeader = req.user.role === 'april_user' || teams.some(t => t.role === 'owner');
+    const isTeamLeader = req.user.role === 'com' || teams.some(t => t.role === 'owner');
 
     res.json({
       success: true,
@@ -2519,9 +3163,9 @@ app.post('/api/user/verify', authenticateUser, (req, res) => {
 // ============================================
 
 // Route POST /api/admin/guest-accounts - Créer un compte invité
-app.post('/api/admin/guest-accounts', authenticateUser, requireRole('admin', 'april_user'), async (req, res) => {
+app.post('/api/admin/guest-accounts', authenticateUser, async (req, res) => {
   try {
-    const { email } = req.body;
+    const { email, durationDays } = req.body;
 
     // Validation
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -2529,6 +3173,22 @@ app.post('/api/admin/guest-accounts', authenticateUser, requireRole('admin', 'ap
         success: false,
         error: 'Email invalide'
       });
+    }
+
+    // Si l'utilisateur n'a pas la permission canCreateGuests,
+    // vérifier que le domaine de l'email invité est approuvé
+    const userPerms = rolePermissionsDb.getByRole(req.user.role);
+    const hasGuestPerm = req.user.role === 'admin' || (userPerms && userPerms.canCreateGuests);
+    if (!hasGuestPerm) {
+      const domain = email.split('@')[1].toLowerCase();
+      const approvedDomains = allowedEmailDomainsDb.getAll();
+      const domainApproved = approvedDomains.some(d => d.domain.toLowerCase() === domain && d.is_active);
+      if (!domainApproved) {
+        return res.status(403).json({
+          success: false,
+          error: `Le domaine "${domain}" n'est pas dans la liste des domaines approuvés`
+        });
+      }
     }
 
     // Vérifier que le système d'invités est activé
@@ -2560,7 +3220,14 @@ app.post('/api/admin/guest-accounts', authenticateUser, requireRole('admin', 'ap
 
     // Calculer les dates d'expiration
     const codeExpirationHours = parseInt(settingsDb.get('guestCodeExpirationHours') || '24');
-    const accountExpirationDays = parseInt(settingsDb.get('guestAccountExpirationDays') || '3');
+    const defaultDays = parseInt(settingsDb.get('guestAccountExpirationDays') || '3');
+    // durationDays: 0 = illimité (soumis à validation admin), sinon 3/7/15/30
+    const requestedDays = durationDays !== undefined ? parseInt(durationDays) : defaultDays;
+    const isUnlimited = requestedDays === 0;
+
+    // Si illimité, nécessite validation admin → créer en is_active=0 (pending)
+    const needsApproval = isUnlimited && req.user.role !== 'admin';
+    const accountExpirationDays = isUnlimited ? 365 * 10 : (requestedDays || defaultDays); // 10 ans si illimité
 
     const now = new Date();
     const codeExpiresAt = new Date(now.getTime() + codeExpirationHours * 60 * 60 * 1000);
@@ -2568,28 +3235,42 @@ app.post('/api/admin/guest-accounts', authenticateUser, requireRole('admin', 'ap
 
     // Créer l'invité
     const guestId = uuidv4();
-    const result = guestAccountsDb.create({
-      guestId: guestId,
-      email: email,
-      verificationCode: verificationCode, // Stocké temporairement, sera supprimé après usage
-      codeHash: codeHash,
-      codeExpiresAt: codeExpiresAt.toISOString(),
-      accountExpiresAt: accountExpiresAt.toISOString(),
-      createdByUserId: req.user.id
-    });
+    // Si needsApproval, créer en is_active=0 + pending_approval=1
+    const stmt = db.prepare(`
+      INSERT INTO guest_accounts (
+        guest_id, email, verification_code, code_hash,
+        code_expires_at, account_expires_at, created_by_user_id,
+        is_active, pending_approval, is_unlimited
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(
+      guestId, email, verificationCode, codeHash,
+      codeExpiresAt.toISOString(), accountExpiresAt.toISOString(),
+      req.user.id,
+      needsApproval ? 0 : 1,
+      needsApproval ? 1 : 0,
+      isUnlimited ? 1 : 0
+    );
 
-    // Envoyer l'email avec le code
-    const emailSent = await emailService.sendGuestCode(email, verificationCode, codeExpirationHours);
+    // Envoyer l'email avec le code + lien vers la page de login invité (sauf si en attente)
+    let emailSent = false;
+    if (!needsApproval) {
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      emailSent = await emailService.sendGuestCode(email, verificationCode, codeExpirationHours, baseUrl);
+    }
 
     logOperation('guest_account_created', {
       guestId,
       email,
       createdBy: req.user.username,
-      emailSent
+      emailSent,
+      needsApproval,
+      isUnlimited
     });
 
     res.json({
       success: true,
+      needsApproval,
       guest: {
         id: result.lastInsertRowid,
         guestId: guestId,
@@ -2710,11 +3391,11 @@ app.post('/api/guest/login', async (req, res) => {
 });
 
 // Route GET /api/admin/guest-accounts - Liste des comptes invités
-app.get('/api/admin/guest-accounts', authenticateUser, requireRole('admin', 'april_user'), (req, res) => {
+app.get('/api/admin/guest-accounts', authenticateUser, requirePermission('canCreateGuests'), (req, res) => {
   try {
     let guests;
 
-    // Admin voit tous les invités, april_user voit uniquement les siens
+    // Admin voit tous les invités, com voit uniquement les siens
     if (req.user.role === 'admin') {
       guests = guestAccountsDb.getAll();
     } else {
@@ -2756,8 +3437,24 @@ app.get('/api/admin/guest-accounts', authenticateUser, requireRole('admin', 'apr
   }
 });
 
+// Route PUT /api/admin/guest-accounts/:guestId/approve - Approuver un invité illimité en attente
+app.put('/api/admin/guest-accounts/:guestId/approve', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const { guestId } = req.params;
+    const guest = db.prepare('SELECT * FROM guest_accounts WHERE guest_id = ?').get(guestId);
+    if (!guest) return res.status(404).json({ success: false, error: 'Invité non trouvé' });
+    if (!guest.pending_approval) return res.status(400).json({ success: false, error: 'Cet invité n\'est pas en attente d\'approbation' });
+
+    db.prepare('UPDATE guest_accounts SET is_active = 1, pending_approval = 0 WHERE guest_id = ?').run(guestId);
+    logOperation('guest_approved', { guestId, email: guest.email, approvedBy: req.user.username });
+    res.json({ success: true, message: 'Invité approuvé' });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 // Route PUT /api/admin/guest-accounts/:guestId/disable - Désactiver un invité
-app.put('/api/admin/guest-accounts/:guestId/disable', authenticateUser, requireRole('admin', 'april_user'), (req, res) => {
+app.put('/api/admin/guest-accounts/:guestId/disable', authenticateUser, requirePermission('canCreateGuests'), (req, res) => {
   try {
     const { guestId } = req.params;
 
@@ -2770,8 +3467,8 @@ app.put('/api/admin/guest-accounts/:guestId/disable', authenticateUser, requireR
       });
     }
 
-    // Vérifier les permissions (april_user ne peut désactiver que ses propres invités)
-    if (req.user.role === 'april_user' && guest.created_by_user_id !== req.user.id) {
+    // Vérifier les permissions (com ne peut désactiver que ses propres invités)
+    if (req.user.role === 'com' && guest.created_by_user_id !== req.user.id) {
       return res.status(403).json({
         success: false,
         error: 'Vous ne pouvez désactiver que vos propres invités'
@@ -2802,7 +3499,7 @@ app.put('/api/admin/guest-accounts/:guestId/disable', authenticateUser, requireR
 });
 
 // Route DELETE /api/admin/guest-accounts/:guestId - Supprimer un invité et ses fichiers
-app.delete('/api/admin/guest-accounts/:guestId', authenticateUser, requireRole('admin', 'april_user'), async (req, res) => {
+app.delete('/api/admin/guest-accounts/:guestId', authenticateUser, requirePermission('canCreateGuests'), async (req, res) => {
   try {
     const { guestId } = req.params;
 
@@ -2815,8 +3512,8 @@ app.delete('/api/admin/guest-accounts/:guestId', authenticateUser, requireRole('
       });
     }
 
-    // Vérifier les permissions (april_user ne peut supprimer que ses propres invités)
-    if (req.user.role === 'april_user' && guest.created_by_user_id !== req.user.id) {
+    // Vérifier les permissions (com ne peut supprimer que ses propres invités)
+    if (req.user.role === 'com' && guest.created_by_user_id !== req.user.id) {
       return res.status(403).json({
         success: false,
         error: 'Vous ne pouvez supprimer que vos propres invités'
@@ -2869,6 +3566,39 @@ app.delete('/api/admin/guest-accounts/:guestId', authenticateUser, requireRole('
       success: false,
       error: 'Erreur serveur'
     });
+  }
+});
+
+// Route GET /api/user/my-guests - Récupérer les invités créés par l'utilisateur courant
+app.get('/api/user/my-guests', authenticateUser, (req, res) => {
+  try {
+    const guests = db.prepare(`
+      SELECT id, guest_id, email, verification_code, code_used, is_active,
+             code_expires_at, account_expires_at, created_at,
+             pending_approval, is_unlimited
+      FROM guest_accounts
+      WHERE created_by_user_id = ?
+      ORDER BY created_at DESC
+    `).all(req.user.id);
+
+    res.json({ success: true, guests });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Route DELETE /api/user/my-guests/:id - Supprimer un invité créé par l'utilisateur courant
+app.delete('/api/user/my-guests/:id', authenticateUser, async (req, res) => {
+  try {
+    const guest = db.prepare('SELECT * FROM guest_accounts WHERE id = ?').get(req.params.id);
+    if (!guest) return res.status(404).json({ success: false, error: 'Invité non trouvé' });
+    if (guest.created_by_user_id !== req.user.id) {
+      return res.status(403).json({ success: false, error: 'Vous ne pouvez supprimer que vos propres invités' });
+    }
+    db.prepare('DELETE FROM guest_accounts WHERE id = ?').run(req.params.id);
+    res.json({ success: true, message: `Invité ${guest.email} supprimé` });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
   }
 });
 
@@ -3210,6 +3940,117 @@ app.put('/api/user/files/move', async (req, res) => {
   } catch (error) {
     console.error('Erreur déplacement:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// Corbeille (Trash) Routes
+// ============================================
+
+// PUT /api/files/trash - Mettre un fichier en corbeille (soft delete + tier Archive)
+app.put('/api/files/trash', authenticateUser, async (req, res) => {
+  try {
+    const { blobName } = req.body;
+    if (!blobName) return res.status(400).json({ success: false, error: 'blobName requis' });
+
+    // Vérifier propriété
+    const file = db.prepare('SELECT * FROM file_ownership WHERE blob_name = ?').get(blobName);
+    if (!file) return res.status(404).json({ success: false, error: 'Fichier non trouvé' });
+
+    // Vérifier que l'user a le droit (propriétaire, team member, ou admin)
+    const isOwner = file.uploaded_by_user_id === req.user.id;
+    const isTeamMember = file.team_id && teamMembersDb.getByTeamAndUser(file.team_id, req.user.id);
+    const isAdmin = req.user.role === 'admin';
+    if (!isOwner && !isTeamMember && !isAdmin) {
+      return res.status(403).json({ success: false, error: 'Non autorisé' });
+    }
+
+    // Soft delete
+    fileOwnershipDb.trash(blobName, req.user.id);
+
+    // Passer le blob en tier Archive sur Azure
+    try {
+      const containerClient = blobServiceClient.getContainerClient(containerName);
+      const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+      await blockBlobClient.setAccessTier('Archive');
+    } catch (tierErr) {
+      console.error('Erreur changement tier Archive:', tierErr.message);
+    }
+
+    logOperation('file_trashed', { blobName, trashedBy: req.user.username, teamId: file.team_id });
+    res.json({ success: true, message: 'Fichier mis en corbeille' });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// GET /api/files/trash - Lister les fichiers en corbeille
+app.get('/api/files/trash', authenticateUser, async (req, res) => {
+  try {
+    const { teamId } = req.query;
+    const files = fileOwnershipDb.getTrashed(req.user.id, teamId ? parseInt(teamId) : null);
+    res.json({ success: true, files });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// PUT /api/files/restore - Restaurer un fichier de la corbeille
+app.put('/api/files/restore', authenticateUser, async (req, res) => {
+  try {
+    const { blobName } = req.body;
+    if (!blobName) return res.status(400).json({ success: false, error: 'blobName requis' });
+
+    const file = db.prepare('SELECT * FROM file_ownership WHERE blob_name = ? AND is_trashed = 1').get(blobName);
+    if (!file) return res.status(404).json({ success: false, error: 'Fichier non trouvé dans la corbeille' });
+
+    const isOwner = file.uploaded_by_user_id === req.user.id;
+    const isTeamMember = file.team_id && teamMembersDb.getByTeamAndUser(file.team_id, req.user.id);
+    const isAdmin = req.user.role === 'admin';
+    if (!isOwner && !isTeamMember && !isAdmin) {
+      return res.status(403).json({ success: false, error: 'Non autorisé' });
+    }
+
+    fileOwnershipDb.restore(blobName);
+
+    // Remettre en Hot tier
+    try {
+      const containerClient = blobServiceClient.getContainerClient(containerName);
+      const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+      await blockBlobClient.setAccessTier('Hot');
+    } catch (tierErr) {
+      console.error('Erreur changement tier Hot:', tierErr.message);
+      // Archive → Hot peut prendre du temps (réhydratation)
+    }
+
+    logOperation('file_restored', { blobName, restoredBy: req.user.username });
+    res.json({ success: true, message: 'Fichier restauré (la réhydratation depuis Archive peut prendre quelques heures)' });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// DELETE /api/files/trash/empty - Vider la corbeille (suppression définitive)
+app.delete('/api/files/trash/empty', authenticateUser, async (req, res) => {
+  try {
+    const { teamId } = req.query;
+    const files = fileOwnershipDb.getTrashed(req.user.id, teamId ? parseInt(teamId) : null);
+
+    const containerClient = blobServiceClient.getContainerClient(containerName);
+    let deleted = 0;
+    for (const file of files) {
+      try {
+        const blockBlobClient = containerClient.getBlockBlobClient(file.blob_name);
+        await blockBlobClient.deleteIfExists();
+        fileOwnershipDb.delete(file.blob_name);
+        deleted++;
+      } catch (e) { console.error('Erreur suppression blob:', file.blob_name, e.message); }
+    }
+
+    logOperation('trash_emptied', { count: deleted, by: req.user.username, teamId });
+    res.json({ success: true, message: `${deleted} fichier(s) supprimé(s) définitivement` });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
   }
 });
 
@@ -4240,10 +5081,10 @@ app.post('/api/files/:blobName(*)/archive', authenticateUser, async (req, res) =
     const blobName = req.params.blobName;
     const { tier, reason } = req.body;
 
-    if (!tier || !['Cool', 'Archive'].includes(tier)) {
+    if (!tier || !['Hot', 'Cool', 'Archive'].includes(tier)) {
       return res.status(400).json({
         success: false,
-        error: 'Tier invalide. Valeurs possibles: Cool, Archive'
+        error: 'Tier invalide. Valeurs possibles: Hot, Cool, Archive'
       });
     }
 
@@ -4830,6 +5671,1450 @@ async function notifyExpiringGuestAccounts() {
   }
 }
 
+// ============================================
+// FACES API ROUTES
+// ============================================
+const faceService = require('./ai/faceService');
+
+app.get('/api/admin/faces/profiles', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const profiles = faceService.getAllProfiles();
+    res.json(profiles);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/faces/profiles', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const { name } = req.body;
+    const profile = faceService.createProfile({ name, createdBy: req.user?.email || 'admin' });
+    res.json(profile);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/admin/faces/profiles/:id', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const result = faceService.updateProfile(req.params.id, { name: req.body.name });
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/admin/faces/profiles/:id', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    faceService.deleteProfile(req.params.id);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/admin/faces/profiles/:id/files', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const files = faceService.getFilesByProfile(req.params.id);
+    res.json(files);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/faces/profiles/merge', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const { targetId, sourceId } = req.body;
+    const result = faceService.mergeProfiles(targetId, sourceId);
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/admin/faces/occurrences', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT fo.*, fp.name as profile_name 
+      FROM face_occurrences fo 
+      LEFT JOIN face_profiles fp ON fo.face_profile_id = fp.id 
+      ORDER BY fo.timestamp DESC
+    `).all();
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/admin/faces/occurrences/unassigned', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT * FROM face_occurrences WHERE face_profile_id IS NULL ORDER BY timestamp DESC
+    `).all();
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/admin/faces/file/:blobName', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const occurrences = faceService.getOccurrencesByBlobName(req.params.blobName);
+    res.json(occurrences);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/admin/faces/occurrences/:id/assign', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const result = faceService.assignFaceToProfile(req.params.id, req.body.profileId);
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============================================
+// UPLOAD REQUESTS (Portail de dépôt externe)
+// ============================================
+
+// In-memory upload tokens with auto-cleanup
+const uploadTokens = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, data] of uploadTokens) {
+    if (data.expiresAt < now) uploadTokens.delete(token);
+  }
+}, 15 * 60 * 1000);
+
+// Serve public upload page
+app.get('/upload/:requestId', (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend/upload.html'));
+});
+
+// === User routes (authenticated) ===
+
+// Create upload request
+app.post('/api/upload-requests', authenticateUser, async (req, res) => {
+  try {
+    const { title, description, allowedEmail, allowedDomain, teamId, maxFiles, maxFileSizeMb, allowedExtensions, expiresInDays } = req.body;
+
+    if (!title || !title.trim()) {
+      return res.status(400).json({ error: 'Le titre est requis' });
+    }
+
+    // Validate allowed email domain if specific email provided
+    if (allowedEmail) {
+      const domain = allowedEmail.split('@')[1]?.toLowerCase();
+      if (!domain) return res.status(400).json({ error: 'Email invalide' });
+      const approved = db.prepare('SELECT 1 FROM allowed_email_domains WHERE domain = ? AND is_active = 1').get(domain);
+      if (!approved) {
+        return res.status(403).json({ error: `Domaine "${domain}" non approuvé` });
+      }
+    }
+
+    // Validate allowed domain if provided
+    if (allowedDomain) {
+      const approved = db.prepare('SELECT 1 FROM allowed_email_domains WHERE domain = ? AND is_active = 1').get(allowedDomain.toLowerCase());
+      if (!approved) {
+        return res.status(403).json({ error: `Domaine "${allowedDomain}" non approuvé` });
+      }
+    }
+
+    // Validate team membership if teamId
+    if (teamId) {
+      const membership = teamMembersDb.getByTeamAndUser(parseInt(teamId), req.user.id);
+      if (!membership && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Vous n\'êtes pas membre de cette équipe' });
+      }
+    }
+
+    const requestId = crypto.randomBytes(16).toString('hex');
+    const expiresAt = new Date(Date.now() + (expiresInDays || 7) * 86400000).toISOString();
+
+    uploadRequestsDb.create({
+      requestId,
+      title: title.trim(),
+      description: description || null,
+      createdByUserId: req.user.id,
+      teamId: teamId ? parseInt(teamId) : null,
+      allowedEmail: allowedEmail || null,
+      allowedDomain: allowedDomain || null,
+      maxFiles: maxFiles || 10,
+      maxFileSizeMb: maxFileSizeMb || 50,
+      allowedExtensions: allowedExtensions || null,
+      expiresAt
+    });
+
+    const backendUrl = process.env.BACKEND_URL || (req.protocol + '://' + req.get('host'));
+    res.json({
+      success: true,
+      requestId,
+      uploadUrl: `${backendUrl}/upload/${requestId}`,
+      expiresAt
+    });
+  } catch (error) {
+    console.error('Erreur création upload request:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// List my upload requests
+app.get('/api/upload-requests', authenticateUser, async (req, res) => {
+  try {
+    const requests = uploadRequestsDb.getByUserId(req.user.id);
+    res.json({ success: true, requests });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get upload request details + files
+app.get('/api/upload-requests/:requestId', authenticateUser, async (req, res) => {
+  try {
+    const request = uploadRequestsDb.getByRequestId(req.params.requestId);
+    if (!request || request.created_by_user_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(404).json({ error: 'Demande non trouvée' });
+    }
+    const files = uploadRequestsDb.getFiles(req.params.requestId);
+    res.json({ success: true, request, files });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update upload request
+app.put('/api/upload-requests/:requestId', authenticateUser, async (req, res) => {
+  try {
+    const request = uploadRequestsDb.getByRequestId(req.params.requestId);
+    if (!request || request.created_by_user_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(404).json({ error: 'Demande non trouvée' });
+    }
+    const { title, description, isActive } = req.body;
+    uploadRequestsDb.update(req.params.requestId, { title, description, isActive });
+    res.json({ success: true, message: 'Demande mise à jour' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete (deactivate) upload request
+app.delete('/api/upload-requests/:requestId', authenticateUser, async (req, res) => {
+  try {
+    const request = uploadRequestsDb.getByRequestId(req.params.requestId);
+    if (!request || request.created_by_user_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(404).json({ error: 'Demande non trouvée' });
+    }
+    uploadRequestsDb.delete(req.params.requestId);
+    res.json({ success: true, message: 'Demande désactivée' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// === Public routes (no auth, for external uploaders) ===
+
+// Get public request info
+app.get('/api/public/upload/:requestId', async (req, res) => {
+  try {
+    const request = uploadRequestsDb.getByRequestId(req.params.requestId);
+    if (!request || !request.is_active || new Date(request.expires_at) < new Date()) {
+      return res.status(404).json({ error: 'Lien de dépôt invalide ou expiré' });
+    }
+    res.json({
+      success: true,
+      title: request.title,
+      description: request.description,
+      maxFiles: request.max_files,
+      maxFileSizeMb: request.max_file_size_mb,
+      allowedExtensions: request.allowed_extensions,
+      expiresAt: request.expires_at,
+      uploadCount: request.upload_count
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Verify email for public upload
+app.post('/api/public/upload/:requestId/verify', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email requis' });
+
+    const request = uploadRequestsDb.getByRequestId(req.params.requestId);
+    if (!request || !request.is_active || new Date(request.expires_at) < new Date()) {
+      return res.status(404).json({ error: 'Lien de dépôt invalide ou expiré' });
+    }
+
+    const emailLower = email.trim().toLowerCase();
+    const domain = emailLower.split('@')[1];
+    if (!domain) return res.status(400).json({ error: 'Email invalide' });
+
+    // Check if email matches allowed_email constraint
+    if (request.allowed_email && request.allowed_email.toLowerCase() !== emailLower) {
+      return res.status(403).json({ error: 'Email non autorisé pour cette demande' });
+    }
+
+    // Check if domain matches allowed_domain constraint
+    if (request.allowed_domain && request.allowed_domain.toLowerCase() !== domain) {
+      return res.status(403).json({ error: 'Domaine email non autorisé pour cette demande' });
+    }
+
+    // Check domain is in approved list
+    const domainApproved = db.prepare('SELECT 1 FROM allowed_email_domains WHERE domain = ? AND is_active = 1').get(domain);
+    if (!domainApproved) {
+      return res.status(403).json({ error: 'Domaine email non approuvé' });
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    uploadTokens.set(token, {
+      email: emailLower,
+      requestId: req.params.requestId,
+      expiresAt: Date.now() + 3600000 // 1 hour
+    });
+
+    res.json({ success: true, token, expiresIn: 3600 });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Upload file via public link
+app.post('/api/public/upload/:requestId/file', upload.single('file'), async (req, res) => {
+  try {
+    const token = req.headers['x-upload-token'];
+    if (!token) return res.status(401).json({ error: 'Token requis' });
+
+    const tokenData = uploadTokens.get(token);
+    if (!tokenData || tokenData.expiresAt < Date.now()) {
+      return res.status(401).json({ error: 'Token invalide ou expiré' });
+    }
+    if (tokenData.requestId !== req.params.requestId) {
+      return res.status(403).json({ error: 'Token non valide pour cette demande' });
+    }
+
+    const request = uploadRequestsDb.getByRequestId(req.params.requestId);
+    if (!request || !request.is_active || new Date(request.expires_at) < new Date()) {
+      return res.status(404).json({ error: 'Lien de dépôt invalide ou expiré' });
+    }
+
+    if (!req.file) return res.status(400).json({ error: 'Aucun fichier fourni' });
+
+    // Check max files
+    if (request.upload_count >= request.max_files) {
+      return res.status(400).json({ error: `Nombre maximum de fichiers atteint (${request.max_files})` });
+    }
+
+    // Check file size
+    const maxBytes = (request.max_file_size_mb || 50) * 1024 * 1024;
+    if (req.file.size > maxBytes) {
+      return res.status(400).json({ error: `Fichier trop volumineux. Maximum: ${request.max_file_size_mb} Mo` });
+    }
+
+    // Check extensions
+    if (request.allowed_extensions) {
+      const ext = path.extname(req.file.originalname).toLowerCase().replace('.', '');
+      const allowed = request.allowed_extensions.split(',').map(e => e.trim().toLowerCase().replace('.', ''));
+      if (!allowed.includes(ext)) {
+        return res.status(400).json({ error: `Extension .${ext} non autorisée. Extensions acceptées: ${request.allowed_extensions}` });
+      }
+    }
+
+    // Determine upload path
+    const containerClient = blobServiceClient.getContainerClient(containerName);
+    let folderPath;
+    if (request.team_id) {
+      const team = teamsDb.getById(request.team_id);
+      folderPath = team ? `${team.storage_prefix}depot-externe/` : `users/${request.created_by_user_id}/depot-externe/`;
+    } else {
+      folderPath = `users/${request.created_by_user_id}/depot-externe/`;
+    }
+
+    let fileName = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+    let blobName = `${folderPath}${fileName}`;
+
+    // Handle duplicates
+    let counter = 1;
+    while (true) {
+      const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+      const exists = await blockBlobClient.exists();
+      if (!exists) break;
+      const nameParts = fileName.split('.');
+      const ext = nameParts.length > 1 ? nameParts.pop() : '';
+      const baseName = nameParts.join('.');
+      fileName = ext ? `${baseName}_${counter}.${ext}` : `${baseName}_${counter}`;
+      blobName = `${folderPath}${fileName}`;
+      counter++;
+    }
+
+    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+
+    await blockBlobClient.uploadData(req.file.buffer, {
+      blobHTTPHeaders: { blobContentType: req.file.mimetype },
+      metadata: {
+        originalName: req.file.originalname,
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: `external:${tokenData.email}`,
+        uploadRequestId: req.params.requestId,
+        contentType: req.file.mimetype,
+        size: req.file.size.toString()
+      }
+    });
+
+    // Record file ownership (linked to requesting user)
+    fileOwnershipDb.create({
+      blobName,
+      originalName: req.file.originalname,
+      contentType: req.file.mimetype,
+      fileSize: req.file.size,
+      uploadedByUserId: request.created_by_user_id,
+      uploadedByGuestId: null,
+      folderPath,
+      teamId: request.team_id || null
+    });
+
+    // Record in upload_request_files
+    uploadRequestsDb.addFile({
+      requestId: req.params.requestId,
+      blobName,
+      originalName: req.file.originalname,
+      fileSize: req.file.size,
+      contentType: req.file.mimetype,
+      uploaderEmail: tokenData.email
+    });
+
+    // Increment upload count
+    uploadRequestsDb.incrementUploadCount(req.params.requestId);
+
+    logOperation('file_uploaded', {
+      blobName,
+      originalName: req.file.originalname,
+      size: req.file.size,
+      contentType: req.file.mimetype,
+      uploadedBy: `external:${tokenData.email}`,
+      uploadRequestId: req.params.requestId,
+      username: `externe:${tokenData.email}`
+    });
+
+    res.json({
+      success: true,
+      message: 'Fichier déposé avec succès',
+      file: {
+        originalName: req.file.originalname,
+        size: req.file.size,
+        contentType: req.file.mimetype
+      }
+    });
+  } catch (error) {
+    console.error('Erreur upload public:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// QUOTAS API
+// ============================================
+
+// Liste tous les quotas d'équipe
+app.get('/api/admin/quotas', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const quotas = teamQuotasDb.getAll();
+    const teams = teamsDb.getAll();
+    // Include teams without quotas
+    const result = teams.map(t => {
+      const q = quotas.find(q => q.team_id === t.id);
+      return {
+        team_id: t.id,
+        team_name: t.name,
+        team_display_name: t.display_name,
+        ...(q || teamQuotasDb.getDefaults()),
+        has_custom_quota: !!q
+      };
+    });
+    res.json({ success: true, quotas: result });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// Quotas par défaut
+app.get('/api/admin/quotas/defaults', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    res.json({ success: true, defaults: teamQuotasDb.getDefaults() });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.put('/api/admin/quotas/defaults', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const { max_storage_gb, max_files, max_file_size_mb, max_shares_per_user, max_share_duration_days } = req.body;
+    const updates = {};
+    if (max_storage_gb !== undefined) updates.defaultMaxStorageGb = String(max_storage_gb);
+    if (max_files !== undefined) updates.defaultMaxFiles = String(max_files);
+    if (max_file_size_mb !== undefined) updates.defaultMaxFileSizeMb = String(max_file_size_mb);
+    if (max_shares_per_user !== undefined) updates.defaultMaxSharesPerUser = String(max_shares_per_user);
+    if (max_share_duration_days !== undefined) updates.defaultMaxShareDurationDays = String(max_share_duration_days);
+    settingsDb.updateMany(updates);
+    res.json({ success: true, defaults: teamQuotasDb.getDefaults() });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// Quota d'une équipe
+app.get('/api/admin/quotas/team/:teamId', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const quota = teamQuotasDb.get(parseInt(req.params.teamId));
+    res.json({ success: true, quota: quota || teamQuotasDb.getDefaults() });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.put('/api/admin/quotas/team/:teamId', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const teamId = parseInt(req.params.teamId);
+    const team = teamsDb.getById(teamId);
+    if (!team) return res.status(404).json({ success: false, error: 'Équipe non trouvée' });
+    teamQuotasDb.upsert(teamId, { ...req.body, updated_by: req.user.username });
+    res.json({ success: true, quota: teamQuotasDb.get(teamId) });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// Usage stats par équipe
+app.get('/api/admin/quotas/usage', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const teams = teamsDb.getAll();
+    const usage = teams.map(t => {
+      const stats = teamsDb.getStats(t.id);
+      const quota = teamQuotasDb.get(t.id) || teamQuotasDb.getDefaults();
+      const shareCount = db.prepare(`
+        SELECT COUNT(*) as count FROM share_links sl
+        INNER JOIN team_members tm ON sl.created_by = (SELECT username FROM users WHERE id = tm.user_id)
+        WHERE tm.team_id = ? AND tm.is_active = 1 AND sl.is_active = 1
+      `).get(t.id);
+      return {
+        team_id: t.id,
+        team_name: t.name,
+        team_display_name: t.display_name,
+        storage_used_bytes: stats.totalSize,
+        storage_used_gb: Math.round((stats.totalSize / (1024 * 1024 * 1024)) * 100) / 100,
+        file_count: stats.fileCount,
+        member_count: stats.memberCount,
+        share_count: shareCount.count,
+        quota
+      };
+    });
+    res.json({ success: true, usage });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// Quota de l'utilisateur courant
+app.get('/api/user/quota', authenticateUser, (req, res) => {
+  try {
+    const membership = db.prepare(`
+      SELECT tm.team_id, t.display_name as team_name FROM team_members tm
+      INNER JOIN teams t ON tm.team_id = t.id
+      WHERE tm.user_id = ? AND tm.is_active = 1 AND t.is_active = 1 LIMIT 1
+    `).get(req.user.id);
+
+    let quotas;
+    if (membership) {
+      quotas = teamQuotasDb.get(membership.team_id) || teamQuotasDb.getDefaults();
+    } else {
+      quotas = teamQuotasDb.getDefaults();
+    }
+
+    const usage = db.prepare(`
+      SELECT COALESCE(SUM(file_size), 0) as total_bytes, COUNT(*) as file_count
+      FROM file_ownership WHERE uploaded_by_user_id = ?
+    `).get(req.user.id);
+
+    const shareCount = db.prepare(`
+      SELECT COUNT(*) as count FROM share_links WHERE created_by = ? AND is_active = 1
+    `).get(req.user.username);
+
+    res.json({
+      success: true,
+      team: membership ? { id: membership.team_id, name: membership.team_name } : null,
+      quotas,
+      usage: {
+        storage_used_bytes: usage.total_bytes,
+        storage_used_gb: Math.round((usage.total_bytes / (1024 * 1024 * 1024)) * 100) / 100,
+        file_count: usage.file_count,
+        share_count: shareCount.count
+      }
+    });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ============================================
+// ROUTES ADMIN - SÉCURITÉ / ANTIVIRUS
+// ============================================
+
+const { virusQuarantineDb } = require('./database');
+
+// Liste des fichiers en quarantaine
+app.get('/api/admin/security/quarantine', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const items = virusQuarantineDb.getAll();
+    res.json({ success: true, items });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Détails d'un fichier en quarantaine
+app.get('/api/admin/security/quarantine/:id', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const item = virusQuarantineDb.getById(parseInt(req.params.id));
+    if (!item) return res.status(404).json({ success: false, error: 'Entrée non trouvée' });
+    res.json({ success: true, item });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Supprimer un fichier en quarantaine
+app.delete('/api/admin/security/quarantine/:id', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const item = virusQuarantineDb.getById(parseInt(req.params.id));
+    if (!item) return res.status(404).json({ success: false, error: 'Entrée non trouvée' });
+
+    // Supprimer le fichier physique en quarantaine
+    if (item.quarantine_path) {
+      try { fs.unlinkSync(item.quarantine_path); } catch(e) {}
+    }
+
+    virusQuarantineDb.delete(parseInt(req.params.id));
+    res.json({ success: true, message: 'Fichier en quarantaine supprimé' });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Marquer comme résolu
+app.put('/api/admin/security/quarantine/:id/resolve', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const item = virusQuarantineDb.getById(parseInt(req.params.id));
+    if (!item) return res.status(404).json({ success: false, error: 'Entrée non trouvée' });
+
+    virusQuarantineDb.resolve(parseInt(req.params.id), req.user.username);
+    res.json({ success: true, message: 'Marqué comme résolu' });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Scan manuel d'un fichier existant
+app.post('/api/admin/security/scan/:blobName', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const { blobName } = req.params;
+    const virusScanService = require('./ai/virusScanService');
+
+    if (!virusScanService.isClamAvAvailable()) {
+      return res.status(503).json({ success: false, error: 'ClamAV non disponible sur le serveur' });
+    }
+
+    const containerClient = blobServiceClient.getContainerClient(containerName);
+    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+    const exists = await blockBlobClient.exists();
+    if (!exists) return res.status(404).json({ success: false, error: 'Fichier non trouvé' });
+
+    const downloadResponse = await blockBlobClient.download();
+    const buffer = await streamToBuffer(downloadResponse.readableStreamBody);
+
+    const result = await virusScanService.scanBuffer(buffer, blobName);
+
+    if (!result.clean) {
+      virusScanService.quarantine(blobName, buffer, result.virus);
+    }
+
+    res.json({ success: true, result });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Statistiques de scan
+app.get('/api/admin/security/scan-stats', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const virusScanService = require('./ai/virusScanService');
+    const stats = virusQuarantineDb.getStats();
+    res.json({
+      success: true,
+      stats: {
+        ...stats,
+        clamAvAvailable: virusScanService.isClamAvAvailable(),
+        scanEnabled: virusScanService.isEnabled(),
+        quarantineDir: virusScanService.QUARANTINE_DIR
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ============================================================================
+// ROLES & PERMISSIONS API
+// ============================================================================
+
+const AVAILABLE_PERMISSIONS = [
+  { key: 'canCreateGuests', label: 'Créer des comptes invités', description: 'Inviter des personnes externes à déposer des fichiers' },
+  { key: 'canUseAI', label: 'Utiliser l\'IA', description: 'Analyse d\'images, vidéos, reconnaissance faciale, OCR' },
+  { key: 'canCreateTeams', label: 'Créer des équipes', description: 'Créer et gérer des équipes' },
+  { key: 'canShareFiles', label: 'Partager des fichiers', description: 'Créer des liens de partage' },
+  { key: 'canUploadFiles', label: 'Uploader des fichiers', description: 'Déposer des fichiers dans son espace' },
+  { key: 'canViewReports', label: 'Voir les rapports', description: 'Consulter les statistiques et rapports' },
+  { key: 'canManageUsers', label: 'Gérer les utilisateurs', description: 'Créer, modifier, supprimer des comptes' },
+  { key: 'canManageSettings', label: 'Gérer les paramètres', description: 'Modifier la configuration de l\'application' },
+  { key: 'canAuditShares', label: 'Auditer les partages', description: 'Voir tous les partages en cours de tous les utilisateurs', category: 'Sécurité' },
+  { key: 'canAuditFiles', label: 'Auditer les fichiers', description: 'Voir tous les fichiers partagés de tous les utilisateurs', category: 'Sécurité' },
+  { key: 'canAuditActivity', label: 'Auditer l\'activité', description: 'Voir toute l\'activité (téléchargements, connexions, partages)', category: 'Sécurité' },
+];
+
+// List all roles with their permissions
+app.get('/api/admin/roles', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const roles = {};
+    const permissionLabels = {};
+    for (const p of AVAILABLE_PERMISSIONS) {
+      permissionLabels[p.key] = p.label;
+    }
+    for (const role of ['admin', 'com', 'user', 'viewer']) {
+      roles[role] = rolePermissionsDb.getByRole(role);
+    }
+    res.json({ success: true, roles, permissionLabels });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Get permissions for a specific role
+app.get('/api/admin/roles/:role/permissions', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const perms = rolePermissionsDb.getByRole(req.params.role);
+    res.json({ success: true, permissions: perms });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Update permissions for a role
+app.put('/api/admin/roles/:role/permissions', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const { role } = req.params;
+    const { permissions } = req.body;
+    const auditPermissions = ['canAuditShares', 'canAuditFiles', 'canAuditActivity'];
+    if (role === 'admin') {
+      // Allow modifying audit permissions for admin role
+      const nonAudit = permissions.filter(p => !auditPermissions.includes(p.permission));
+      if (nonAudit.length > 0) {
+        return res.status(400).json({ success: false, error: 'Seules les permissions d\'audit peuvent être modifiées pour le rôle admin' });
+      }
+    }
+    if (!Array.isArray(permissions)) {
+      return res.status(400).json({ success: false, error: 'permissions doit être un tableau' });
+    }
+    for (const p of permissions) {
+      rolePermissionsDb.update(role, p.permission, p.enabled ? 1 : 0, req.user.username);
+    }
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// List all available permissions
+app.get('/api/admin/permissions', authenticateUser, requireAdmin, (req, res) => {
+  res.json({ success: true, permissions: AVAILABLE_PERMISSIONS });
+});
+
+// Current user's effective permissions
+app.get('/api/user/permissions', authenticateUser, (req, res) => {
+  try {
+    const perms = {};
+    for (const p of AVAILABLE_PERMISSIONS) {
+      perms[p.key] = rolePermissionsDb.hasPermission(req.user.role, p.key);
+    }
+    res.json({ success: true, role: req.user.role, permissions: perms });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ============================================
+// ENTRA ROLE MAPPINGS ADMIN ROUTES
+// ============================================
+
+// GET /api/admin/entra/role-mappings
+app.get('/api/admin/entra/role-mappings', authenticateUser, requireRole('admin'), (req, res) => {
+  try {
+    const mappings = entraRoleMappingsDb.getAll();
+    const syncEnabled = settingsDb.get('entraGroupSyncEnabled') !== 'false';
+    const defaultRole = settingsDb.get('entraDefaultRole') || 'viewer';
+    res.json({ success: true, mappings, syncEnabled, defaultRole });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// PUT /api/admin/entra/role-mappings/:role
+app.put('/api/admin/entra/role-mappings/:role', authenticateUser, requireRole('admin'), (req, res) => {
+  try {
+    const { role } = req.params;
+    const { entra_group_id, entra_group_name } = req.body;
+    const mapping = entraRoleMappingsDb.getByRole(role);
+    if (!mapping) {
+      return res.status(404).json({ success: false, error: 'Rôle non trouvé' });
+    }
+    entraRoleMappingsDb.update(role, {
+      entra_group_id: entra_group_id || null,
+      entra_group_name: entra_group_name || null,
+      updatedBy: req.user.username
+    });
+    res.json({ success: true, message: 'Mapping mis à jour' });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// GET /api/admin/entra/groups - list Entra ID groups via Graph API
+app.get('/api/admin/entra/groups', authenticateUser, requireRole('admin'), async (req, res) => {
+  try {
+    const token = await getAppToken();
+    if (!token) {
+      return res.status(400).json({ success: false, error: 'Configuration Entra incomplète ou token impossible à obtenir' });
+    }
+    const result = await httpsRequest(
+      'https://graph.microsoft.com/v1.0/groups?$select=id,displayName,description&$top=100',
+      { method: 'GET', headers: { 'Authorization': `Bearer ${token}` } }
+    );
+    if (result.status !== 200) {
+      return res.status(result.status).json({ success: false, error: 'Erreur Graph API', details: result.data });
+    }
+    const groups = (result.data.value || []).map(g => ({
+      id: g.id,
+      displayName: g.displayName,
+      description: g.description
+    }));
+    res.json({ success: true, groups });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// POST /api/admin/entra/test-mapping - test role mapping for a user email
+app.post('/api/admin/entra/test-mapping', authenticateUser, requireRole('admin'), async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, error: 'Email requis' });
+
+    const token = await getAppToken();
+    if (!token) {
+      return res.status(400).json({ success: false, error: 'Configuration Entra incomplète' });
+    }
+
+    // Get user's groups via Graph API
+    const userResult = await httpsRequest(
+      `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(email)}/memberOf?$select=id,displayName,@odata.type`,
+      { method: 'GET', headers: { 'Authorization': `Bearer ${token}` } }
+    );
+
+    if (userResult.status !== 200) {
+      return res.status(400).json({ success: false, error: 'Utilisateur non trouvé dans Entra ID', details: userResult.data });
+    }
+
+    const groups = (userResult.data.value || [])
+      .filter(v => v['@odata.type'] === '#microsoft.graph.group')
+      .map(g => ({ id: g.id, displayName: g.displayName }));
+
+    const groupIds = groups.map(g => g.id);
+    const mappedRole = entraRoleMappingsDb.getRoleForGroups(groupIds);
+
+    res.json({
+      success: true,
+      email,
+      groups,
+      mappedRole,
+      totalGroups: groups.length
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// PUT /api/admin/entra/sync-settings - update sync settings
+app.put('/api/admin/entra/sync-settings', authenticateUser, requireRole('admin'), (req, res) => {
+  try {
+    const { syncEnabled, defaultRole } = req.body;
+    if (syncEnabled !== undefined) settingsDb.update('entraGroupSyncEnabled', syncEnabled ? 'true' : 'false');
+    if (defaultRole) settingsDb.update('entraDefaultRole', defaultRole);
+    res.json({ success: true, message: 'Paramètres de synchronisation mis à jour' });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ============================================
+// SECURITY AUDIT ROUTES
+// ============================================
+
+// GET /api/audit/shares — All active shares across all users
+app.get('/api/audit/shares', authenticateUser, requirePermission('canAuditShares'), (req, res) => {
+  try {
+    const shares = db.prepare(`
+      SELECT sl.*, u.username as created_by_username, u.full_name as created_by_name,
+             u.email as created_by_email
+      FROM share_links sl
+      LEFT JOIN users u ON sl.created_by = u.username
+      WHERE sl.is_active = 1
+      ORDER BY sl.created_at DESC
+    `).all();
+    res.json({ success: true, shares, count: shares.length });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/audit/shares/expired — Recently expired shares
+app.get('/api/audit/shares/expired', authenticateUser, requirePermission('canAuditShares'), (req, res) => {
+  try {
+    const shares = db.prepare(`
+      SELECT sl.*, u.username as created_by_username, u.full_name as created_by_name
+      FROM share_links sl
+      LEFT JOIN users u ON sl.created_by = u.username
+      WHERE sl.is_active = 0
+      ORDER BY sl.expires_at DESC
+      LIMIT 100
+    `).all();
+    res.json({ success: true, shares, count: shares.length });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/audit/shares/stats — Share statistics
+app.get('/api/audit/shares/stats', authenticateUser, requirePermission('canAuditShares'), (req, res) => {
+  try {
+    const stats = {
+      activeShares: db.prepare('SELECT COUNT(*) as c FROM share_links WHERE is_active = 1').get().c,
+      expiredShares: db.prepare('SELECT COUNT(*) as c FROM share_links WHERE is_active = 0').get().c,
+      totalDownloads: db.prepare('SELECT COALESCE(SUM(download_count), 0) as c FROM share_links').get().c,
+      sharesWithPassword: db.prepare('SELECT COUNT(*) as c FROM share_links WHERE password_hash IS NOT NULL AND is_active = 1').get().c,
+      sharesWithoutPassword: db.prepare('SELECT COUNT(*) as c FROM share_links WHERE password_hash IS NULL AND is_active = 1').get().c,
+      topSharers: db.prepare(`
+        SELECT created_by as username, COUNT(*) as share_count
+        FROM share_links WHERE is_active = 1
+        GROUP BY created_by ORDER BY share_count DESC LIMIT 10
+      `).all(),
+      recentDownloads: db.prepare(`
+        SELECT dl.*, sl.original_name, sl.created_by
+        FROM download_logs dl
+        JOIN share_links sl ON dl.link_id = sl.link_id
+        ORDER BY dl.downloaded_at DESC LIMIT 20
+      `).all()
+    };
+    res.json({ success: true, stats });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/audit/shares/:linkId/revoke — Revoke a share
+app.post('/api/audit/shares/:linkId/revoke', authenticateUser, requirePermission('canAuditShares'), (req, res) => {
+  try {
+    db.prepare('UPDATE share_links SET is_active = 0 WHERE link_id = ?').run(req.params.linkId);
+    res.json({ success: true, message: 'Partage révoqué' });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/audit/files — All files with ownership info
+app.get('/api/audit/files', authenticateUser, requirePermission('canAuditFiles'), (req, res) => {
+  try {
+    const { page = 1, limit = 50 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const files = db.prepare(`
+      SELECT fo.*, u.username, u.full_name, u.email,
+             (SELECT COUNT(*) FROM share_links sl WHERE sl.blob_name = fo.blob_name AND sl.is_active = 1) as active_shares
+      FROM file_ownership fo
+      LEFT JOIN users u ON fo.uploaded_by_user_id = u.id
+      ORDER BY fo.uploaded_at DESC
+      LIMIT ? OFFSET ?
+    `).all(parseInt(limit), offset);
+    const total = db.prepare('SELECT COUNT(*) as c FROM file_ownership').get().c;
+    res.json({ success: true, files, total, page: parseInt(page), limit: parseInt(limit) });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/audit/activity — All activity logs
+app.get('/api/audit/activity', authenticateUser, requirePermission('canAuditActivity'), (req, res) => {
+  try {
+    const { page = 1, limit = 50, type } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    let query = `SELECT * FROM activity_logs ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+    let params = [parseInt(limit), offset];
+    if (type) {
+      query = `SELECT * FROM activity_logs WHERE operation = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+      params = [type, parseInt(limit), offset];
+    }
+    let logs;
+    try {
+      logs = db.prepare(query).all(...params);
+    } catch(e) {
+      query = query.replace(/activity_logs/g, 'operation_logs');
+      try { logs = db.prepare(query).all(...params); } catch(e2) { logs = []; }
+    }
+    res.json({ success: true, logs, page: parseInt(page), limit: parseInt(limit) });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/audit/downloads — Download history across all shares
+app.get('/api/audit/downloads', authenticateUser, requirePermission('canAuditShares'), (req, res) => {
+  try {
+    const downloads = db.prepare(`
+      SELECT dl.*, sl.original_name, sl.created_by, sl.recipient_email
+      FROM download_logs dl
+      JOIN share_links sl ON dl.link_id = sl.link_id
+      ORDER BY dl.downloaded_at DESC
+      LIMIT 200
+    `).all();
+    res.json({ success: true, downloads, count: downloads.length });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============================================
+// EMAIL CONFIGURATION ROUTES
+// ============================================
+
+app.get('/api/admin/email/config', authenticateUser, requireAdmin, (req, res) => {
+  const emailService = require('./emailService');
+  const config = emailService.getConfig();
+  res.json({
+    success: true,
+    config: {
+      ...config,
+      password: config.password ? '••••••••' : '',
+      mailjetSecretKey: config.mailjetSecretKey ? '••••••••' : ''
+    }
+  });
+});
+
+app.put('/api/admin/email/config', authenticateUser, requireAdmin, (req, res) => {
+  const { host, port, secure, user, password, fromEmail, fromName, enabled, provider, mailjetApiKey, mailjetSecretKey } = req.body;
+  const { settingsDb } = require('./database');
+  
+  if (provider !== undefined) settingsDb.update('emailProvider', provider);
+  if (host !== undefined) settingsDb.update('smtpHost', host);
+  if (port !== undefined) settingsDb.update('smtpPort', String(port));
+  if (secure !== undefined) settingsDb.update('smtpSecure', String(secure));
+  if (user !== undefined) settingsDb.update('smtpUser', user);
+  if (password !== undefined && password !== '••••••••') settingsDb.update('smtpPassword', password);
+  if (fromEmail !== undefined) settingsDb.update('smtpFromEmail', fromEmail);
+  if (fromName !== undefined) settingsDb.update('smtpFromName', fromName);
+  if (enabled !== undefined) settingsDb.update('emailEnabled', String(enabled));
+  if (mailjetApiKey !== undefined) settingsDb.update('mailjetApiKey', mailjetApiKey);
+  if (mailjetSecretKey !== undefined && mailjetSecretKey !== '••••••••') settingsDb.update('mailjetSecretKey', mailjetSecretKey);
+  
+  const emailService = require('./emailService');
+  emailService.reload();
+  
+  res.json({ success: true, message: 'Configuration email mise à jour' });
+});
+
+app.post('/api/admin/email/test', authenticateUser, requireAdmin, async (req, res) => {
+  const emailService = require('./emailService');
+  const result = await emailService.testConnection();
+  res.json(result);
+});
+
+app.post('/api/admin/email/send-test', authenticateUser, requireAdmin, async (req, res) => {
+  const { to } = req.body;
+  if (!to) return res.status(400).json({ success: false, error: 'Adresse email requise' });
+  
+  try {
+    const emailService = require('./emailService');
+    const config = emailService.getConfig();
+    
+    console.log(`📧 Test email vers ${to} via ${config.provider} (host: ${config.host}, user: ${config.user}, from: ${config.fromEmail})`);
+    
+    if (!config.enabled) {
+      return res.json({ success: false, error: 'Email désactivé dans les paramètres. Activez-le dans Paramètres > Général.' });
+    }
+    
+    if (config.provider === 'mailjet') {
+      if (!config.mailjetApiKey || !config.mailjetSecretKey) {
+        return res.json({ success: false, error: 'Clés API Mailjet non configurées (API Key + Secret Key requises)' });
+      }
+    } else {
+      if (!config.user || !config.password) {
+        return res.json({ success: false, error: `Identifiants SMTP manquants (user: ${config.user ? '✅' : '❌'}, password: ${config.password ? '✅' : '❌'})` });
+      }
+      if (!config.host) {
+        return res.json({ success: false, error: 'Hôte SMTP non configuré' });
+      }
+    }
+    
+    const result = await emailService.sendMail(
+      to,
+      '✅ Test ShareAzure — Email fonctionnel',
+      `<div style="font-family:sans-serif;padding:20px;">
+        <h1 style="color:#003C61;">✅ Test réussi</h1>
+        <p>Si vous recevez cet email, la configuration ${config.provider === 'mailjet' ? 'Mailjet' : 'SMTP'} de ShareAzure fonctionne correctement.</p>
+        <p style="color:#888;font-size:0.85rem;">Provider: ${config.provider} | Host: ${config.host || 'Mailjet API'} | From: ${config.fromEmail || config.user}</p>
+        <p style="color:#666;font-size:0.85rem;">ShareAzure — Partage sécurisé</p>
+      </div>`,
+      'Test ShareAzure — La configuration email fonctionne.'
+    );
+    
+    if (result.success) {
+      console.log(`✅ Test email envoyé à ${to} (messageId: ${result.messageId})`);
+      res.json({ success: true, message: `Email envoyé à ${to}`, messageId: result.messageId, provider: config.provider });
+    } else {
+      console.error(`❌ Test email échoué vers ${to}:`, result.error);
+      res.json({ success: false, error: result.error, provider: config.provider, details: `Host: ${config.host || 'Mailjet'}, Port: ${config.port}, Secure: ${config.secure}, User: ${config.user}, From: ${config.fromEmail || config.user}` });
+    }
+  } catch (e) {
+    console.error('❌ Test email exception:', e);
+    res.json({ success: false, error: e.message, stack: e.stack?.split('\n')[1]?.trim() });
+  }
+});
+
+// ============================================
+// STATS API (cached 5 min)
+// ============================================
+let statsCache = null;
+let statsCacheTime = 0;
+const STATS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+app.get('/api/admin/stats', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const now = Date.now();
+    if (statsCache && (now - statsCacheTime) < STATS_CACHE_TTL) {
+      return res.json({ success: true, stats: statsCache });
+    }
+
+    const containerClient = blobServiceClient.getContainerClient(containerName);
+
+    // Blob listing
+    let totalFiles = 0;
+    let totalSize = 0;
+    const storageByTier = { hot: { count: 0, size: 0 }, cool: { count: 0, size: 0 }, archive: { count: 0, size: 0 } };
+    const allBlobs = [];
+
+    for await (const blob of containerClient.listBlobsFlat({ includeMetadata: true })) {
+      totalFiles++;
+      const size = blob.properties.contentLength || 0;
+      totalSize += size;
+      const tier = (blob.properties.accessTier || 'Hot').toLowerCase();
+      if (storageByTier[tier]) {
+        storageByTier[tier].count++;
+        storageByTier[tier].size += size;
+      } else {
+        storageByTier.hot.count++;
+        storageByTier.hot.size += size;
+      }
+      allBlobs.push({
+        name: blob.name,
+        size,
+        contentType: blob.properties.contentType,
+        lastModified: blob.properties.lastModified,
+        tier: blob.properties.accessTier || 'Hot',
+        originalName: blob.metadata?.originalname || blob.metadata?.originalName || blob.name
+      });
+    }
+
+    // Recent uploads (last 10)
+    allBlobs.sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified));
+    const recentUploads = allBlobs.slice(0, 10).map(b => ({
+      name: b.originalName,
+      size: b.size,
+      date: b.lastModified,
+      contentType: b.contentType
+    }));
+
+    // Top 10 biggest files
+    const topFiles = [...allBlobs].sort((a, b) => b.size - a.size).slice(0, 10).map(b => ({
+      name: b.originalName,
+      blobName: b.name,
+      size: b.size,
+      contentType: b.contentType,
+      tier: b.tier
+    }));
+
+    // Storage by file type
+    const storageByType = { images: { count: 0, size: 0 }, videos: { count: 0, size: 0 }, documents: { count: 0, size: 0 }, other: { count: 0, size: 0 } };
+    allBlobs.forEach(b => {
+      const ct = (b.contentType || '').toLowerCase();
+      let cat = 'other';
+      if (ct.startsWith('image/')) cat = 'images';
+      else if (ct.startsWith('video/')) cat = 'videos';
+      else if (ct.includes('pdf') || ct.includes('document') || ct.includes('spreadsheet') || ct.includes('presentation') || ct.includes('text/') || ct.includes('msword') || ct.includes('officedocument')) cat = 'documents';
+      storageByType[cat].count++;
+      storageByType[cat].size += b.size;
+    });
+
+    // DB stats
+    const totalShares = db.prepare('SELECT COUNT(*) as c FROM share_links').get().c;
+    const activeShares = db.prepare("SELECT COUNT(*) as c FROM share_links WHERE is_active = 1 AND (expires_at IS NULL OR expires_at > datetime('now'))").get().c;
+    const totalUsers = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
+    const totalTeams = db.prepare('SELECT COUNT(*) as c FROM teams').get().c;
+    let totalScans = 0;
+    try { totalScans = db.prepare('SELECT COUNT(*) as c FROM ai_analyses').get().c; } catch (e) {}
+
+    // Storage by team
+    const storageByTeam = db.prepare(`
+      SELECT t.name as team_name, t.id as team_id,
+             COUNT(fo.id) as file_count,
+             COALESCE(SUM(fo.file_size), 0) as total_size
+      FROM teams t
+      LEFT JOIN file_ownership fo ON fo.team_id = t.id
+      GROUP BY t.id
+      ORDER BY total_size DESC
+    `).all();
+
+    statsCache = {
+      totalFiles, totalSize, totalShares, activeShares, totalUsers, totalTeams, totalScans,
+      storageByTier, recentUploads, topFiles, storageByType, storageByTeam
+    };
+    statsCacheTime = now;
+
+    res.json({ success: true, stats: statsCache });
+  } catch (error) {
+    console.error('Stats error:', error);
+    res.status(500).json({ success: false, error: 'Erreur lors du calcul des statistiques' });
+  }
+});
+
+// ============================================
+// AUTO-TIERING
+// ============================================
+
+async function runAutoTiering(dryRun = false) {
+  const containerClient = blobServiceClient.getContainerClient(containerName);
+  const globalPolicy = tieringPoliciesDb.getGlobal();
+  const allPolicies = tieringPoliciesDb.getAll();
+  const teamPolicies = {};
+  for (const p of allPolicies) {
+    if (p.team_id) teamPolicies[p.team_id] = p;
+  }
+
+  const results = [];
+  const now = Date.now();
+
+  for await (const blob of containerClient.listBlobsFlat({ includeMetadata: true })) {
+    const tier = (blob.properties.accessTier || 'Hot');
+    const lastModified = new Date(blob.properties.lastModified);
+    const ageDays = Math.floor((now - lastModified.getTime()) / (1000 * 60 * 60 * 24));
+
+    // Determine team
+    let teamId = null;
+    try {
+      const ownership = fileOwnershipDb.getByBlobName ? fileOwnershipDb.getByBlobName(blob.name) : db.prepare('SELECT team_id FROM file_ownership WHERE blob_name = ?').get(blob.name);
+      if (ownership) teamId = ownership.team_id;
+    } catch (e) { /* ignore */ }
+
+    // Get applicable policy
+    const policy = (teamId && teamPolicies[teamId]) ? teamPolicies[teamId] : globalPolicy;
+    if (!policy || !policy.enabled) continue;
+
+    let newTier = null;
+    if (tier === 'Hot' && ageDays > policy.hot_to_cool_days) {
+      newTier = 'Cool';
+    } else if (tier === 'Cool' && ageDays > policy.cool_to_archive_days) {
+      newTier = 'Archive';
+    }
+
+    if (newTier) {
+      results.push({
+        fileName: blob.name,
+        currentTier: tier,
+        newTier,
+        ageDays,
+        teamId,
+        teamName: teamId && teamPolicies[teamId] ? teamPolicies[teamId].team_name : null
+      });
+
+      if (!dryRun) {
+        try {
+          const blobClient = containerClient.getBlobClient(blob.name);
+          await blobClient.setAccessTier(newTier);
+          console.log(`📦 Tiering: ${blob.name} ${tier} → ${newTier} (${ageDays}j)`);
+        } catch (err) {
+          console.error(`❌ Tiering error for ${blob.name}:`, err.message);
+        }
+      }
+    }
+  }
+
+  return results;
+}
+
+// Tiering API routes
+app.get('/api/admin/tiering/policies', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const policies = tieringPoliciesDb.getAll();
+    res.json({ success: true, policies });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.put('/api/admin/tiering/global', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const { hotToCoolDays, coolToArchiveDays, enabled } = req.body;
+    tieringPoliciesDb.upsertGlobal(hotToCoolDays || 30, coolToArchiveDays || 90, enabled);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.put('/api/admin/tiering/team/:teamId', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const { hotToCoolDays, coolToArchiveDays, enabled } = req.body;
+    tieringPoliciesDb.upsertTeam(parseInt(req.params.teamId), hotToCoolDays || 30, coolToArchiveDays || 90, enabled);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.delete('/api/admin/tiering/team/:teamId', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const policy = tieringPoliciesDb.getByTeam(parseInt(req.params.teamId));
+    if (!policy) return res.status(404).json({ success: false, error: 'Politique non trouvée' });
+    tieringPoliciesDb.delete(policy.id);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/admin/tiering/run', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const results = await runAutoTiering(false);
+    res.json({ success: true, message: `${results.length} fichier(s) déplacé(s)`, results });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/admin/tiering/preview', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const results = await runAutoTiering(true);
+    res.json({ success: true, results });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============================================
+// SYNC AZURE BLOBS → DB
+// ============================================
+app.post('/api/admin/sync-storage', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const containerClient = blobServiceClient.getContainerClient(containerName);
+    let synced = 0, skipped = 0, errors = 0;
+    const results = [];
+
+    for await (const blob of containerClient.listBlobsFlat({ includeMetadata: true })) {
+      // Skip directory markers
+      if (blob.properties.contentType === 'application/x-directory' || blob.name.endsWith('/')) {
+        skipped++;
+        continue;
+      }
+
+      // Check if already in DB
+      const existing = db.prepare('SELECT id FROM file_ownership WHERE blob_name = ?').get(blob.name);
+      if (existing) {
+        skipped++;
+        continue;
+      }
+
+      try {
+        // Determine team from path (e.g., "TeamName/file.pdf" → find team)
+        const parts = blob.name.split('/');
+        let teamId = null;
+        let originalName = blob.name;
+
+        if (parts.length > 1) {
+          // First part could be a team name
+          const teamName = parts[0];
+          const team = db.prepare('SELECT id FROM teams WHERE name = ? COLLATE NOCASE').get(teamName);
+          if (team) {
+            teamId = team.id;
+          }
+          originalName = parts[parts.length - 1];
+        }
+
+        // Insert into file_ownership
+        db.prepare(`
+          INSERT INTO file_ownership (blob_name, original_name, content_type, file_size, uploaded_by_user_id, team_id, uploaded_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          blob.name,
+          originalName,
+          blob.properties.contentType || 'application/octet-stream',
+          blob.properties.contentLength || 0,
+          req.user.id, // Assign to current admin
+          teamId,
+          blob.properties.lastModified ? new Date(blob.properties.lastModified).toISOString() : new Date().toISOString()
+        );
+
+        synced++;
+        results.push({ name: blob.name, originalName, team: teamId ? parts[0] : null, size: blob.properties.contentLength });
+      } catch (e) {
+        errors++;
+        console.error(`Sync error for ${blob.name}:`, e.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Synchronisation terminée : ${synced} importé(s), ${skipped} ignoré(s), ${errors} erreur(s)`,
+      synced, skipped, errors, results
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// POST reset storage - delete all blobs and clean DB
+app.post('/api/admin/reset-storage', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const containerClient = blobServiceClient.getContainerClient(containerName);
+    let deletedBlobs = 0;
+    let errors = 0;
+
+    // Delete all blobs from Azure
+    for await (const blob of containerClient.listBlobsFlat()) {
+      try {
+        await containerClient.getBlockBlobClient(blob.name).delete();
+        deletedBlobs++;
+      } catch (e) {
+        errors++;
+        console.error(`Reset: erreur suppression ${blob.name}:`, e.message);
+      }
+    }
+
+    // Clean DB tables
+    const deletedDbRecords = db.prepare('SELECT count(*) as c FROM file_ownership').get().c;
+    db.prepare('DELETE FROM file_ownership').run();
+    db.prepare('DELETE FROM share_links').run();
+    db.prepare('DELETE FROM download_logs').run();
+    db.prepare('DELETE FROM file_tiers').run();
+    db.prepare('DELETE FROM virus_quarantine').run();
+    db.prepare('DELETE FROM operation_logs').run();
+
+    // Log activity
+    if (activityLogsDb && activityLogsDb.log) {
+      activityLogsDb.log('admin', req.user.id, 'reset_storage', `Reset complet: ${deletedBlobs} blobs supprimés, ${deletedDbRecords} enregistrements nettoyés`);
+    }
+
+    res.json({
+      success: true,
+      message: `Storage réinitialisé : ${deletedBlobs} blob(s) supprimé(s), ${deletedDbRecords} enregistrement(s) nettoyé(s)`,
+      deletedBlobs,
+      deletedDbRecords,
+      errors
+    });
+  } catch (e) {
+    console.error('Reset storage error:', e);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// GET storage structure (list all blobs with hierarchy)
+app.get('/api/admin/storage/tree', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const containerClient = blobServiceClient.getContainerClient(containerName);
+    const blobs = [];
+    for await (const blob of containerClient.listBlobsFlat({ includeMetadata: true })) {
+      blobs.push({
+        name: blob.name,
+        size: blob.properties.contentLength,
+        contentType: blob.properties.contentType,
+        lastModified: blob.properties.lastModified,
+        tier: blob.properties.accessTier || 'Hot',
+        inDb: !!db.prepare('SELECT 1 FROM file_ownership WHERE blob_name = ?').get(blob.name)
+      });
+    }
+    res.json({ success: true, blobs, total: blobs.length });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 // Catch-all 404 pour les routes API non trouvées (retourne du JSON, pas du HTML)
 app.all('/api/*', (req, res) => {
   res.status(404).json({ success: false, error: 'Route non trouvée' });
@@ -4843,12 +7128,12 @@ if (require.main === module) {
       await migrateHardcodedUsers();
 
       // Tester la configuration email (optionnel, n'empêche pas le démarrage)
-      await emailService.testEmailConfiguration().catch(() => {
+      await emailService.testConnection().catch(() => {
         console.warn('⚠️  Service email non configuré - les emails ne seront pas envoyés');
       });
 
-      app.listen(PORT, () => {
-        console.log(`🚀 Serveur démarré sur le port ${PORT}`);
+      app.listen(PORT, '127.0.0.1', () => {
+        console.log(`🚀 Serveur démarré sur 127.0.0.1:${PORT} (derrière Nginx)`);
         console.log(`📁 Conteneur Azure: ${containerName}`);
         console.log(`🌍 Environnement: ${process.env.NODE_ENV || 'development'}`);
 
@@ -4895,6 +7180,31 @@ if (require.main === module) {
             scanService.checkScheduledScans(getBlobBufferHelper);
           } catch (err) {
             console.error('Erreur tâche scans IA:', err.message);
+          }
+        }, 60 * 1000);
+
+        // Purge des partages expirés toutes les heures
+        setInterval(() => {
+          try {
+            const result = db.prepare(`
+              UPDATE share_links SET is_active = 0
+              WHERE is_active = 1 AND expires_at < datetime('now')
+            `).run();
+            if (result.changes > 0) {
+              console.log(`🧹 Purge: ${result.changes} partage(s) expiré(s) désactivé(s)`);
+            }
+          } catch (e) {
+            console.error('Purge error:', e.message);
+          }
+        }, 60 * 60 * 1000);
+
+        // Auto-tiering quotidien à 3h du matin
+        setInterval(() => {
+          const now = new Date();
+          if (now.getHours() === 3 && now.getMinutes() < 1) {
+            runAutoTiering(false).then(results => {
+              if (results.length > 0) console.log(`📦 Auto-tiering: ${results.length} fichier(s) déplacé(s)`);
+            }).catch(err => console.error('Erreur tâche auto-tiering:', err));
           }
         }, 60 * 1000);
 

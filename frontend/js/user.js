@@ -1,5 +1,5 @@
 // Configuration
-const API_URL = 'http://localhost:3000/api';
+const API_URL = window.location.origin + '/api';
 
 // État de l'application
 let currentView = 'grid';
@@ -24,6 +24,22 @@ document.addEventListener('DOMContentLoaded', () => {
 // ============================================
 // Authentication
 // ============================================
+
+function showSuccess(msg) {
+    const toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#28a745;color:#fff;padding:12px 24px;border-radius:8px;z-index:10001;font-size:0.9rem;box-shadow:0 4px 12px rgba(0,0,0,0.2);';
+    toast.innerHTML = '<i class="fas fa-check-circle"></i> ' + msg;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+}
+
+function showError(msg) {
+    const toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#dc3545;color:#fff;padding:12px 24px;border-radius:8px;z-index:10001;font-size:0.9rem;box-shadow:0 4px 12px rgba(0,0,0,0.2);';
+    toast.innerHTML = '<i class="fas fa-exclamation-circle"></i> ' + msg;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 4000);
+}
 
 function getAuthToken() {
     return localStorage.getItem('authToken') || sessionStorage.getItem('authToken') ||
@@ -60,7 +76,15 @@ function initializeEventListeners() {
     });
 
     document.getElementById('createFolderBtn')?.addEventListener('click', showCreateFolderModal);
-    document.getElementById('createGuestBtn')?.addEventListener('click', showCreateGuestModal);
+    document.getElementById('guestsBtn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const dd = document.getElementById('guestsDropdown');
+        dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+    });
+    document.addEventListener('click', () => { document.getElementById('guestsDropdown').style.display = 'none'; });
+    document.getElementById('closeCreateGuestBtn')?.addEventListener('click', () => { document.getElementById('createGuestModal').style.display = 'none'; });
+    document.getElementById('cancelCreateGuestBtn')?.addEventListener('click', () => { document.getElementById('createGuestModal').style.display = 'none'; });
+    document.getElementById('closeMyGuestsBtn')?.addEventListener('click', () => { document.getElementById('myGuestsModal').style.display = 'none'; });
     document.getElementById('shareLinksBtn')?.addEventListener('click', showShareLinksSection);
     document.getElementById('closeShareLinksBtn')?.addEventListener('click', hideShareLinksSection);
     document.getElementById('discoverBtn')?.addEventListener('click', showDiscoverSection);
@@ -150,12 +174,6 @@ function initializeEventListeners() {
     document.getElementById('confirmCreateFolderBtn')?.addEventListener('click', handleCreateFolder);
 
     // Create guest modal
-    document.getElementById('closeCreateGuestBtn')?.addEventListener('click', () => {
-        document.getElementById('createGuestModal').style.display = 'none';
-    });
-    document.getElementById('cancelCreateGuestBtn')?.addEventListener('click', () => {
-        document.getElementById('createGuestModal').style.display = 'none';
-    });
     document.getElementById('confirmCreateGuestBtn')?.addEventListener('click', handleCreateGuest);
 
     // Rename modal
@@ -183,52 +201,56 @@ function initializeEventListeners() {
     document.getElementById('cancelShareBtn')?.addEventListener('click', () => {
         document.getElementById('shareModal').style.display = 'none';
     });
-    document.getElementById('applyShareBtn')?.addEventListener('click', handleApplyShare);
-    document.getElementById('refreshShareLinkBtn')?.addEventListener('click', handleGenerateShareLink);
+    document.getElementById('applyShareBtn')?.addEventListener('click', handleGenerateShareLink);
     document.getElementById('copyShareLinkBtn')?.addEventListener('click', copyShareLink);
-    document.getElementById('sharePasswordCheck')?.addEventListener('change', async (e) => {
-        const isChecked = e.target.checked;
-        const passwordInput = document.getElementById('sharePasswordInput');
-        passwordInput.style.display = isChecked ? 'block' : 'none';
+    
+    // Close result step
+    document.getElementById('closeShareResultBtn')?.addEventListener('click', () => {
+        document.getElementById('shareModal').style.display = 'none';
+    });
+    
+    // Send by email
+    document.getElementById('sendShareEmailBtn')?.addEventListener('click', async () => {
+        const linkId = document.getElementById('shareModal').dataset.linkId;
+        const shareLink = document.getElementById('shareLinkInput').value;
+        const recipientEmails = document.getElementById('shareRecipientEmailInput').value.trim();
+        const fileName = document.getElementById('shareModalTitle').textContent.replace('Partager "', '').replace('"', '');
         
-        // Si un lien existe déjà et que l'email est rempli, régénérer automatiquement immédiatement
-        const shareLinkInput = document.getElementById('shareLinkInput');
-        const recipientInput = document.getElementById('shareRecipientEmailInput');
-        const recipientEmails = recipientInput.value.trim();
+        if (!linkId || !shareLink) return;
         
-        if (shareLinkInput.value && recipientEmails) {
-            // Régénérer immédiatement le lien avec les nouveaux paramètres (avec ou sans mot de passe)
-            // Si le mot de passe n'est pas rempli mais que la case est cochée, on régénère sans mot de passe d'abord
-            // Puis on régénérera à nouveau quand le mot de passe sera saisi
-            await handleGenerateShareLink();
-            
-            // Si on active la protection et que le mot de passe n'est pas encore rempli,
-            // on attend la saisie pour régénérer avec le mot de passe
-            if (isChecked && !passwordInput.value.trim()) {
-                passwordInput.focus();
-                // Attendre que l'utilisateur entre le mot de passe puis quitte le champ
-                const onPasswordBlur = async () => {
-                    if (passwordInput.value.trim()) {
-                        passwordInput.removeEventListener('blur', onPasswordBlur);
-                        // Régénérer le lien avec le mot de passe
-                        await handleGenerateShareLink();
-                    }
-                };
-                passwordInput.addEventListener('blur', onPasswordBlur, { once: true });
+        const sendBtn = document.getElementById('sendShareEmailBtn');
+        if (sendBtn) { sendBtn.disabled = true; sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Envoi...'; }
+        
+        try {
+            const token = getAuthToken();
+            const res = await fetch(`${API_URL}/share/send-email`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ linkId, recipientEmails, fileName, shareLink })
+            });
+            const data = await res.json();
+            if (data.success) {
+                showSuccess('Email envoyé !');
+                if (sendBtn) { sendBtn.innerHTML = '<i class="fas fa-check"></i> Envoyé !'; sendBtn.style.background = '#4caf50'; }
+            } else {
+                showError(data.error || 'Erreur envoi email');
+                if (sendBtn) { sendBtn.disabled = false; sendBtn.innerHTML = '<i class="fas fa-envelope"></i> Envoyer par email'; }
             }
-        } else if (isChecked && recipientEmails) {
-            // Si on active la protection et qu'il n'y a pas encore de lien, générer après saisie du mot de passe
-            passwordInput.focus();
-            const onPasswordBlur = async () => {
-                if (passwordInput.value.trim()) {
-                    passwordInput.removeEventListener('blur', onPasswordBlur);
-                    await handleGenerateShareLink();
-                }
-            };
-            passwordInput.addEventListener('blur', onPasswordBlur, { once: true });
+        } catch(e) {
+            showError('Erreur envoi email');
+            if (sendBtn) { sendBtn.disabled = false; sendBtn.innerHTML = '<i class="fas fa-envelope"></i> Envoyer par email'; }
         }
     });
-}
+    
+    // Toggle password visibility
+    document.getElementById('togglePasswordVisibility')?.addEventListener('click', () => {
+        const pwd = document.getElementById('sharePasswordInput');
+        const btn = document.getElementById('togglePasswordVisibility');
+        if (pwd.type === 'password') { pwd.type = 'text'; btn.innerHTML = '<i class="fas fa-eye-slash"></i>'; }
+        else { pwd.type = 'password'; btn.innerHTML = '<i class="fas fa-eye"></i>'; }
+    });
+    
+    }
 
 // ============================================
 // File Management
@@ -1119,30 +1141,32 @@ async function showShareModal() {
     
     const displayName = file.displayName || file.originalName || contextMenuFile;
     document.getElementById('shareModalTitle').textContent = `Partager "${displayName}"`;
+    
+    // Reset fields
     document.getElementById('shareLinkInput').value = '';
     document.getElementById('shareRecipientEmailInput').value = '';
-    document.getElementById('sharePasswordCheck').checked = false;
-    document.getElementById('sharePasswordInput').style.display = 'none';
     document.getElementById('sharePasswordInput').value = '';
-    document.getElementById('shareExpirationSelect').value = '24';
-    document.getElementById('shareModal').dataset.linkId = ''; // Réinitialiser
+    document.getElementById('shareExpirationSelect').value = '1440';
+    document.getElementById('shareModal').dataset.linkId = '';
+    
+    // Show step 1 (config), hide step 2 (result)
+    const stepConfig = document.getElementById('shareStepConfig');
+    const stepResult = document.getElementById('shareStepResult');
+    if (stepConfig) stepConfig.style.display = 'block';
+    if (stepResult) stepResult.style.display = 'none';
+    
+    // File info
+    const shareFileInfo = document.getElementById('shareFileInfo');
+    if (shareFileInfo) {
+        shareFileInfo.innerHTML = `<div style="display:flex;align-items:center;gap:12px;">
+            <div style="font-size:1.5rem;">📄</div>
+            <div><div style="font-weight:600;font-size:0.95rem;">${escapeHtml(displayName)}</div>
+            <div style="color:#888;font-size:0.85rem;">${file.size ? formatSize(file.size) : ''}</div></div>
+        </div>`;
+    }
+    
     document.getElementById('shareModal').style.display = 'flex';
     document.getElementById('shareRecipientEmailInput').focus();
-    
-    // Générer automatiquement le lien quand l'utilisateur entre un email et quitte le champ
-    const recipientInput = document.getElementById('shareRecipientEmailInput');
-    const autoGenerate = async () => {
-        const emails = recipientInput.value.trim();
-        if (emails && !document.getElementById('shareLinkInput').value) {
-            // Générer automatiquement si l'email est rempli et qu'il n'y a pas encore de lien
-            await handleGenerateShareLink();
-        }
-    };
-    
-    // Retirer l'ancien listener s'il existe
-    recipientInput.removeEventListener('blur', autoGenerate);
-    // Ajouter le nouveau listener
-    recipientInput.addEventListener('blur', autoGenerate);
 }
 
 async function handleGenerateShareLink() {
@@ -1151,7 +1175,7 @@ async function handleGenerateShareLink() {
     const file = filteredFiles.find(f => f.name === contextMenuFile);
     if (!file || file.isFolder) return;
     
-    // Valider que l'email est rempli
+    // Valider email
     const recipientEmails = document.getElementById('shareRecipientEmailInput').value.trim();
     if (!recipientEmails) {
         showError('Veuillez entrer au moins un email de destinataire');
@@ -1159,23 +1183,22 @@ async function handleGenerateShareLink() {
         return;
     }
     
+    // Valider mot de passe obligatoire
+    const password = document.getElementById('sharePasswordInput').value.trim();
+    if (!password) {
+        showError('Le mot de passe est obligatoire');
+        document.getElementById('sharePasswordInput').focus();
+        return;
+    }
+    
+    const applyBtn = document.getElementById('applyShareBtn');
+    if (applyBtn) {
+        applyBtn.disabled = true;
+        applyBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Création...';
+    }
+    
     try {
-        const expirationHours = parseInt(document.getElementById('shareExpirationSelect').value);
-        const expiresInMinutes = expirationHours * 60; // Convertir en minutes
-        const passwordCheck = document.getElementById('sharePasswordCheck').checked;
-        const passwordInput = document.getElementById('sharePasswordInput');
-        const password = passwordCheck && passwordInput.value.trim() ? passwordInput.value.trim() : '';
-        
-        const requestBody = {
-            blobName: contextMenuFile,
-            expiresInMinutes: expiresInMinutes,
-            recipientEmail: recipientEmails,
-            permissions: 'r'
-        };
-        
-        if (password) {
-            requestBody.password = password;
-        }
+        const expiresInMinutes = parseInt(document.getElementById('shareExpirationSelect').value);
         
         const token = getAuthToken();
         const response = await fetch(`${API_URL}/share/generate`, {
@@ -1184,7 +1207,13 @@ async function handleGenerateShareLink() {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`
             },
-            body: JSON.stringify(requestBody)
+            body: JSON.stringify({
+                blobName: contextMenuFile,
+                expiresInMinutes,
+                recipientEmail: recipientEmails,
+                password,
+                permissions: 'r'
+            })
         });
         
         const data = await response.json();
@@ -1192,26 +1221,27 @@ async function handleGenerateShareLink() {
         if (data.success && data.shareLink) {
             document.getElementById('shareLinkInput').value = data.shareLink;
             
-            // Si on était en train de régénérer un lien, recharger la liste des liens
-            const linkId = document.getElementById('shareModal').dataset.linkId;
-            if (linkId && document.getElementById('shareLinksSection').style.display !== 'none') {
-                // Le modal de partage a été ouvert depuis la liste des liens
-                setTimeout(() => {
-                    loadShareLinks();
-                }, 500);
+            // Expiration info
+            const shareExpires = document.getElementById('shareExpires');
+            if (shareExpires && data.expiresAt) {
+                const d = new Date(data.expiresAt);
+                shareExpires.innerHTML = `🕒 Expire le <strong>${d.toLocaleString('fr-FR', { dateStyle: 'full', timeStyle: 'short' })}</strong>`;
             }
             
-            // Afficher un message de succès si c'est une régénération
-            const refreshBtn = document.getElementById('refreshShareLinkBtn');
-            if (refreshBtn) {
-                const originalHTML = refreshBtn.innerHTML;
-                refreshBtn.innerHTML = '<i class="fas fa-check"></i>';
-                refreshBtn.style.color = '#10b981';
-                setTimeout(() => {
-                    refreshBtn.innerHTML = originalHTML;
-                    refreshBtn.style.color = '';
-                }, 1000);
-            }
+            // QR Code
+            const qrImg = document.getElementById('qrCodeImage');
+            if (qrImg && data.qrCode) qrImg.src = data.qrCode;
+            
+            // Store linkId
+            document.getElementById('shareModal').dataset.linkId = data.linkId || '';
+            
+            // Switch to result step
+            const stepConfig = document.getElementById('shareStepConfig');
+            const stepResult = document.getElementById('shareStepResult');
+            if (stepConfig) stepConfig.style.display = 'none';
+            if (stepResult) stepResult.style.display = 'block';
+            
+            showSuccess('Lien de partage créé !');
         } else {
             showError(data.error || 'Erreur lors de la génération du lien');
         }
@@ -1219,11 +1249,9 @@ async function handleGenerateShareLink() {
         console.error('Erreur génération lien:', error);
         showError('Erreur lors de la génération du lien');
     } finally {
-        // Réactiver le bouton refresh
-        const refreshBtn = document.getElementById('refreshShareLinkBtn');
-        if (refreshBtn) {
-            refreshBtn.disabled = false;
-            refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i>';
+        if (applyBtn) {
+            applyBtn.disabled = false;
+            applyBtn.innerHTML = '<i class="fas fa-link"></i> Créer le lien';
         }
     }
 }
@@ -1283,18 +1311,19 @@ async function handleDelete() {
     if (!file) return;
     
     const displayName = file.displayName || file.originalName || contextMenuFile;
-    const confirmed = await showConfirmDialog('Supprimer', `Êtes-vous sûr de vouloir supprimer "${displayName}" ?`);
+    const confirmed = await showConfirmDialog('Corbeille', `Mettre "${displayName}" en corbeille ?\n\nLe fichier sera archivé et pourra être restauré.`);
     if (!confirmed) return;
     
     try {
         const token = getAuthToken();
-        const response = await fetch(`${API_URL}/user/files`, {
-            method: 'DELETE',
+        const blobName = file.blobName || contextMenuFile;
+        const response = await fetch(`${API_URL}/files/trash`, {
+            method: 'PUT',
             headers: {
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ path: contextMenuFile })
+            body: JSON.stringify({ blobName })
         });
         
         if (response.status === 401) {
@@ -1304,13 +1333,14 @@ async function handleDelete() {
         
         const data = await response.json();
         if (data.success) {
+            showSuccess('Fichier mis en corbeille');
             loadFiles(currentPath);
         } else {
-            showError(data.error || 'Erreur lors de la suppression');
+            showError(data.error || 'Erreur lors de la mise en corbeille');
         }
     } catch (error) {
-        console.error('Erreur suppression:', error);
-        showError('Erreur lors de la suppression');
+        console.error('Erreur corbeille:', error);
+        showError('Erreur lors de la mise en corbeille');
     }
 }
 
@@ -1518,8 +1548,8 @@ function viewShareLink(link) {
     const displayName = link.original_name || link.blob_name;
     document.getElementById('shareModalTitle').textContent = `Lien de partage - "${displayName}"`;
     document.getElementById('shareLinkInput').value = link.share_url || '';
-    document.getElementById('sharePasswordCheck').checked = link.hasPassword || false;
-    document.getElementById('sharePasswordInput').style.display = 'none';
+    
+    
     document.getElementById('sharePasswordInput').value = '';
     
     // Calculer la durée d'expiration restante en heures
@@ -1543,8 +1573,8 @@ async function regenerateShareLink(link) {
     const displayName = link.original_name || link.blob_name;
     document.getElementById('shareModalTitle').textContent = `Régénérer le lien - "${displayName}"`;
     document.getElementById('shareLinkInput').value = '';
-    document.getElementById('sharePasswordCheck').checked = false;
-    document.getElementById('sharePasswordInput').style.display = 'none';
+    
+    
     document.getElementById('sharePasswordInput').value = '';
     document.getElementById('shareExpirationSelect').value = '24';
     
@@ -1593,11 +1623,105 @@ async function deleteShareLink(linkId) {
 // Guest Account Management
 // ============================================
 
+async function loadMyGuestsList() {
+    const list = document.getElementById('myGuestsList');
+    list.innerHTML = '<p style="text-align:center;color:#666;padding:20px;"><i class="fas fa-spinner fa-spin"></i> Chargement...</p>';
+    
+    try {
+        const token = getAuthToken();
+        const res = await fetch(`${API_URL}/user/my-guests`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        
+        if (!data.success || !data.guests || data.guests.length === 0) {
+            list.innerHTML = '<div style="text-align:center;padding:40px;color:#888;"><i class="fas fa-user-slash" style="font-size:2rem;margin-bottom:12px;display:block;"></i>Aucun invité créé pour le moment</div>';
+            return;
+        }
+        
+        list.innerHTML = data.guests.map(g => {
+            const now = new Date();
+            const codeExpires = new Date(g.code_expires_at);
+            const accountExpires = new Date(g.account_expires_at);
+            const codeExpired = codeExpires < now;
+            const accountExpired = accountExpires < now;
+            
+            let statusBadge, statusColor;
+            if (g.pending_approval) {
+                statusBadge = '⏳ En attente d\'approbation'; statusColor = '#ff9800';
+            } else if (!g.is_active || accountExpired) {
+                statusBadge = 'Expiré'; statusColor = '#9e9e9e';
+            } else if (g.code_used) {
+                statusBadge = 'Vérifié'; statusColor = '#4caf50';
+            } else if (codeExpired) {
+                statusBadge = 'Code expiré'; statusColor = '#ff9800';
+            } else {
+                statusBadge = 'En attente'; statusColor = '#2196f3';
+            }
+            
+            const isUnlimited = g.is_unlimited;
+            const showCode = !g.code_used && !codeExpired && g.is_active && !g.pending_approval;
+            
+            return `<div style="background:#f9f9f9;border:1px solid #e0e0e0;border-radius:10px;padding:16px;margin-bottom:12px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                    <div>
+                        <strong style="font-size:1rem;">${escapeHtml(g.email)}</strong>
+                        <span style="display:inline-block;background:${statusColor};color:white;font-size:0.75rem;padding:2px 10px;border-radius:12px;margin-left:8px;">${statusBadge}</span>
+                    </div>
+                    <div style="color:#888;font-size:0.85rem;">
+                        Créé le ${new Date(g.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                </div>
+                ${showCode ? `
+                <div style="background:#fff;border:2px dashed #4caf50;border-radius:8px;padding:12px;margin-top:12px;text-align:center;">
+                    <div style="color:#666;font-size:0.85rem;margin-bottom:4px;">Code de vérification</div>
+                    <div style="font-size:1.8rem;font-weight:bold;color:#4caf50;letter-spacing:6px;font-family:monospace;">${g.verification_code}</div>
+                    <div style="color:#888;font-size:0.8rem;margin-top:4px;">Expire le ${codeExpires.toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
+                </div>` : ''}
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;">
+                    <div style="display:flex;gap:16px;font-size:0.85rem;color:#666;">
+                        <span>📧 ${g.code_used ? 'Email vérifié' : 'Non vérifié'}</span>
+                        <span>${isUnlimited ? '♾️ Illimité' : '⏰ Expire le ' + accountExpires.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</span>
+                    </div>
+                    <button onclick="deleteMyGuest(${g.id}, '${escapeHtml(g.email)}')" style="background:none;border:1px solid #ef5350;color:#ef5350;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:0.85rem;" onmouseover="this.style.background='#ffebee'" onmouseout="this.style.background='none'">
+                        <i class="fas fa-trash"></i> Supprimer
+                    </button>
+                </div>
+            </div>`;
+        }).join('');
+    } catch(e) {
+        list.innerHTML = `<p style="color:#c62828;text-align:center;padding:20px;">Erreur: ${e.message}</p>`;
+    }
+}
+
+async function deleteMyGuest(id, email) {
+    if (!confirm(`Supprimer l'invité ${email} ?\n\nCette action est irréversible.`)) return;
+    try {
+        const token = getAuthToken();
+        const res = await fetch(`${API_URL}/user/my-guests/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (data.success) {
+            showSuccess(`Invité ${email} supprimé`);
+            loadMyGuestsList(); // Refresh list
+        } else {
+            showError(data.error || 'Erreur suppression');
+        }
+    } catch(e) { showError(e.message); }
+}
+
 function showCreateGuestModal() {
     document.getElementById('createGuestModal').style.display = 'flex';
     document.getElementById('guestEmailInput').value = '';
     document.getElementById('guestCreateResult').style.display = 'none';
     document.getElementById('guestEmailInput').focus();
+}
+
+function showMyGuestsModal() {
+    document.getElementById('myGuestsModal').style.display = 'flex';
+    loadMyGuestsList();
 }
 
 async function handleCreateGuest() {
@@ -1627,7 +1751,7 @@ async function handleCreateGuest() {
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ email })
+            body: JSON.stringify({ email, durationDays: parseInt(document.getElementById('guestDurationSelect').value) })
         });
 
         if (response.status === 401) {
@@ -1639,32 +1763,49 @@ async function handleCreateGuest() {
 
         if (data.success) {
             resultDiv.style.display = 'block';
-            resultDiv.style.backgroundColor = '#d4edda';
-            resultDiv.style.borderLeft = '4px solid #28a745';
 
-            const codeInfo = data.guest.emailSent
-                ? 'Le code de vérification a été envoyé par email.'
-                : `Code de vérification : <strong>${data.guest.verificationCode}</strong> (email non envoyé)`;
+            if (data.needsApproval) {
+                resultDiv.style.backgroundColor = '#fff3e0';
+                resultDiv.style.borderLeft = '4px solid #ff9800';
+                resultDiv.innerHTML = `
+                    <div style="margin-bottom: 10px;">
+                        <i class="fas fa-clock" style="color: #ff9800;"></i>
+                        <strong>Invitation créée — en attente d'approbation</strong>
+                    </div>
+                    <div style="font-size: 0.9rem;">
+                        <p><strong>Email :</strong> ${email}</p>
+                        <p>L'accès illimité nécessite la validation d'un administrateur.</p>
+                        <p>Le code de vérification sera envoyé après approbation.</p>
+                    </div>
+                `;
+            } else {
+                resultDiv.style.backgroundColor = '#d4edda';
+                resultDiv.style.borderLeft = '4px solid #28a745';
 
-            resultDiv.innerHTML = `
-                <div style="margin-bottom: 10px;">
-                    <i class="fas fa-check-circle" style="color: #28a745;"></i>
-                    <strong>Compte invité créé avec succès !</strong>
-                </div>
-                <div style="font-size: 0.9rem;">
-                    <p><strong>Email :</strong> ${email}</p>
-                    <p>${codeInfo}</p>
-                    <p><strong>Expiration du code :</strong> ${formatDate(data.guest.codeExpiresAt)}</p>
-                    <p><strong>Expiration du compte :</strong> ${formatDate(data.guest.accountExpiresAt)}</p>
-                </div>
-            `;
+                const codeInfo = data.guest.emailSent
+                    ? 'Le code de vérification a été envoyé par email.'
+                    : `Code de vérification : <strong>${data.guest.verificationCode}</strong> (email non envoyé)`;
 
-            // Réinitialiser le formulaire après 3 secondes
+                resultDiv.innerHTML = `
+                    <div style="margin-bottom: 10px;">
+                        <i class="fas fa-check-circle" style="color: #28a745;"></i>
+                        <strong>Compte invité créé avec succès !</strong>
+                    </div>
+                    <div style="font-size: 0.9rem;">
+                        <p><strong>Email :</strong> ${email}</p>
+                        <p>${codeInfo}</p>
+                        <p><strong>Expiration du code :</strong> ${formatDate(data.guest.codeExpiresAt)}</p>
+                        <p><strong>Expiration du compte :</strong> ${formatDate(data.guest.accountExpiresAt)}</p>
+                    </div>
+                `;
+            }
+
+            // Réinitialiser le formulaire après 4 secondes
             setTimeout(() => {
                 emailInput.value = '';
                 resultDiv.style.display = 'none';
                 document.getElementById('createGuestModal').style.display = 'none';
-            }, 5000);
+            }, 4000);
         } else {
             resultDiv.style.display = 'block';
             resultDiv.style.backgroundColor = '#fee';
@@ -2162,4 +2303,107 @@ function showConfirmDialog(title, message) {
         close.addEventListener('click', onNo);
         modal.style.display = 'flex';
     });
+}
+
+// ============================================
+// Corbeille (Trash)
+// ============================================
+
+async function showTrashModal() {
+    document.getElementById('trashModal').style.display = 'flex';
+    const list = document.getElementById('trashFilesList');
+    list.innerHTML = '<p style="text-align:center;color:#666;padding:20px;"><i class="fas fa-spinner fa-spin"></i> Chargement...</p>';
+    
+    try {
+        const token = getAuthToken();
+        const res = await fetch(`${API_URL}/files/trash`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        
+        if (!data.success || !data.files || data.files.length === 0) {
+            list.innerHTML = '<div style="text-align:center;padding:40px;color:#999;"><i class="fas fa-recycle" style="font-size:3rem;margin-bottom:12px;display:block;"></i><p>La corbeille est vide</p></div>';
+            document.getElementById('emptyTrashBtn').style.display = 'none';
+            return;
+        }
+        
+        document.getElementById('emptyTrashBtn').style.display = 'inline-flex';
+        
+        list.innerHTML = data.files.map(f => {
+            const name = f.original_name || f.blob_name.split('/').pop();
+            const size = f.file_size ? formatSize(f.file_size) : '—';
+            const trashedDate = f.trashed_at ? new Date(f.trashed_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+            const icon = getFileIcon(name);
+            
+            return `<div style="display:flex;align-items:center;justify-content:space-between;padding:12px;border:1px solid #e0e0e0;border-radius:8px;margin-bottom:8px;background:#fafafa;">
+                <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;">
+                    <i class="${icon}" style="font-size:1.3rem;color:#999;width:24px;text-align:center;"></i>
+                    <div style="min-width:0;">
+                        <div style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(name)}</div>
+                        <div style="font-size:0.8rem;color:#888;">${size} · Supprimé le ${trashedDate}</div>
+                    </div>
+                </div>
+                <div style="display:flex;gap:8px;flex-shrink:0;">
+                    <button onclick="restoreFile('${escapeHtml(f.blob_name)}')" style="background:#4caf50;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:0.8rem;" title="Restaurer">
+                        <i class="fas fa-undo"></i> Restaurer
+                    </button>
+                </div>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        list.innerHTML = `<p style="color:#c62828;text-align:center;">Erreur: ${e.message}</p>`;
+    }
+}
+
+async function restoreFile(blobName) {
+    if (!confirm('Restaurer ce fichier ?\n\nLa réhydratation depuis Archive peut prendre quelques heures.')) return;
+    try {
+        const token = getAuthToken();
+        const res = await fetch(`${API_URL}/files/restore`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ blobName })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showSuccess(data.message || 'Fichier restauré');
+            showTrashModal(); // Refresh
+            loadFiles(currentPath);
+        } else {
+            showError(data.error || 'Erreur');
+        }
+    } catch (e) { showError(e.message); }
+}
+
+async function emptyTrash() {
+    if (!confirm('Vider la corbeille ?\n\nTous les fichiers seront supprimés DÉFINITIVEMENT.')) return;
+    if (!confirm('⚠️ Dernière chance !\n\nCette action est irréversible.')) return;
+    try {
+        const token = getAuthToken();
+        const res = await fetch(`${API_URL}/files/trash/empty`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (data.success) {
+            showSuccess(data.message);
+            showTrashModal(); // Refresh
+        } else {
+            showError(data.error || 'Erreur');
+        }
+    } catch (e) { showError(e.message); }
+}
+
+function getFileIcon(name) {
+    const ext = (name || '').split('.').pop().toLowerCase();
+    const icons = {
+        pdf: 'fas fa-file-pdf', doc: 'fas fa-file-word', docx: 'fas fa-file-word',
+        xls: 'fas fa-file-excel', xlsx: 'fas fa-file-excel', ppt: 'fas fa-file-powerpoint',
+        pptx: 'fas fa-file-powerpoint', jpg: 'fas fa-file-image', jpeg: 'fas fa-file-image',
+        png: 'fas fa-file-image', gif: 'fas fa-file-image', svg: 'fas fa-file-image',
+        mp4: 'fas fa-file-video', mov: 'fas fa-file-video', avi: 'fas fa-file-video',
+        mp3: 'fas fa-file-audio', wav: 'fas fa-file-audio', zip: 'fas fa-file-archive',
+        rar: 'fas fa-file-archive', txt: 'fas fa-file-alt', csv: 'fas fa-file-csv'
+    };
+    return icons[ext] || 'fas fa-file';
 }

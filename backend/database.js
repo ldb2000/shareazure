@@ -180,6 +180,22 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id);
   CREATE INDEX IF NOT EXISTS idx_team_members_composite ON team_members(team_id, user_id, is_active);
 
+  -- Table pour les quotas d'équipe
+  CREATE TABLE IF NOT EXISTS team_quotas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    team_id INTEGER UNIQUE,
+    max_storage_gb REAL DEFAULT 5,
+    max_files INTEGER DEFAULT 1000,
+    max_shares_per_user INTEGER DEFAULT 50,
+    max_file_size_mb REAL DEFAULT 100,
+    max_share_duration_days INTEGER DEFAULT 30,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_by TEXT,
+    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_team_quotas_team_id ON team_quotas(team_id);
+
   -- Table pour le suivi des coûts
   CREATE TABLE IF NOT EXISTS cost_tracking (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -439,6 +455,23 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_scan_schedules_type ON scan_schedules(scan_type);
   CREATE INDEX IF NOT EXISTS idx_scan_schedules_enabled ON scan_schedules(is_enabled);
 
+  -- Table pour la quarantaine antivirus
+  CREATE TABLE IF NOT EXISTS virus_quarantine (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    blob_name TEXT NOT NULL,
+    original_name TEXT,
+    virus_name TEXT NOT NULL,
+    quarantine_path TEXT,
+    uploaded_by TEXT,
+    detected_at TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved INTEGER DEFAULT 0,
+    resolved_by TEXT,
+    resolved_at TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_virus_quarantine_detected ON virus_quarantine(detected_at);
+  CREATE INDEX IF NOT EXISTS idx_virus_quarantine_resolved ON virus_quarantine(resolved);
+
   -- Insérer les valeurs par défaut si elles n'existent pas
   INSERT OR IGNORE INTO settings (key, value, category, description) VALUES
     ('maxFileSizeMB', '100', 'storage', 'Taille maximale des fichiers en MB'),
@@ -477,7 +510,26 @@ db.exec(`
     ('thumbnailSize', '300', 'ai', 'Taille des thumbnails (pixels)'),
     ('thumbnailQuality', '80', 'ai', 'Qualité des thumbnails (0-100)'),
     ('geolocationEnabled', 'true', 'ai', 'Activer l''extraction de géolocalisation EXIF'),
-    ('reverseGeocodingEnabled', 'false', 'ai', 'Activer le reverse geocoding (Nominatim OSM)');
+    ('reverseGeocodingEnabled', 'false', 'ai', 'Activer le reverse geocoding (Nominatim OSM)'),
+    ('defaultMaxStorageGb', '5', 'quotas', 'Quota stockage par défaut (Go)'),
+    ('defaultMaxFiles', '1000', 'quotas', 'Nombre max de fichiers par défaut'),
+    ('defaultMaxFileSizeMb', '100', 'quotas', 'Taille max par fichier par défaut (Mo)'),
+    ('defaultMaxSharesPerUser', '50', 'quotas', 'Nombre max de partages par utilisateur par défaut'),
+    ('defaultMaxShareDurationDays', '30', 'quotas', 'Durée max de partage par défaut (jours)'),
+    ('virusScanEnabled', 'true', 'security', 'Activer le scan antivirus ClamAV'),
+    ('virusScanOnUpload', 'true', 'security', 'Scanner automatiquement chaque upload'),
+    ('virusQuarantineNotifyAdmin', 'true', 'security', 'Notifier l''admin en cas de menace détectée'),
+    ('smtpHost', 'smtp.mail.yahoo.com', 'email', 'Serveur SMTP'),
+    ('smtpPort', '465', 'email', 'Port SMTP'),
+    ('smtpSecure', 'true', 'email', 'Connexion SSL/TLS'),
+    ('smtpUser', '', 'email', 'Utilisateur SMTP'),
+    ('smtpPassword', '', 'email', 'Mot de passe SMTP'),
+    ('smtpFromEmail', '', 'email', 'Email expéditeur'),
+    ('smtpFromName', 'ShareAzure', 'email', 'Nom expéditeur'),
+    ('emailEnabled', 'false', 'email', 'Emails activés'),
+    ('emailProvider', 'smtp', 'email', 'Fournisseur email (smtp, mailjet, ovh, gmail, yahoo, outlook)'),
+    ('mailjetApiKey', '', 'email', 'Clé API Mailjet'),
+    ('mailjetSecretKey', '', 'email', 'Clé secrète Mailjet');
 
   -- Seed des scans planifiés par défaut
   INSERT OR IGNORE INTO scan_schedules (scan_type, schedule, is_enabled) VALUES
@@ -485,9 +537,56 @@ db.exec(`
     ('auto_tagging', 'manual', 1),
     ('geolocation_extraction', 'manual', 1),
     ('full_analysis', 'manual', 1);
+
+  -- Table pour les politiques de tiering automatique
+  CREATE TABLE IF NOT EXISTS tiering_policies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    team_id INTEGER DEFAULT NULL,
+    hot_to_cool_days INTEGER DEFAULT 30,
+    cool_to_archive_days INTEGER DEFAULT 90,
+    enabled INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (team_id) REFERENCES teams(id)
+  );
+
+  -- Seed politique globale par défaut (team_id = NULL)
+  INSERT OR IGNORE INTO tiering_policies (id, team_id, hot_to_cool_days, cool_to_archive_days, enabled)
+    SELECT 1, NULL, 30, 90, 0 WHERE NOT EXISTS (SELECT 1 FROM tiering_policies WHERE team_id IS NULL);
 `);
 
 console.log('✅ Base de données initialisée:', dbPath);
+
+// Migration : Ajouter les colonnes auth Entra aux utilisateurs
+try {
+  const usersInfo = db.prepare(`PRAGMA table_info(users)`).all();
+  const hasAuthProvider = usersInfo.some(col => col.name === 'auth_provider');
+  if (!hasAuthProvider) {
+    console.log('🔄 Migration : Ajout des colonnes auth Entra à users...');
+    db.exec(`
+      ALTER TABLE users ADD COLUMN auth_provider TEXT DEFAULT 'local';
+      ALTER TABLE users ADD COLUMN entra_oid TEXT;
+      ALTER TABLE users ADD COLUMN entra_email TEXT;
+    `);
+    console.log('✅ Migration terminée : colonnes auth Entra ajoutées');
+  }
+} catch (error) {
+  console.error('⚠️  Erreur lors de la migration auth Entra:', error);
+}
+
+// Migration : Ajouter les settings auth Entra
+try {
+  db.exec(`
+    INSERT OR IGNORE INTO settings (key, value, category, description) VALUES
+      ('authMode', 'local', 'auth', 'Mode d''authentification: local, entra, hybrid'),
+      ('entraTenantId', '', 'auth', 'Azure Entra Tenant ID'),
+      ('entraClientId', '', 'auth', 'Azure Entra Client ID'),
+      ('entraClientSecret', '', 'auth', 'Azure Entra Client Secret'),
+      ('entraRedirectUri', '', 'auth', 'Azure Entra Redirect URI');
+  `);
+} catch (error) {
+  console.error('⚠️  Erreur lors de l\'ajout des settings auth:', error);
+}
 
 // Migration : Ajouter la colonne recipient_email si elle n'existe pas
 try {
@@ -808,15 +907,69 @@ const settingsDb = {
   }
 };
 
+// Migration : Ajouter les colonnes creation_date et has_dmarc aux domaines d'emails
+try {
+  const domainsInfo = db.prepare(`PRAGMA table_info(allowed_email_domains)`).all();
+  const hasCreationDate = domainsInfo.some(col => col.name === 'creation_date');
+  if (!hasCreationDate) {
+    console.log('🔄 Migration : Ajout des colonnes creation_date, has_dmarc, bimi_logo à allowed_email_domains...');
+    db.exec(`
+      ALTER TABLE allowed_email_domains ADD COLUMN creation_date TEXT;
+      ALTER TABLE allowed_email_domains ADD COLUMN has_dmarc INTEGER DEFAULT NULL;
+      ALTER TABLE allowed_email_domains ADD COLUMN bimi_logo TEXT;
+    `);
+    console.log('✅ Migration terminée : colonnes creation_date, has_dmarc, bimi_logo ajoutées');
+  }
+} catch (error) {
+  console.error('⚠️  Erreur lors de la migration creation_date/has_dmarc:', error);
+}
+
+// Migration : Ajouter bimi_logo si manquant
+try {
+  const domainsInfo2 = db.prepare(`PRAGMA table_info(allowed_email_domains)`).all();
+  if (!domainsInfo2.some(col => col.name === 'bimi_logo')) {
+    db.exec(`ALTER TABLE allowed_email_domains ADD COLUMN bimi_logo TEXT`);
+    console.log('✅ Migration : colonne bimi_logo ajoutée');
+  }
+} catch (error) {
+  console.error('⚠️  Erreur migration bimi_logo:', error);
+}
+
 // Fonctions pour gérer les domaines d'emails autorisés
 const allowedEmailDomainsDb = {
   // Ajouter un domaine autorisé
-  add: (domain, createdBy = null) => {
+  add: (domain, createdBy = null, creationDate = null, hasDmarc = null) => {
     const stmt = db.prepare(`
-      INSERT INTO allowed_email_domains (domain, created_by)
-      VALUES (?, ?)
+      INSERT INTO allowed_email_domains (domain, created_by, creation_date, has_dmarc)
+      VALUES (?, ?, ?, ?)
     `);
-    return stmt.run(domain.toLowerCase(), createdBy);
+    return stmt.run(domain.toLowerCase(), createdBy, creationDate, hasDmarc);
+  },
+
+  // Mettre à jour creation_date, has_dmarc et bimi_logo
+  updateChecks: (domain, creationDate, hasDmarc, bimiLogo = null) => {
+    const stmt = db.prepare(`
+      UPDATE allowed_email_domains 
+      SET creation_date = ?, has_dmarc = ?, bimi_logo = ?
+      WHERE domain = ?
+    `);
+    return stmt.run(creationDate, hasDmarc, bimiLogo, domain.toLowerCase());
+  },
+
+  // Obtenir un domaine par son nom
+  getByDomain: (domain) => {
+    const stmt = db.prepare(`
+      SELECT * FROM allowed_email_domains WHERE domain = ?
+    `);
+    return stmt.get(domain.toLowerCase());
+  },
+
+  // Obtenir un domaine par son ID
+  getById: (id) => {
+    const stmt = db.prepare(`
+      SELECT * FROM allowed_email_domains WHERE id = ?
+    `);
+    return stmt.get(id);
   },
 
   // Obtenir tous les domaines actifs
@@ -987,6 +1140,31 @@ const usersDb = {
       WHERE id = ?
     `);
     return stmt.run(passwordHash, userId);
+  },
+
+  // Créer un utilisateur Entra
+  createEntra: (userData) => {
+    const stmt = db.prepare(`
+      INSERT INTO users (username, email, password_hash, role, full_name, auth_provider, entra_oid, entra_email)
+      VALUES (?, ?, ?, ?, ?, 'entra', ?, ?)
+    `);
+    return stmt.run(
+      userData.username,
+      userData.email,
+      userData.passwordHash || '',
+      userData.role || 'user',
+      userData.fullName || null,
+      userData.entraOid || null,
+      userData.entraEmail || null
+    );
+  },
+
+  // Obtenir un utilisateur par son Entra OID
+  getByEntraOid: (oid) => {
+    const stmt = db.prepare(`
+      SELECT * FROM users WHERE entra_oid = ? AND is_active = 1
+    `);
+    return stmt.get(oid);
   },
 
   // Obtenir tous les utilisateurs
@@ -1183,7 +1361,7 @@ const fileOwnershipDb = {
   getByUser: (userId) => {
     const stmt = db.prepare(`
       SELECT * FROM file_ownership
-      WHERE uploaded_by_user_id = ?
+      WHERE uploaded_by_user_id = ? AND (is_trashed = 0 OR is_trashed IS NULL)
       ORDER BY uploaded_at DESC
     `);
     return stmt.all(userId);
@@ -1193,7 +1371,7 @@ const fileOwnershipDb = {
   getByGuest: (guestId) => {
     const stmt = db.prepare(`
       SELECT * FROM file_ownership
-      WHERE uploaded_by_guest_id = ?
+      WHERE uploaded_by_guest_id = ? AND (is_trashed = 0 OR is_trashed IS NULL)
       ORDER BY uploaded_at DESC
     `);
     return stmt.all(guestId);
@@ -1206,10 +1384,13 @@ const fileOwnershipDb = {
              u.username as user_owner,
              u.role as user_role,
              ga.email as guest_owner,
-             ga.guest_id as guest_id
+             ga.guest_id as guest_id,
+             t.name as team_name
       FROM file_ownership fo
       LEFT JOIN users u ON fo.uploaded_by_user_id = u.id
       LEFT JOIN guest_accounts ga ON fo.uploaded_by_guest_id = ga.id
+      LEFT JOIN teams t ON fo.team_id = t.id
+      WHERE (fo.is_trashed = 0 OR fo.is_trashed IS NULL)
       ORDER BY fo.uploaded_at DESC
     `);
     return stmt.all();
@@ -1226,11 +1407,34 @@ const fileOwnershipDb = {
       FROM file_ownership fo
       LEFT JOIN users u ON fo.uploaded_by_user_id = u.id
       LEFT JOIN guest_accounts ga ON fo.uploaded_by_guest_id = ga.id
-      WHERE fo.uploaded_by_user_id = ?
-         OR ga.created_by_user_id = ?
+      WHERE (fo.uploaded_by_user_id = ? OR ga.created_by_user_id = ?)
+        AND (fo.is_trashed = 0 OR fo.is_trashed IS NULL)
       ORDER BY fo.uploaded_at DESC
     `);
     return stmt.all(userId, userId);
+  },
+
+  // Corbeille: fichiers supprimés
+  getTrashed: (userId, teamId) => {
+    let sql, params;
+    if (teamId) {
+      sql = `SELECT fo.*, u.username as user_owner FROM file_ownership fo
+             LEFT JOIN users u ON fo.uploaded_by_user_id = u.id
+             WHERE fo.team_id = ? AND fo.is_trashed = 1 ORDER BY fo.trashed_at DESC`;
+      params = [teamId];
+    } else {
+      sql = `SELECT * FROM file_ownership WHERE uploaded_by_user_id = ? AND is_trashed = 1 ORDER BY trashed_at DESC`;
+      params = [userId];
+    }
+    return db.prepare(sql).all(...params);
+  },
+
+  trash: (blobName, userId) => {
+    return db.prepare(`UPDATE file_ownership SET is_trashed = 1, trashed_at = datetime('now'), trashed_by = ? WHERE blob_name = ?`).run(userId, blobName);
+  },
+
+  restore: (blobName) => {
+    return db.prepare(`UPDATE file_ownership SET is_trashed = 0, trashed_at = NULL, trashed_by = NULL WHERE blob_name = ?`).run(blobName);
   },
 
   // Supprimer un enregistrement de propriété
@@ -2339,6 +2543,386 @@ const activityLogsDb = {
   }
 };
 
+// Fonctions pour gérer les quotas d'équipe
+const teamQuotasDb = {
+  get: (teamId) => {
+    const stmt = db.prepare('SELECT * FROM team_quotas WHERE team_id = ?');
+    return stmt.get(teamId);
+  },
+
+  upsert: (teamId, data) => {
+    const existing = teamQuotasDb.get(teamId);
+    if (existing) {
+      const stmt = db.prepare(`
+        UPDATE team_quotas SET
+          max_storage_gb = ?, max_files = ?, max_shares_per_user = ?,
+          max_file_size_mb = ?, max_share_duration_days = ?,
+          updated_at = datetime('now'), updated_by = ?
+        WHERE team_id = ?
+      `);
+      return stmt.run(
+        data.max_storage_gb ?? existing.max_storage_gb,
+        data.max_files ?? existing.max_files,
+        data.max_shares_per_user ?? existing.max_shares_per_user,
+        data.max_file_size_mb ?? existing.max_file_size_mb,
+        data.max_share_duration_days ?? existing.max_share_duration_days,
+        data.updated_by || null,
+        teamId
+      );
+    } else {
+      const stmt = db.prepare(`
+        INSERT INTO team_quotas (team_id, max_storage_gb, max_files, max_shares_per_user, max_file_size_mb, max_share_duration_days, updated_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      return stmt.run(
+        teamId,
+        data.max_storage_gb ?? 5,
+        data.max_files ?? 1000,
+        data.max_shares_per_user ?? 50,
+        data.max_file_size_mb ?? 100,
+        data.max_share_duration_days ?? 30,
+        data.updated_by || null
+      );
+    }
+  },
+
+  getAll: () => {
+    const stmt = db.prepare(`
+      SELECT tq.*, t.name as team_name, t.display_name as team_display_name
+      FROM team_quotas tq
+      LEFT JOIN teams t ON tq.team_id = t.id
+      ORDER BY t.name
+    `);
+    return stmt.all();
+  },
+
+  getDefaults: () => {
+    return {
+      max_storage_gb: parseFloat(settingsDb.get('defaultMaxStorageGb')) || 5,
+      max_files: parseInt(settingsDb.get('defaultMaxFiles')) || 1000,
+      max_file_size_mb: parseFloat(settingsDb.get('defaultMaxFileSizeMb')) || 100,
+      max_shares_per_user: parseInt(settingsDb.get('defaultMaxSharesPerUser')) || 50,
+      max_share_duration_days: parseInt(settingsDb.get('defaultMaxShareDurationDays')) || 30
+    };
+  },
+
+  delete: (teamId) => {
+    const stmt = db.prepare('DELETE FROM team_quotas WHERE team_id = ?');
+    return stmt.run(teamId);
+  }
+};
+
+// Fonctions pour la quarantaine antivirus
+const virusQuarantineDb = {
+  create: (data) => {
+    const stmt = db.prepare(`
+      INSERT INTO virus_quarantine (blob_name, original_name, virus_name, quarantine_path, uploaded_by, detected_at)
+      VALUES (?, ?, ?, ?, ?, datetime('now'))
+    `);
+    return stmt.run(data.blobName, data.originalName || null, data.virusName, data.quarantinePath || null, data.uploadedBy || null);
+  },
+
+  getAll: () => {
+    const stmt = db.prepare(`SELECT * FROM virus_quarantine ORDER BY detected_at DESC`);
+    return stmt.all();
+  },
+
+  getById: (id) => {
+    const stmt = db.prepare(`SELECT * FROM virus_quarantine WHERE id = ?`);
+    return stmt.get(id);
+  },
+
+  resolve: (id, resolvedBy) => {
+    const stmt = db.prepare(`
+      UPDATE virus_quarantine SET resolved = 1, resolved_by = ?, resolved_at = datetime('now') WHERE id = ?
+    `);
+    return stmt.run(resolvedBy || null, id);
+  },
+
+  delete: (id) => {
+    const stmt = db.prepare(`DELETE FROM virus_quarantine WHERE id = ?`);
+    return stmt.run(id);
+  },
+
+  getStats: () => {
+    const stmt = db.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN resolved = 0 THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN resolved = 1 THEN 1 ELSE 0 END) as resolved
+      FROM virus_quarantine
+    `);
+    return stmt.get();
+  }
+};
+
+// Migration: upload_requests tables
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS upload_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      request_id TEXT UNIQUE NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      created_by_user_id INTEGER NOT NULL,
+      team_id INTEGER,
+      allowed_email TEXT,
+      allowed_domain TEXT,
+      max_files INTEGER DEFAULT 10,
+      max_file_size_mb REAL DEFAULT 50,
+      allowed_extensions TEXT,
+      expires_at TEXT NOT NULL,
+      is_active INTEGER DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      upload_count INTEGER DEFAULT 0,
+      last_upload_at TEXT,
+      FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_upload_requests_request_id ON upload_requests(request_id);
+    CREATE INDEX IF NOT EXISTS idx_upload_requests_created_by ON upload_requests(created_by_user_id);
+    CREATE INDEX IF NOT EXISTS idx_upload_requests_expires ON upload_requests(expires_at);
+    CREATE TABLE IF NOT EXISTS upload_request_files (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      request_id TEXT NOT NULL,
+      blob_name TEXT NOT NULL,
+      original_name TEXT NOT NULL,
+      file_size INTEGER,
+      content_type TEXT,
+      uploader_email TEXT NOT NULL,
+      uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (request_id) REFERENCES upload_requests(request_id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_upload_request_files_request ON upload_request_files(request_id);
+  `);
+} catch (error) {
+  console.error('⚠️  Erreur migration upload_requests:', error);
+}
+
+const uploadRequestsDb = {
+  create: (data) => {
+    return db.prepare('INSERT INTO upload_requests (request_id, title, description, created_by_user_id, team_id, allowed_email, allowed_domain, max_files, max_file_size_mb, allowed_extensions, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(data.requestId, data.title, data.description || null, data.createdByUserId, data.teamId || null, data.allowedEmail || null, data.allowedDomain || null, data.maxFiles || 10, data.maxFileSizeMb || 50, data.allowedExtensions || null, data.expiresAt);
+  },
+  getByRequestId: (requestId) => db.prepare('SELECT * FROM upload_requests WHERE request_id = ?').get(requestId),
+  getByUserId: (userId) => db.prepare("SELECT ur.*, (SELECT COUNT(*) FROM upload_request_files urf WHERE urf.request_id = ur.request_id) as file_count FROM upload_requests ur WHERE ur.created_by_user_id = ? ORDER BY ur.created_at DESC").all(userId),
+  update: (requestId, data) => {
+    const f = [], v = [];
+    if (data.title !== undefined) { f.push('title = ?'); v.push(data.title); }
+    if (data.description !== undefined) { f.push('description = ?'); v.push(data.description); }
+    if (data.isActive !== undefined) { f.push('is_active = ?'); v.push(data.isActive ? 1 : 0); }
+    if (f.length === 0) return;
+    v.push(requestId);
+    return db.prepare('UPDATE upload_requests SET ' + f.join(', ') + ' WHERE request_id = ?').run(...v);
+  },
+  delete: (requestId) => db.prepare('UPDATE upload_requests SET is_active = 0 WHERE request_id = ?').run(requestId),
+  getFiles: (requestId) => db.prepare('SELECT * FROM upload_request_files WHERE request_id = ? ORDER BY uploaded_at DESC').all(requestId),
+  addFile: (data) => db.prepare('INSERT INTO upload_request_files (request_id, blob_name, original_name, file_size, content_type, uploader_email) VALUES (?, ?, ?, ?, ?, ?)').run(data.requestId, data.blobName, data.originalName, data.fileSize || null, data.contentType || null, data.uploaderEmail),
+  incrementUploadCount: (requestId) => db.prepare("UPDATE upload_requests SET upload_count = upload_count + 1, last_upload_at = datetime('now') WHERE request_id = ?").run(requestId)
+};
+
+// ============================================================================
+// ROLE PERMISSIONS
+// ============================================================================
+
+// Create role_permissions table
+db.exec(`
+  CREATE TABLE IF NOT EXISTS role_permissions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    role TEXT NOT NULL,
+    permission TEXT NOT NULL,
+    enabled INTEGER DEFAULT 1,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_by TEXT,
+    UNIQUE(role, permission)
+  );
+`);
+
+// Migration: rename april_user → com
+try {
+  db.prepare(`UPDATE users SET role = 'com' WHERE role = 'april_user'`).run();
+} catch(e) { /* ignore if already done */ }
+
+// Seed default permissions
+const defaultPermissions = [
+  { role: 'admin', permission: 'canCreateGuests', enabled: 1 },
+  { role: 'admin', permission: 'canUseAI', enabled: 1 },
+  { role: 'admin', permission: 'canCreateTeams', enabled: 1 },
+  { role: 'admin', permission: 'canShareFiles', enabled: 1 },
+  { role: 'admin', permission: 'canUploadFiles', enabled: 1 },
+  { role: 'admin', permission: 'canManageUsers', enabled: 1 },
+  { role: 'admin', permission: 'canViewReports', enabled: 1 },
+  { role: 'admin', permission: 'canManageSettings', enabled: 1 },
+  { role: 'com', permission: 'canCreateGuests', enabled: 1 },
+  { role: 'com', permission: 'canUseAI', enabled: 1 },
+  { role: 'com', permission: 'canCreateTeams', enabled: 1 },
+  { role: 'com', permission: 'canShareFiles', enabled: 1 },
+  { role: 'com', permission: 'canUploadFiles', enabled: 1 },
+  { role: 'com', permission: 'canViewReports', enabled: 1 },
+  { role: 'com', permission: 'canManageUsers', enabled: 0 },
+  { role: 'com', permission: 'canManageSettings', enabled: 0 },
+  { role: 'user', permission: 'canCreateGuests', enabled: 0 },
+  { role: 'user', permission: 'canUseAI', enabled: 0 },
+  { role: 'user', permission: 'canCreateTeams', enabled: 1 },
+  { role: 'user', permission: 'canShareFiles', enabled: 1 },
+  { role: 'user', permission: 'canUploadFiles', enabled: 1 },
+  { role: 'user', permission: 'canViewReports', enabled: 0 },
+  { role: 'user', permission: 'canManageUsers', enabled: 0 },
+  { role: 'user', permission: 'canManageSettings', enabled: 0 },
+  { role: 'viewer', permission: 'canCreateGuests', enabled: 0 },
+  { role: 'viewer', permission: 'canUseAI', enabled: 0 },
+  { role: 'viewer', permission: 'canCreateTeams', enabled: 0 },
+  { role: 'viewer', permission: 'canShareFiles', enabled: 0 },
+  { role: 'viewer', permission: 'canUploadFiles', enabled: 0 },
+  { role: 'viewer', permission: 'canViewReports', enabled: 1 },
+  { role: 'viewer', permission: 'canManageUsers', enabled: 0 },
+  { role: 'viewer', permission: 'canManageSettings', enabled: 0 },
+  // Audit permissions (disabled by default for ALL roles, including admin)
+  { role: 'admin', permission: 'canAuditShares', enabled: 0 },
+  { role: 'admin', permission: 'canAuditFiles', enabled: 0 },
+  { role: 'admin', permission: 'canAuditActivity', enabled: 0 },
+  { role: 'com', permission: 'canAuditShares', enabled: 0 },
+  { role: 'com', permission: 'canAuditFiles', enabled: 0 },
+  { role: 'com', permission: 'canAuditActivity', enabled: 0 },
+  { role: 'user', permission: 'canAuditShares', enabled: 0 },
+  { role: 'user', permission: 'canAuditFiles', enabled: 0 },
+  { role: 'user', permission: 'canAuditActivity', enabled: 0 },
+  { role: 'viewer', permission: 'canAuditShares', enabled: 0 },
+  { role: 'viewer', permission: 'canAuditFiles', enabled: 0 },
+  { role: 'viewer', permission: 'canAuditActivity', enabled: 0 },
+];
+
+const seedStmt = db.prepare(`
+  INSERT OR IGNORE INTO role_permissions (role, permission, enabled, updated_at)
+  VALUES (?, ?, ?, datetime('now'))
+`);
+const seedTx = db.transaction(() => {
+  for (const p of defaultPermissions) {
+    seedStmt.run(p.role, p.permission, p.enabled);
+  }
+});
+seedTx();
+
+const rolePermissionsDb = {
+  getByRole(role) {
+    return db.prepare('SELECT permission, enabled FROM role_permissions WHERE role = ?').all(role);
+  },
+  getAll() {
+    return db.prepare('SELECT * FROM role_permissions ORDER BY role, permission').all();
+  },
+  hasPermission(role, permission) {
+    // Audit permissions are NEVER auto-granted, even to admin
+    const auditPermissions = ['canAuditShares', 'canAuditFiles', 'canAuditActivity'];
+    if (role === 'admin' && !auditPermissions.includes(permission)) return true;
+    const row = db.prepare('SELECT enabled FROM role_permissions WHERE role = ? AND permission = ?').get(role, permission);
+    return row ? row.enabled === 1 : false;
+  },
+  update(role, permission, enabled, updatedBy) {
+    return db.prepare(`
+      INSERT INTO role_permissions (role, permission, enabled, updated_by, updated_at)
+      VALUES (?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(role, permission) DO UPDATE SET enabled = ?, updated_by = ?, updated_at = datetime('now')
+    `).run(role, permission, enabled, updatedBy, enabled, updatedBy);
+  },
+  bulkUpdate(permissions) {
+    const stmt = db.prepare(`
+      INSERT INTO role_permissions (role, permission, enabled, updated_at)
+      VALUES (?, ?, ?, datetime('now'))
+      ON CONFLICT(role, permission) DO UPDATE SET enabled = ?, updated_at = datetime('now')
+    `);
+    const tx = db.transaction(() => {
+      for (const p of permissions) {
+        stmt.run(p.role, p.permission, p.enabled ? 1 : 0, p.enabled ? 1 : 0);
+      }
+    });
+    tx();
+  }
+};
+
+// ============================================================================
+// ENTRA ROLE MAPPINGS
+// ============================================================================
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS entra_role_mappings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    role TEXT NOT NULL UNIQUE,
+    entra_group_id TEXT,
+    entra_group_name TEXT,
+    priority INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_by TEXT
+  );
+`);
+
+// Seed defaults
+db.exec(`
+  INSERT OR IGNORE INTO entra_role_mappings (role, priority) VALUES ('admin', 100);
+  INSERT OR IGNORE INTO entra_role_mappings (role, priority) VALUES ('com', 75);
+  INSERT OR IGNORE INTO entra_role_mappings (role, priority) VALUES ('user', 50);
+  INSERT OR IGNORE INTO entra_role_mappings (role, priority) VALUES ('viewer', 25);
+`);
+
+// Settings for Entra group sync
+try {
+  db.exec(`
+    INSERT OR IGNORE INTO settings (key, value, category, description) VALUES
+      ('entraDefaultRole', 'viewer', 'auth', 'Rôle par défaut si aucun groupe Entra ne correspond'),
+      ('entraGroupSyncEnabled', 'true', 'auth', 'Synchroniser les rôles depuis les groupes Entra à la connexion');
+  `);
+} catch(e) { /* ignore */ }
+
+const entraRoleMappingsDb = {
+  getAll() {
+    return db.prepare('SELECT * FROM entra_role_mappings ORDER BY priority DESC').all();
+  },
+  getByRole(role) {
+    return db.prepare('SELECT * FROM entra_role_mappings WHERE role = ?').get(role);
+  },
+  update(role, data) {
+    return db.prepare(`
+      UPDATE entra_role_mappings
+      SET entra_group_id = ?, entra_group_name = ?, updated_at = datetime('now'), updated_by = ?
+      WHERE role = ?
+    `).run(data.entra_group_id || null, data.entra_group_name || null, data.updatedBy || null, role);
+  },
+  getRoleForGroups(groupIds) {
+    const defaultRole = settingsDb.get('entraDefaultRole') || 'viewer';
+    if (!groupIds || groupIds.length === 0) return defaultRole;
+    const mappings = this.getAll().filter(m => m.entra_group_id && groupIds.includes(m.entra_group_id));
+    if (mappings.length === 0) return defaultRole;
+    mappings.sort((a, b) => b.priority - a.priority);
+    return mappings[0].role;
+  }
+};
+
+const tieringPoliciesDb = {
+  getAll() {
+    return db.prepare('SELECT tp.*, t.name as team_name FROM tiering_policies tp LEFT JOIN teams t ON tp.team_id = t.id ORDER BY tp.team_id IS NULL DESC, t.name ASC').all();
+  },
+  getGlobal() {
+    return db.prepare('SELECT * FROM tiering_policies WHERE team_id IS NULL').get();
+  },
+  getByTeam(teamId) {
+    return db.prepare('SELECT * FROM tiering_policies WHERE team_id = ?').get(teamId);
+  },
+  upsertGlobal(hotDays, coolDays, enabled) {
+    const existing = this.getGlobal();
+    if (existing) {
+      return db.prepare('UPDATE tiering_policies SET hot_to_cool_days = ?, cool_to_archive_days = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE team_id IS NULL').run(hotDays, coolDays, enabled ? 1 : 0);
+    }
+    return db.prepare('INSERT INTO tiering_policies (team_id, hot_to_cool_days, cool_to_archive_days, enabled) VALUES (NULL, ?, ?, ?)').run(hotDays, coolDays, enabled ? 1 : 0);
+  },
+  upsertTeam(teamId, hotDays, coolDays, enabled) {
+    const existing = this.getByTeam(teamId);
+    if (existing) {
+      return db.prepare('UPDATE tiering_policies SET hot_to_cool_days = ?, cool_to_archive_days = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE team_id = ?').run(hotDays, coolDays, enabled ? 1 : 0, teamId);
+    }
+    return db.prepare('INSERT INTO tiering_policies (team_id, hot_to_cool_days, cool_to_archive_days, enabled) VALUES (?, ?, ?, ?)').run(teamId, hotDays, coolDays, enabled ? 1 : 0);
+  },
+  delete(id) {
+    return db.prepare('DELETE FROM tiering_policies WHERE id = ? AND team_id IS NOT NULL').run(id);
+  }
+};
+
 module.exports = {
   db,
   shareLinksDb,
@@ -2363,5 +2947,11 @@ module.exports = {
   searchIndexDb,
   geolocationDb,
   scanSchedulesDb,
-  activityLogsDb
+  activityLogsDb,
+  teamQuotasDb,
+  uploadRequestsDb,
+  virusQuarantineDb,
+  rolePermissionsDb,
+  entraRoleMappingsDb,
+  tieringPoliciesDb
 };

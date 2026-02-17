@@ -236,37 +236,93 @@ async function analyzeVideo(blobName, getBufferFn) {
       result.tags = Array.from(allTags);
     }
 
-    // Analyze frames with Azure Vision for face detection
+    // Analyze frames with Azure Vision for face detection + objects
     if (frames.length > 0 && azureVisionService.isEnabled()) {
-      const maxFrames = Math.min(frames.length, 3);
+      const faceFrameCount = Math.min(frames.length, 5);
 
-      for (let i = 0; i < maxFrames; i++) {
-        const frameIdx = Math.floor(i * frames.length / maxFrames);
+      for (let i = 0; i < faceFrameCount; i++) {
+        const frameIdx = Math.floor(i * frames.length / faceFrameCount);
         const frame = frames[frameIdx];
         try {
           const frameBuffer = fs.readFileSync(frame.path);
-          const faces = await azureVisionService.detectFaces(frameBuffer, blobName);
+          const azureResult = await azureVisionService.analyzeImage(frameBuffer, blobName);
 
-          if (faces.length > 0 && faceService.isEnabled()) {
-            for (const face of faces) {
-              faceService.addOccurrence({
-                blobName,
-                boundingBox: face.boundingBox,
-                confidence: face.confidence,
-                timestamp: frame.timestamp
-              });
+          // Store Azure tags
+          if (azureResult.tags) {
+            for (const tag of azureResult.tags) {
+              if (tag.confidence > 0.7) {
+                result.tags.push(tag.name);
+              }
+            }
+          }
 
-              videoMarkersDb.create({
-                blobName,
-                timestamp: frame.timestamp,
-                type: 'face',
-                label: `Face detected`,
-                data: { boundingBox: face.boundingBox }
-              });
+          // Face occurrences
+          if (azureResult.people && faceService.isEnabled()) {
+            const minConfidence = faceService.getMinConfidence();
+            for (const face of azureResult.people) {
+              const conf = face.confidence || 0.8;
+              if (conf >= minConfidence) {
+                faceService.addOccurrence({
+                  blobName,
+                  boundingBox: face.boundingBox,
+                  confidence: conf,
+                  timestamp: frame.timestamp
+                });
+
+                videoMarkersDb.create({
+                  blobName,
+                  timestamp: frame.timestamp,
+                  type: 'face',
+                  label: `Visage détecté (${Math.round(conf * 100)}%)`,
+                  data: { boundingBox: face.boundingBox, age: face.age, gender: face.gender }
+                });
+              }
             }
           }
         } catch (e) {
-          console.error(`Azure frame analysis failed for ${blobName}:`, e.message);
+          console.error(`Azure Vision frame analysis failed for ${blobName} frame ${i}:`, e.message);
+        }
+      }
+      
+      // Deduplicate tags
+      result.tags = [...new Set(result.tags)];
+    }
+
+    // OCR on video frames (text recognition)
+    if (frames.length > 0 && azureVisionService.isEnabled()) {
+      const ocrFrameCount = Math.min(frames.length, 4); // Analyze up to 4 frames for text
+      const allOcrTexts = new Set();
+      
+      for (let i = 0; i < ocrFrameCount; i++) {
+        const frameIdx = Math.floor(i * frames.length / ocrFrameCount);
+        const frame = frames[frameIdx];
+        try {
+          const frameBuffer = fs.readFileSync(frame.path);
+          const ocrResult = await azureVisionService.ocr(frameBuffer, blobName);
+          
+          if (ocrResult.text && ocrResult.text.trim()) {
+            allOcrTexts.add(ocrResult.text.trim());
+            
+            // Create a text marker at this timestamp
+            videoMarkersDb.create({
+              blobName,
+              timestamp: frame.timestamp,
+              type: 'text',
+              label: ocrResult.text.trim().substring(0, 200),
+              data: { lines: ocrResult.lines?.length || 0 }
+            });
+          }
+        } catch (e) {
+          console.error(`Video OCR failed for ${blobName} frame ${i}:`, e.message);
+        }
+      }
+      
+      // Store all OCR text in result for search indexing
+      if (allOcrTexts.size > 0) {
+        result.azure = result.azure || {};
+        result.azure.ocrText = Array.from(allOcrTexts).join('\n---\n');
+        if (!result.tags.includes('text-detected')) {
+          result.tags.push('text-detected');
         }
       }
     }

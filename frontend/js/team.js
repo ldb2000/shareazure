@@ -1,5 +1,5 @@
 // Configuration
-const API_URL = 'http://localhost:3000/api';
+const API_URL = window.location.origin + '/api';
 
 // State
 let currentSection = 'team-dashboard';
@@ -592,9 +592,10 @@ function renderGuestsTable(guests) {
             <td><span class="badge-info">${g.file_count || 0}</span></td>
             <td>${formatDate(g.created_at)}</td>
             <td>${formatDate(g.account_expires_at)}</td>
-            <td>${isActive ? '<span class="badge-success">Actif</span>' : '<span class="badge-danger">Expire</span>'}</td>
+            <td>${g.pending_approval ? '<span class="badge-warning">⏳ Approbation</span>' : isActive ? '<span class="badge-success">Actif</span>' : '<span class="badge-danger">Expiré</span>'}${g.is_unlimited ? ' <span class="badge-info">♾️</span>' : ''}</td>
             <td><div class="table-actions">
-                ${isActive ? `<button class="btn btn-small btn-warning" onclick="disableGuest('${g.guest_id}', '${escapeHtml(g.email)}')"><i class="fas fa-ban"></i></button>` : ''}
+                ${g.pending_approval ? `<button class="btn btn-small btn-success" onclick="approveGuest('${g.guest_id}', '${escapeHtml(g.email)}')"><i class="fas fa-check"></i> Approuver</button>` : ''}
+                ${isActive && !g.pending_approval ? `<button class="btn btn-small btn-warning" onclick="disableGuest('${g.guest_id}', '${escapeHtml(g.email)}')"><i class="fas fa-ban"></i></button>` : ''}
                 <button class="btn btn-small btn-danger" onclick="deleteGuest('${g.guest_id}', '${escapeHtml(g.email)}')"><i class="fas fa-trash"></i></button>
             </div></td>
         </tr>`;
@@ -612,7 +613,9 @@ async function createGuest() {
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creation...';
     try {
-        const res = await apiRequest('/admin/guest-accounts', 'POST', { email });
+        const durationEl = document.getElementById('guestDuration');
+        const durationDays = durationEl ? parseInt(durationEl.value) : 15;
+        const res = await apiRequest('/admin/guest-accounts', 'POST', { email, durationDays });
         if (res.success) {
             closeModal('createGuestModal');
             showNotification(res.message || 'Invite cree', 'success');
@@ -634,6 +637,15 @@ function showCreateGuestError(msg) {
     el.style.display = 'block';
     setTimeout(() => el.style.display = 'none', 5000);
 }
+
+window.approveGuest = async (guestId, email) => {
+    if (!await showConfirmDialog('Approuver l\'invité', `Approuver l'accès illimité pour ${email} ?`)) return;
+    try {
+        await apiRequest(`/admin/guest-accounts/${guestId}/approve`, 'PUT');
+        showNotification('Invité approuvé — accès illimité activé', 'success');
+        loadGuests();
+    } catch (e) { showNotification('Erreur: ' + (e.message || 'Erreur'), 'error'); }
+};
 
 window.disableGuest = async (guestId, email) => {
     if (!await showConfirmDialog('Desactiver l\'invite', `Desactiver ${email} ?`)) return;

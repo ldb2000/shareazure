@@ -135,6 +135,7 @@ resource "azurerm_application_insights" "main" {
   location            = data.azurerm_resource_group.main.location
   resource_group_name = data.azurerm_resource_group.main.name
   application_type    = "web"
+  workspace_id        = "/subscriptions/011ab966-2d51-4b9b-a5f2-397425614082/resourceGroups/ai_appi-shareazure_263150ad-caec-4036-8a48-c46512056653_managed/providers/Microsoft.OperationalInsights/workspaces/managed-appi-shareazure-ws"
 
   tags = {
     environment = "production"
@@ -163,6 +164,125 @@ resource "azurerm_cognitive_account" "vision" {
   resource_group_name = data.azurerm_resource_group.main.name
   kind                = "ComputerVision"
   sku_name            = var.cognitive_services_sku
+
+  tags = {
+    environment = "production"
+    project     = var.project_name
+    managed_by  = "terraform"
+  }
+}
+
+# ─── Azure OpenAI Service ───────────────────────────────────
+variable "enable_openai" {
+  description = "Créer Azure OpenAI Service (GPT-4o, Whisper)"
+  type        = bool
+  default     = true
+}
+
+variable "openai_sku" {
+  description = "SKU pour Azure OpenAI (S0 = standard)"
+  type        = string
+  default     = "S0"
+}
+
+variable "openai_location" {
+  description = "Région pour Azure OpenAI GPT-4o"
+  type        = string
+  default     = "francecentral"
+}
+
+variable "whisper_location" {
+  description = "Région pour Whisper (westeurope si indisponible en francecentral)"
+  type        = string
+  default     = "westeurope"
+}
+
+resource "azurerm_cognitive_account" "openai" {
+  count               = var.enable_openai ? 1 : 0
+  name                = "oai-${var.project_name}"
+  location            = var.openai_location
+  resource_group_name = data.azurerm_resource_group.main.name
+  kind                = "OpenAI"
+  sku_name            = var.openai_sku
+
+  tags = {
+    environment = "production"
+    project     = var.project_name
+    managed_by  = "terraform"
+  }
+}
+
+# Déploiement du modèle GPT-4o
+resource "azurerm_cognitive_deployment" "gpt4o" {
+  count                = var.enable_openai ? 1 : 0
+  name                 = "gpt-4o"
+  cognitive_account_id = azurerm_cognitive_account.openai[0].id
+
+  model {
+    format  = "OpenAI"
+    name    = "gpt-4o"
+    version = "2024-11-20"
+  }
+
+  scale {
+    type     = "Standard"
+    capacity = 10
+  }
+}
+
+# Compte OpenAI séparé pour Whisper (westeurope)
+resource "azurerm_cognitive_account" "whisper" {
+  count               = var.enable_openai ? 1 : 0
+  name                = "oai-${var.project_name}-whisper"
+  location            = var.whisper_location
+  resource_group_name = data.azurerm_resource_group.main.name
+  kind                = "OpenAI"
+  sku_name            = var.openai_sku
+
+  tags = {
+    environment = "production"
+    project     = var.project_name
+    managed_by  = "terraform"
+  }
+}
+
+# Déploiement du modèle Whisper
+resource "azurerm_cognitive_deployment" "whisper" {
+  count                = var.enable_openai ? 1 : 0
+  name                 = "whisper"
+  cognitive_account_id = azurerm_cognitive_account.whisper[0].id
+
+  model {
+    format  = "OpenAI"
+    name    = "whisper"
+    version = "001"
+  }
+
+  scale {
+    type     = "Standard"
+    capacity = 1
+  }
+}
+
+# ─── Azure AI Search (pour recherche sémantique avancée) ────
+variable "enable_ai_search" {
+  description = "Créer Azure AI Search pour la recherche sémantique"
+  type        = bool
+  default     = false
+}
+
+variable "ai_search_sku" {
+  description = "SKU pour Azure AI Search (free, basic, standard)"
+  type        = string
+  default     = "free"
+}
+
+resource "azurerm_search_service" "main" {
+  count               = var.enable_ai_search ? 1 : 0
+  name                = "srch-${var.project_name}"
+  resource_group_name = data.azurerm_resource_group.main.name
+  location            = data.azurerm_resource_group.main.location
+  sku                 = var.ai_search_sku
 
   tags = {
     environment = "production"
@@ -229,5 +349,78 @@ output "cognitive_services_endpoint" {
 output "cognitive_services_key" {
   description = "Clé primaire Azure Cognitive Services (-> AZURE_VISION_KEY)"
   value       = var.enable_cognitive_services ? azurerm_cognitive_account.vision[0].primary_access_key : null
+  sensitive   = true
+}
+
+# ─── Azure OpenAI Outputs ───
+output "openai_endpoint" {
+  description = "Endpoint Azure OpenAI (-> OPENAI_API_BASE ou AZURE_OPENAI_ENDPOINT)"
+  value       = var.enable_openai ? azurerm_cognitive_account.openai[0].endpoint : null
+}
+
+output "openai_key" {
+  description = "Clé primaire Azure OpenAI (-> OPENAI_API_KEY)"
+  value       = var.enable_openai ? azurerm_cognitive_account.openai[0].primary_access_key : null
+  sensitive   = true
+}
+
+output "whisper_endpoint" {
+  description = "Endpoint Azure OpenAI Whisper (westeurope)"
+  value       = var.enable_openai ? azurerm_cognitive_account.whisper[0].endpoint : null
+}
+
+output "whisper_key" {
+  description = "Clé Azure OpenAI Whisper"
+  value       = var.enable_openai ? azurerm_cognitive_account.whisper[0].primary_access_key : null
+  sensitive   = true
+}
+
+# ─── Azure AI Search Outputs ───
+output "ai_search_endpoint" {
+  description = "Endpoint Azure AI Search (si créé)"
+  value       = var.enable_ai_search ? "https://${azurerm_search_service.main[0].name}.search.windows.net" : null
+}
+
+output "ai_search_key" {
+  description = "Clé primaire Azure AI Search (si créé)"
+  value       = var.enable_ai_search ? azurerm_search_service.main[0].primary_key : null
+  sensitive   = true
+}
+
+# ─── .env template complet ───
+output "env_template" {
+  description = "Template .env pour le backend avec toutes les valeurs"
+  value       = <<-EOT
+# === Azure Storage ===
+AZURE_STORAGE_ACCOUNT_NAME=${azurerm_storage_account.main.name}
+AZURE_STORAGE_ACCOUNT_KEY=${azurerm_storage_account.main.primary_access_key}
+AZURE_STORAGE_CONNECTION_STRING=${azurerm_storage_account.main.primary_connection_string}
+AZURE_CONTAINER_NAME=${azurerm_storage_container.uploads.name}
+
+# === Serveur ===
+PORT=3000
+NODE_ENV=production
+MAX_FILE_SIZE_MB=100
+
+# === Application Insights ===
+APPLICATIONINSIGHTS_CONNECTION_STRING=${var.enable_application_insights ? azurerm_application_insights.main[0].connection_string : ""}
+
+# === Azure Computer Vision ===
+AZURE_VISION_ENDPOINT=${var.enable_cognitive_services ? azurerm_cognitive_account.vision[0].endpoint : ""}
+AZURE_VISION_KEY=${var.enable_cognitive_services ? azurerm_cognitive_account.vision[0].primary_access_key : ""}
+
+# === OpenAI GPT-4o (francecentral) ===
+OPENAI_API_KEY=${var.enable_openai ? azurerm_cognitive_account.openai[0].primary_access_key : ""}
+OPENAI_API_BASE=${var.enable_openai ? azurerm_cognitive_account.openai[0].endpoint : ""}
+OPENAI_MODEL=gpt-4o
+
+# === Whisper (westeurope) ===
+WHISPER_API_KEY=${var.enable_openai ? azurerm_cognitive_account.whisper[0].primary_access_key : ""}
+WHISPER_API_BASE=${var.enable_openai ? azurerm_cognitive_account.whisper[0].endpoint : ""}
+OPENAI_WHISPER_MODEL=whisper
+
+# === CORS ===
+ALLOWED_ORIGINS=http://localhost:8080,http://localhost:3000
+EOT
   sensitive   = true
 }

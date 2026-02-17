@@ -1,0 +1,307 @@
+<mxfile host="app.diagrams.net" modified="2026-02-17T09:15:00.000Z" agent="ShareAzure" version="24.0.0" type="device">
+  <diagram id="azure-architecture" name="Architecture ShareAzure">
+    <mxGraphModel dx="1800" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ═══════════════════════════════════════ -->
+        <!-- Title -->
+        <!-- ═══════════════════════════════════════ -->
+        <mxCell id="title" value="&lt;b style='font-size:18px'&gt;ShareAzure — Architecture Complète&lt;/b&gt;&lt;br&gt;&lt;i&gt;Infrastructure Cloud, Sécurité &amp; Services IA&lt;/i&gt;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="660" y="15" width="420" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════ -->
+        <!-- USERS -->
+        <!-- ═══════════════════════════════════════ -->
+        <mxCell id="users-int" value="&lt;b&gt;Utilisateurs internes&lt;/b&gt;&lt;br&gt;Admin / COM / User / Viewer" style="shape=mxgraph.azure.user;fillColor=#0078D4;fontColor=#ffffff;strokeColor=none;fontSize=10;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="560" y="80" width="55" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="users-ext" value="&lt;b&gt;Externes&lt;/b&gt;&lt;br&gt;Portail Upload&lt;br&gt;Comptes invités" style="shape=mxgraph.azure.user;fillColor=#E65100;fontColor=#ffffff;strokeColor=none;fontSize=10;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="780" y="80" width="55" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="users-sso" value="&lt;b&gt;SSO&lt;/b&gt;&lt;br&gt;Azure Entra ID" style="shape=mxgraph.azure.user;fillColor=#5C2D91;fontColor=#ffffff;strokeColor=none;fontSize=10;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="670" y="80" width="55" height="55" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════ -->
+        <!-- CLOUDFLARE -->
+        <!-- ═══════════════════════════════════════ -->
+        <mxCell id="cloudflare" value="&lt;b&gt;Cloudflare&lt;/b&gt;&lt;br&gt;DNS + CDN + WAF&lt;br&gt;&lt;i&gt;shareazure.deberti.fr&lt;/i&gt;&lt;br&gt;HTTPS automatique&lt;br&gt;Protection DDoS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F48120;fontColor=#ffffff;strokeColor=none;fontSize=10;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="610" y="175" width="200" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cf-tunnel" value="&lt;b&gt;Cloudflare Tunnel&lt;/b&gt;&lt;br&gt;&lt;i&gt;cloudflared (systemd)&lt;/i&gt;&lt;br&gt;Aucun port ouvert" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F4811F;fontColor=#ffffff;strokeColor=none;fontSize=9;dashed=0;" vertex="1" parent="1">
+          <mxGeometry x="630" y="290" width="160" height="55" as="geometry" />
+        </mxCell>
+
+        <!-- Arrows Users → Cloudflare -->
+        <mxCell id="a-uint-cf" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#F48120;strokeWidth=2;endArrow=block;endFill=1;" edge="1" source="users-int" target="cloudflare" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a-uext-cf" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#F48120;strokeWidth=2;endArrow=block;endFill=1;" edge="1" source="users-ext" target="cloudflare" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a-usso-cf" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#F48120;strokeWidth=2;endArrow=block;endFill=1;" edge="1" source="users-sso" target="cloudflare" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a-cf-tunnel" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#F48120;strokeWidth=2;endArrow=block;endFill=1;" edge="1" source="cloudflare" target="cf-tunnel" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════ -->
+        <!-- VPS GROUP -->
+        <!-- ═══════════════════════════════════════ -->
+        <mxCell id="vps" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#333333;strokeWidth=2;verticalAlign=top;dashed=0;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="100" y="370" width="1220" height="310" as="geometry" />
+        </mxCell>
+
+        <mxCell id="vps-label" value="&lt;b style='font-size:13px'&gt;🖥️ VPS OVH — 51.255.206.146&lt;/b&gt;&lt;br&gt;&lt;i&gt;Debian 13 • SSH uniquement (port 22) • iptables DROP all&lt;/i&gt;" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="115" y="375" width="370" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Firewall -->
+        <mxCell id="firewall" value="&lt;b&gt;🔥 iptables&lt;/b&gt;&lt;br&gt;DROP all sauf SSH&lt;br&gt;Loopback OK" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C62828;fontColor=#ffffff;strokeColor=none;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="120" y="420" width="120" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Nginx -->
+        <mxCell id="nginx" value="&lt;b&gt;Nginx&lt;/b&gt;&lt;br&gt;Reverse Proxy&lt;br&gt;SSL :8443 (self-signed)&lt;br&gt;Rate limiting&lt;br&gt;Security headers&lt;br&gt;HSTS, CSP, X-Frame" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E7D32;fontColor=#ffffff;strokeColor=none;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="280" y="415" width="150" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- Backend -->
+        <mxCell id="backend" value="&lt;b&gt;Backend Node.js&lt;/b&gt;&lt;br&gt;Express.js — :3000&lt;br&gt;(127.0.0.1 only)&lt;br&gt;&lt;br&gt;Auth locale + Entra SSO&lt;br&gt;Upload / Partage&lt;br&gt;API REST (57 routes)&lt;br&gt;Services IA&lt;br&gt;SMTP multi-provider" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1565C0;fontColor=#ffffff;strokeColor=none;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="480" y="410" width="180" height="140" as="geometry" />
+        </mxCell>
+
+        <!-- Frontend -->
+        <mxCell id="frontend" value="&lt;b&gt;Frontend&lt;/b&gt;&lt;br&gt;HTML/CSS/JS vanilla&lt;br&gt;&lt;br&gt;Login / Upload&lt;br&gt;Admin Panel&lt;br&gt;Portail externe" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#F9A825;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="480" y="565" width="180" height="95" as="geometry" />
+        </mxCell>
+
+        <!-- SQLite -->
+        <mxCell id="sqlite" value="&lt;b&gt;SQLite&lt;/b&gt;&lt;br&gt;better-sqlite3&lt;br&gt;&lt;br&gt;users, teams, roles&lt;br&gt;share_links, files&lt;br&gt;ai_analyses, faces&lt;br&gt;audit, quotas&lt;br&gt;upload_requests" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=12;fillColor=#7B1FA2;fontColor=#ffffff;strokeColor=none;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="710" y="410" width="130" height="145" as="geometry" />
+        </mxCell>
+
+        <!-- ClamAV -->
+        <mxCell id="clamav" value="&lt;b&gt;🛡️ ClamAV&lt;/b&gt;&lt;br&gt;Antivirus daemon&lt;br&gt;Scan upload&lt;br&gt;Quarantaine auto" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#B71C1C;fontColor=#ffffff;strokeColor=none;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="890" y="420" width="130" height="75" as="geometry" />
+        </mxCell>
+
+        <!-- Roles box -->
+        <mxCell id="roles" value="&lt;b&gt;Rôles &amp; Permissions&lt;/b&gt;&lt;br&gt;&lt;br&gt;👑 Admin&lt;br&gt;📢 COM (IA, invités)&lt;br&gt;👤 User (upload, partage)&lt;br&gt;👁️ Viewer (lecture seule)&lt;br&gt;&lt;br&gt;8 permissions configurables&lt;br&gt;Entra ID → Role mapping" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#3F51B5;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="890" y="510" width="160" height="150" as="geometry" />
+        </mxCell>
+
+        <!-- Audit -->
+        <mxCell id="audit" value="&lt;b&gt;🔍 Audit Sécurité&lt;/b&gt;&lt;br&gt;Partages, fichiers&lt;br&gt;Téléchargements&lt;br&gt;Permissions séparées" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBE9E7;strokeColor=#BF360C;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="420" width="140" height="75" as="geometry" />
+        </mxCell>
+
+        <!-- SMTP -->
+        <mxCell id="smtp" value="&lt;b&gt;📧 SMTP&lt;/b&gt;&lt;br&gt;21 providers&lt;br&gt;+ Mailjet API&lt;br&gt;Notifications partage" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="510" width="140" height="75" as="geometry" />
+        </mxCell>
+
+        <!-- Arrows VPS interne -->
+        <mxCell id="a-tunnel-nginx" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#2E7D32;strokeWidth=2;endArrow=block;endFill=1;" edge="1" source="cf-tunnel" target="nginx" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a-nginx-back" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#1565C0;strokeWidth=2;endArrow=block;endFill=1;" edge="1" source="nginx" target="backend" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a-back-sqlite" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#7B1FA2;strokeWidth=2;endArrow=block;endFill=1;" edge="1" source="backend" target="sqlite" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a-back-clam" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#B71C1C;strokeWidth=1;endArrow=block;endFill=1;dashed=1;" edge="1" source="backend" target="clamav" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a-back-front" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#F9A825;strokeWidth=1;endArrow=block;endFill=1;" edge="1" source="backend" target="frontend" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════ -->
+        <!-- AZURE RESOURCE GROUP -->
+        <!-- ═══════════════════════════════════════ -->
+        <mxCell id="rg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#0078D4;strokeWidth=2;verticalAlign=top;dashed=1;dashPattern=8 4;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="100" y="720" width="1220" height="280" as="geometry" />
+        </mxCell>
+
+        <mxCell id="rg-label" value="&lt;b style='font-size:13px'&gt;☁️ Azure — Resource Group rg-shareazure&lt;/b&gt;&lt;br&gt;&lt;i&gt;Terraform managed • Subscription 011ab966-...&lt;/i&gt;" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="115" y="725" width="360" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Blob Storage -->
+        <mxCell id="blob" value="&lt;b&gt;Azure Blob Storage&lt;/b&gt;&lt;br&gt;sastshareazure&lt;br&gt;&lt;i&gt;France Central&lt;/i&gt;&lt;br&gt;&lt;br&gt;📦 Container: uploads&lt;br&gt;🔥 Hot / ❄️ Cool / 🧊 Archive&lt;br&gt;Versioning ✓ Soft Delete 7j ✓&lt;br&gt;TLS 1.2 ✓ SAS jamais exposé" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0078D4;fontColor=#ffffff;strokeColor=none;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="120" y="775" width="220" height="145" as="geometry" />
+        </mxCell>
+
+        <!-- Azure OpenAI GPT-4o -->
+        <mxCell id="gpt4o" value="&lt;b&gt;Azure OpenAI&lt;/b&gt;&lt;br&gt;oai-shareazure&lt;br&gt;&lt;i&gt;France Central&lt;/i&gt;&lt;br&gt;&lt;br&gt;🧠 GPT-4o Vision&lt;br&gt;Tags IA, descriptions&lt;br&gt;Analyse images/vidéos&lt;br&gt;Smart Albums" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#10A37F;fontColor=#ffffff;strokeColor=none;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="380" y="775" width="190" height="145" as="geometry" />
+        </mxCell>
+
+        <!-- Azure OpenAI Whisper -->
+        <mxCell id="whisper" value="&lt;b&gt;Azure OpenAI&lt;/b&gt;&lt;br&gt;oai-shareazure-whisper&lt;br&gt;&lt;i&gt;West Europe&lt;/i&gt;&lt;br&gt;&lt;br&gt;🎤 Whisper&lt;br&gt;Transcription audio&lt;br&gt;Transcription vidéo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FF6F00;fontColor=#ffffff;strokeColor=none;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="610" y="775" width="190" height="145" as="geometry" />
+        </mxCell>
+
+        <!-- Azure AI Vision -->
+        <mxCell id="vision" value="&lt;b&gt;Azure AI Vision&lt;/b&gt;&lt;br&gt;cog-shareazure&lt;br&gt;&lt;i&gt;France Central&lt;/i&gt;&lt;br&gt;&lt;br&gt;👁️ Computer Vision S1&lt;br&gt;OCR, Tags, Objets&lt;br&gt;Détection visages&lt;br&gt;Reconnaissance faciale" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0078D4;fontColor=#ffffff;strokeColor=none;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="840" y="775" width="190" height="145" as="geometry" />
+        </mxCell>
+
+        <!-- Azure Entra ID -->
+        <mxCell id="entra" value="&lt;b&gt;Azure Entra ID&lt;/b&gt;&lt;br&gt;&lt;i&gt;(Optionnel)&lt;/i&gt;&lt;br&gt;&lt;br&gt;🔐 SSO OAuth2/OIDC&lt;br&gt;Graph API → Groupes&lt;br&gt;Mapping groupes→rôles" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#5C2D91;fontColor=#ffffff;strokeColor=none;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1070" y="775" width="190" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- App Insights -->
+        <mxCell id="appinsights" value="&lt;b&gt;App Insights&lt;/b&gt;&lt;br&gt;Monitoring" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#68217A;fontColor=#ffffff;strokeColor=none;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="1070" y="910" width="100" height="45" as="geometry" />
+        </mxCell>
+
+        <!-- Arrows Backend → Azure -->
+        <mxCell id="a-back-blob" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#0078D4;strokeWidth=2;endArrow=block;endFill=1;" edge="1" source="backend" target="blob" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a-back-blob-lbl" value="Upload/Download" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=8;fontColor=#0078D4;" vertex="1" connectable="0" parent="a-back-blob">
+          <mxGeometry x="0.1" relative="1" as="geometry"><mxPoint as="offset" /></mxGeometry>
+        </mxCell>
+
+        <mxCell id="a-back-gpt" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#10A37F;strokeWidth=2;endArrow=block;endFill=1;" edge="1" source="backend" target="gpt4o" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a-back-gpt-lbl" value="Analyse IA" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=8;fontColor=#10A37F;" vertex="1" connectable="0" parent="a-back-gpt">
+          <mxGeometry x="0.1" relative="1" as="geometry"><mxPoint as="offset" /></mxGeometry>
+        </mxCell>
+
+        <mxCell id="a-back-whisper" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#FF6F00;strokeWidth=2;endArrow=block;endFill=1;" edge="1" source="backend" target="whisper" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a-back-whisper-lbl" value="Transcription" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=8;fontColor=#FF6F00;" vertex="1" connectable="0" parent="a-back-whisper">
+          <mxGeometry x="0.1" relative="1" as="geometry"><mxPoint as="offset" /></mxGeometry>
+        </mxCell>
+
+        <mxCell id="a-back-vision" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#0078D4;strokeWidth=2;endArrow=block;endFill=1;" edge="1" source="backend" target="vision" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a-back-vision-lbl" value="OCR / Visages" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=8;fontColor=#0078D4;" vertex="1" connectable="0" parent="a-back-vision">
+          <mxGeometry x="0.1" relative="1" as="geometry"><mxPoint as="offset" /></mxGeometry>
+        </mxCell>
+
+        <mxCell id="a-back-entra" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#5C2D91;strokeWidth=1;endArrow=block;endFill=1;dashed=1;" edge="1" source="backend" target="entra" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════ -->
+        <!-- EXTERNAL SERVICES -->
+        <!-- ═══════════════════════════════════════ -->
+        <mxCell id="ext-group" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF3E0;strokeColor=#E65100;verticalAlign=top;dashed=1;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="1380" y="370" width="200" height="630" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ext-label" value="&lt;b&gt;Services externes&lt;/b&gt;" style="text;html=1;align=center;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=11;fontColor=#E65100;" vertex="1" parent="1">
+          <mxGeometry x="1395" y="375" width="130" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="nominatim" value="&lt;b&gt;Nominatim&lt;/b&gt;&lt;br&gt;Reverse Geocoding&lt;br&gt;OpenStreetMap" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#E65100;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="410" width="160" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="whois-svc" value="&lt;b&gt;WHOIS&lt;/b&gt;&lt;br&gt;Âge domaine&lt;br&gt;Vérification email" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#E65100;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="480" width="160" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="dns-dmarc" value="&lt;b&gt;DNS / DMARC&lt;/b&gt;&lt;br&gt;BIMI / VMC&lt;br&gt;Sécurité domaine" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#E65100;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="550" width="160" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ddg" value="&lt;b&gt;DuckDuckGo Icons&lt;/b&gt;&lt;br&gt;Favicons domaines" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#E65100;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="620" width="160" height="45" as="geometry" />
+        </mxCell>
+
+        <mxCell id="smtp-ext" value="&lt;b&gt;SMTP / Mailjet&lt;/b&gt;&lt;br&gt;21 providers&lt;br&gt;Envoi notifications" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#E65100;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="680" width="160" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="leaflet" value="&lt;b&gt;Leaflet / OSM&lt;/b&gt;&lt;br&gt;Carte géolocalisation&lt;br&gt;Clusters photos" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#E65100;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="750" width="160" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="clamav-ext" value="&lt;b&gt;ClamAV DB&lt;/b&gt;&lt;br&gt;Signatures virus&lt;br&gt;freshclam updates" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#E65100;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="820" width="160" height="55" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════ -->
+        <!-- FEATURES SUMMARY -->
+        <!-- ═══════════════════════════════════════ -->
+        <mxCell id="features" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#2E7D32;verticalAlign=top;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="100" y="1030" width="1220" height="130" as="geometry" />
+        </mxCell>
+
+        <mxCell id="feat-label" value="&lt;b style='font-size:12px'&gt;✨ Fonctionnalités ShareAzure&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=10;fontColor=#2E7D32;" vertex="1" parent="1">
+          <mxGeometry x="115" y="1035" width="220" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="f1" value="&lt;b&gt;📤 Upload&lt;/b&gt;&lt;br&gt;Drag &amp; drop&lt;br&gt;Multi-fichier&lt;br&gt;Portail externe" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#2E7D32;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="120" y="1070" width="110" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="f2" value="&lt;b&gt;🔗 Partage&lt;/b&gt;&lt;br&gt;Mot de passe obligatoire&lt;br&gt;Expiration auto&lt;br&gt;Email vérification" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#2E7D32;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="245" y="1070" width="130" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="f3" value="&lt;b&gt;🧠 IA&lt;/b&gt;&lt;br&gt;GPT-4o Vision&lt;br&gt;Whisper, OCR&lt;br&gt;Visages, Albums" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#2E7D32;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="390" y="1070" width="110" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="f4" value="&lt;b&gt;🛡️ Sécurité&lt;/b&gt;&lt;br&gt;ClamAV antivirus&lt;br&gt;Audit séparé&lt;br&gt;DMARC/WHOIS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#2E7D32;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="515" y="1070" width="120" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="f5" value="&lt;b&gt;👥 Équipes&lt;/b&gt;&lt;br&gt;4 rôles fixes&lt;br&gt;8 permissions&lt;br&gt;Quotas par équipe" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#2E7D32;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="650" y="1070" width="120" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="f6" value="&lt;b&gt;🔐 Auth&lt;/b&gt;&lt;br&gt;Local / Entra / Hybride&lt;br&gt;SSO Microsoft&lt;br&gt;Groupe→Rôle auto" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#2E7D32;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="785" y="1070" width="130" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="f7" value="&lt;b&gt;🗺️ Géoloc&lt;/b&gt;&lt;br&gt;EXIF → carte&lt;br&gt;Clusters Leaflet&lt;br&gt;Reverse geocoding" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#2E7D32;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="930" y="1070" width="120" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="f8" value="&lt;b&gt;💰 Coûts&lt;/b&gt;&lt;br&gt;Suivi Azure Storage&lt;br&gt;Hot/Cool/Archive&lt;br&gt;Dashboard admin" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#2E7D32;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="1065" y="1070" width="120" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════ -->
+        <!-- LEGEND -->
+        <!-- ═══════════════════════════════════════ -->
+        <mxCell id="legend" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#BDBDBD;verticalAlign=top;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1380" y="1030" width="200" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="leg-title" value="&lt;b&gt;Légende&lt;/b&gt;" style="text;html=1;align=center;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1435" y="1035" width="70" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="l1" value="" style="rounded=1;fillColor=#F48120;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="1395" y="1065" width="16" height="10" as="geometry" /></mxCell>
+        <mxCell id="l1t" value="Cloudflare (CDN/Tunnel)" style="text;html=1;align=left;fontSize=9;strokeColor=none;fillColor=none;" vertex="1" parent="1"><mxGeometry x="1418" y="1060" width="150" height="20" as="geometry" /></mxCell>
+        <mxCell id="l2" value="" style="rounded=1;fillColor=#1565C0;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="1395" y="1082" width="16" height="10" as="geometry" /></mxCell>
+        <mxCell id="l2t" value="VPS (Backend/Nginx)" style="text;html=1;align=left;fontSize=9;strokeColor=none;fillColor=none;" vertex="1" parent="1"><mxGeometry x="1418" y="1077" width="150" height="20" as="geometry" /></mxCell>
+        <mxCell id="l3" value="" style="rounded=1;fillColor=#0078D4;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="1395" y="1099" width="16" height="10" as="geometry" /></mxCell>
+        <mxCell id="l3t" value="Azure (France Central)" style="text;html=1;align=left;fontSize=9;strokeColor=none;fillColor=none;" vertex="1" parent="1"><mxGeometry x="1418" y="1094" width="150" height="20" as="geometry" /></mxCell>
+        <mxCell id="l4" value="" style="rounded=1;fillColor=#10A37F;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="1395" y="1116" width="16" height="10" as="geometry" /></mxCell>
+        <mxCell id="l4t" value="Azure OpenAI" style="text;html=1;align=left;fontSize=9;strokeColor=none;fillColor=none;" vertex="1" parent="1"><mxGeometry x="1418" y="1111" width="150" height="20" as="geometry" /></mxCell>
+        <mxCell id="l5" value="" style="rounded=1;fillColor=#FF6F00;strokeColor=none;" vertex="1" parent="1"><mxGeometry x="1395" y="1133" width="16" height="10" as="geometry" /></mxCell>
+        <mxCell id="l5t" value="Whisper (West Europe)" style="text;html=1;align=left;fontSize=9;strokeColor=none;fillColor=none;" vertex="1" parent="1"><mxGeometry x="1418" y="1128" width="150" height="20" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,5 +1,5 @@
 // Configuration
-const API_URL = 'http://localhost:3000/api';
+const API_URL = window.location.origin + '/api';
 
 // State
 let currentSection = 'dashboard';
@@ -80,6 +80,30 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Fermer les menus kebab quand on clique ailleurs
     document.addEventListener('click', () => closeAllKebabs());
+
+    // Mobile sidebar toggle
+    const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+    const sidebar = document.querySelector('.sidebar');
+    const sidebarOverlay = document.getElementById('sidebarOverlay');
+    if (mobileMenuBtn && sidebar) {
+        mobileMenuBtn.addEventListener('click', () => {
+            sidebar.classList.toggle('open');
+            sidebarOverlay?.classList.toggle('active');
+        });
+        sidebarOverlay?.addEventListener('click', () => {
+            sidebar.classList.remove('open');
+            sidebarOverlay.classList.remove('active');
+        });
+        // Fermer la sidebar quand on clique sur un lien nav (mobile)
+        sidebar.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                if (window.innerWidth <= 1024) {
+                    sidebar.classList.remove('open');
+                    sidebarOverlay?.classList.remove('active');
+                }
+            });
+        });
+    }
 });
 
 // ============================================
@@ -113,7 +137,9 @@ function switchSection(section) {
         guests: { title: 'Gestion des invites', subtitle: 'Comptes temporaires' },
         logs: { title: 'Logs systeme', subtitle: 'Historique des operations' },
         settings: { title: 'Parametres', subtitle: 'Configuration de l\'application' },
-        ai: { title: 'Intelligence Artificielle', subtitle: 'Configuration et pilotage de l\'IA' }
+        ai: { title: 'Intelligence Artificielle', subtitle: 'Configuration et pilotage de l\'IA' },
+        faces: { title: 'Reconnaissance faciale', subtitle: 'Profils et identification des visages' },
+        storage: { title: 'Stockage', subtitle: 'Utilisation et répartition du stockage Azure' }
     };
 
     const t = titles[section] || { title: section, subtitle: '' };
@@ -134,8 +160,11 @@ function loadSectionData(section) {
         case 'users': loadUsers(); break;
         case 'guests': loadGuests(); break;
         case 'logs': loadLogs(); break;
-        case 'settings': loadSettings(); loadEmailDomains(); break;
+        case 'settings': loadSettings(); loadEmailDomains(); loadAuthSettings(); loadEntraMappings(); loadQuotas(); loadVirusScan(); loadPermissions(); loadEmailConfig(); loadTieringSettings(); break;
         case 'ai': loadAI(); break;
+        case 'faces': loadFacesSection(); break;
+        case 'storage': loadStorage(); break;
+        case 'audit': loadAuditDashboard(); break;
     }
 }
 
@@ -145,6 +174,18 @@ function loadSectionData(section) {
 
 function initializeEventListeners() {
     document.getElementById('logoutBtn').addEventListener('click', handleLogout);
+
+    // User menu dropdown toggle
+    const userMenuToggle = document.getElementById('userMenuToggle');
+    const userDropdown = document.getElementById('userDropdown');
+    if (userMenuToggle && userDropdown) {
+        userMenuToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            userDropdown.style.display = userDropdown.style.display === 'none' ? 'block' : 'none';
+        });
+        document.addEventListener('click', () => { userDropdown.style.display = 'none'; });
+    }
+
     document.getElementById('refreshBtn').addEventListener('click', () => {
         loadSectionData(currentSection);
         showNotification('Donnees actualisees', 'success');
@@ -174,6 +215,15 @@ function initializeEventListeners() {
     // Settings
     document.getElementById('saveSettingsBtn')?.addEventListener('click', saveSettings);
     document.getElementById('resetSettingsBtn')?.addEventListener('click', resetSettings);
+    document.getElementById('saveAuthSettingsBtn')?.addEventListener('click', saveAuthSettings);
+    document.getElementById('testEntraBtn')?.addEventListener('click', testEntraConnection);
+    document.querySelectorAll('input[name="authMode"]').forEach(radio => {
+        radio.addEventListener('change', toggleEntraConfig);
+    });
+    document.getElementById('saveEntraSyncSettingsBtn')?.addEventListener('click', saveEntraSyncSettings);
+    document.getElementById('fetchEntraGroupsBtn')?.addEventListener('click', fetchEntraGroups);
+    document.getElementById('testMappingBtn')?.addEventListener('click', testEntraMapping);
+    document.getElementById('testMappingEmail')?.addEventListener('keypress', (e) => { if (e.key === 'Enter') testEntraMapping(); });
     document.getElementById('addEmailDomainBtn')?.addEventListener('click', addEmailDomain);
     document.getElementById('domainsPrevBtn')?.addEventListener('click', () => window.changeDomainsPage(-1));
     document.getElementById('domainsNextBtn')?.addEventListener('click', () => window.changeDomainsPage(1));
@@ -261,22 +311,35 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
 
 async function loadDashboard() {
     try {
-        const files = await fetchFiles();
-
-        // Stats
-        document.getElementById('statTotalFiles').textContent = files.length;
-
-        // Teams count
+        // Use stats API instead of fetching all files
+        let stats = null;
         try {
-            const teamsRes = await apiRequest('/teams');
-            document.getElementById('statTotalTeams').textContent = teamsRes.success ? teamsRes.teams.length : 0;
-        } catch (e) { document.getElementById('statTotalTeams').textContent = '0'; }
+            const statsRes = await apiRequest('/admin/stats');
+            if (statsRes.success) stats = statsRes.stats;
+        } catch (e) { console.warn('Stats API unavailable, falling back', e); }
 
-        // Users count
-        try {
-            const usersRes = await apiRequest('/admin/users');
-            document.getElementById('statTotalUsers').textContent = usersRes.success ? (usersRes.users || []).length : '-';
-        } catch (e) { document.getElementById('statTotalUsers').textContent = '-'; }
+        if (stats) {
+            document.getElementById('statTotalFiles').textContent = stats.totalFiles || 0;
+            document.getElementById('statTotalTeams').textContent = stats.totalTeams || 0;
+            document.getElementById('statTotalUsers').textContent = stats.totalUsers || 0;
+
+            // Empty states
+            if (stats.totalFiles === 0) {
+                document.getElementById('statTotalFiles').innerHTML = '0 <small style="font-size:0.5em;color:#9ca3af;">Uploadez votre premier fichier</small>';
+            }
+        } else {
+            // Fallback
+            const files = await fetchFiles();
+            document.getElementById('statTotalFiles').textContent = files.length;
+            try {
+                const teamsRes = await apiRequest('/teams');
+                document.getElementById('statTotalTeams').textContent = teamsRes.success ? teamsRes.teams.length : 0;
+            } catch (e) { document.getElementById('statTotalTeams').textContent = '0'; }
+            try {
+                const usersRes = await apiRequest('/admin/users');
+                document.getElementById('statTotalUsers').textContent = usersRes.success ? (usersRes.users || []).length : '-';
+            } catch (e) { document.getElementById('statTotalUsers').textContent = '-'; }
+        }
 
         // Costs
         try {
@@ -284,11 +347,54 @@ async function loadDashboard() {
             document.getElementById('statTotalCosts').textContent = costsRes.success ? `$${(costsRes.totals.overall || 0).toFixed(2)}` : '$0.00';
         } catch (e) { document.getElementById('statTotalCosts').textContent = '$0.00'; }
 
-        // Charts
-        const stats = calculateStats(files);
-        createUploadsChart(stats.uploadsByDay);
-        createFileTypesChart(stats.filesByType);
-        loadRecentActivity(files);
+        // Charts - use files for uploads chart
+        const files = await fetchFiles();
+        const chartStats = calculateStats(files);
+        createUploadsChart(chartStats.uploadsByDay);
+        createFileTypesChart(chartStats.filesByType);
+
+        // Recent activity from stats API
+        if (stats && stats.recentUploads && stats.recentUploads.length > 0) {
+            const container = document.getElementById('recentActivity');
+            const recent = stats.recentUploads.slice(0, 5);
+            container.innerHTML = recent.map(f => `
+                <div class="activity-item">
+                    <div class="activity-icon">${getFileIcon(f.contentType)}</div>
+                    <div class="activity-content">
+                        <p class="activity-title">Fichier uploadé</p>
+                        <p class="activity-details">${f.name} — ${formatBytes(f.size)}</p>
+                    </div>
+                    <div class="activity-time">${formatTimeAgo(f.date)}</div>
+                </div>
+            `).join('');
+        } else if (stats && stats.totalFiles === 0) {
+            document.getElementById('recentActivity').innerHTML = '<p style="color:#9ca3af;text-align:center;padding:24px;">Aucune activité — Uploadez votre premier fichier pour commencer</p>';
+        } else {
+            loadRecentActivity(files);
+        }
+
+        // Storage usage mini bar
+        if (stats && stats.totalSize > 0) {
+            const card = document.getElementById('dashStorageCard');
+            card.style.display = '';
+            const tiers = stats.storageByTier;
+            const total = stats.totalSize;
+            const bar = document.getElementById('dashStorageBar');
+            const hotPct = (tiers.hot.size / total * 100).toFixed(1);
+            const coolPct = (tiers.cool.size / total * 100).toFixed(1);
+            const archPct = (tiers.archive.size / total * 100).toFixed(1);
+            bar.innerHTML = `
+                <div style="width:${hotPct}%;background:#ef4444;" title="Hot: ${formatBytes(tiers.hot.size)}"></div>
+                <div style="width:${coolPct}%;background:#3b82f6;" title="Cool: ${formatBytes(tiers.cool.size)}"></div>
+                <div style="width:${archPct}%;background:#6b7280;" title="Archive: ${formatBytes(tiers.archive.size)}"></div>
+            `;
+            document.getElementById('dashStorageLabel').textContent = formatBytes(total);
+            document.getElementById('dashStorageLegend').innerHTML = `
+                <span>🔴 Hot: ${formatBytes(tiers.hot.size)}</span>
+                <span>🔵 Cool: ${formatBytes(tiers.cool.size)}</span>
+                <span>⚫ Archive: ${formatBytes(tiers.archive.size)}</span>
+            `;
+        }
 
     } catch (error) {
         console.error('Dashboard error:', error);
@@ -361,6 +467,175 @@ function loadRecentActivity(files) {
 }
 
 // ============================================
+// STORAGE
+// ============================================
+
+async function previewSync() {
+    const resultDiv = document.getElementById('syncResult');
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = '<span style="color:#666;">⏳ Scan du blob storage Azure...</span>';
+    try {
+        const res = await fetch(`${API_URL}/admin/storage/tree`, { headers: getAuthHeaders() });
+        const data = await res.json();
+        if (!data.success) { resultDiv.innerHTML = `<span style="color:#c62828;">❌ ${data.error}</span>`; return; }
+        const notInDb = data.blobs.filter(b => !b.inDb && b.contentType !== 'application/x-directory');
+        const inDb = data.blobs.filter(b => b.inDb);
+        resultDiv.innerHTML = `
+            <div style="background:#fff;border-radius:6px;padding:12px;">
+                <p><strong>${data.total}</strong> blob(s) dans Azure • <strong>${inDb.length}</strong> déjà en DB • <strong style="color:#e65100;">${notInDb.length}</strong> à importer</p>
+                ${notInDb.length > 0 ? '<table class="data-table" style="margin-top:8px;"><thead><tr><th>Fichier</th><th>Taille</th><th>Type</th><th>Tier</th></tr></thead><tbody>' +
+                    notInDb.map(b => `<tr><td>${escapeHtml(b.name)}</td><td>${formatBytes(b.size)}</td><td>${b.contentType}</td><td>${b.tier}</td></tr>`).join('') +
+                    '</tbody></table>' : '<p style="color:#2e7d32;">✅ Tous les fichiers sont déjà synchronisés</p>'}
+            </div>`;
+    } catch(e) { resultDiv.innerHTML = `<span style="color:#c62828;">❌ ${e.message}</span>`; }
+}
+
+async function runSync() {
+    if (!confirm('Importer tous les fichiers Azure non référencés dans la base de données ?')) return;
+    const resultDiv = document.getElementById('syncResult');
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = '<span style="color:#666;">⏳ Synchronisation en cours...</span>';
+    try {
+        const res = await fetch(`${API_URL}/admin/sync-storage`, { method: 'POST', headers: getAuthHeaders() });
+        const data = await res.json();
+        if (!data.success) { resultDiv.innerHTML = `<span style="color:#c62828;">❌ ${data.error}</span>`; return; }
+        resultDiv.innerHTML = `<div style="background:#e8f5e9;padding:12px;border-radius:6px;">
+            <p style="color:#2e7d32;"><strong>✅ ${data.message}</strong></p>
+            ${data.results.length > 0 ? '<ul style="margin:8px 0;padding-left:20px;">' + data.results.map(r =>
+                `<li>${escapeHtml(r.originalName)} (${formatBytes(r.size)})${r.team ? ' → Équipe: ' + escapeHtml(r.team) : ''}</li>`
+            ).join('') + '</ul>' : ''}
+        </div>`;
+        // Refresh storage and dashboard
+        loadStorage();
+        showNotification(data.message, 'success');
+    } catch(e) { resultDiv.innerHTML = `<span style="color:#c62828;">❌ ${e.message}</span>`; }
+}
+
+async function confirmResetStorage() {
+    // Step 1: First confirmation
+    const countRes = await fetch(`${API_URL}/files`, { headers: getAuthHeaders() });
+    const countData = await countRes.json();
+    const fileCount = countData.count || 0;
+
+    if (!confirm(`⚠️ ATTENTION: Vous êtes sur le point de supprimer TOUS les fichiers du Blob Storage Azure.\n\n${fileCount} fichier(s) seront définitivement supprimés.\n\nCette action est IRRÉVERSIBLE.\n\nVoulez-vous continuer ?`)) return;
+
+    // Step 2: Second confirmation
+    if (!confirm(`🔴 DERNIÈRE CONFIRMATION\n\nTous les fichiers, partages, et données associées seront supprimés.\n\nÊtes-vous absolument sûr ?`)) return;
+
+    const resultDiv = document.getElementById('syncResult');
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = '<span style="color:#c62828;">⏳ Suppression en cours... Ne fermez pas cette page.</span>';
+
+    try {
+        const res = await fetch(`${API_URL}/admin/reset-storage`, {
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
+        const data = await res.json();
+        if (!data.success) {
+            resultDiv.innerHTML = `<span style="color:#c62828;">❌ ${data.error}</span>`;
+            return;
+        }
+        resultDiv.innerHTML = `<div style="background:#ffebee;padding:12px;border-radius:6px;">
+            <p style="color:#2e7d32;"><strong>✅ ${data.message}</strong></p>
+            <p style="color:#555;margin-top:6px;">Blobs supprimés: ${data.deletedBlobs} | Fichiers DB nettoyés: ${data.deletedDbRecords}</p>
+        </div>`;
+        loadStorage();
+        loadFiles();
+        showNotification('Storage réinitialisé', 'success');
+    } catch(e) {
+        resultDiv.innerHTML = `<span style="color:#c62828;">❌ ${e.message}</span>`;
+    }
+}
+
+async function loadStorage() {
+    try {
+        const statsRes = await apiRequest('/admin/stats');
+        if (!statsRes.success) throw new Error('Erreur stats');
+        const s = statsRes.stats;
+
+        // Stats cards
+        document.getElementById('storTotalSize').textContent = formatBytes(s.totalSize);
+        document.getElementById('storTotalFiles').textContent = s.totalFiles;
+        document.getElementById('storHot').textContent = `${s.storageByTier.hot.count} (${formatBytes(s.storageByTier.hot.size)})`;
+        document.getElementById('storCool').textContent = `${s.storageByTier.cool.count} (${formatBytes(s.storageByTier.cool.size)})`;
+        document.getElementById('storArchive').textContent = `${s.storageByTier.archive.count} (${formatBytes(s.storageByTier.archive.size)})`;
+
+        // Tier bar
+        const total = s.totalSize || 1;
+        const bar = document.getElementById('storageTierBar');
+        const hotPct = (s.storageByTier.hot.size / total * 100);
+        const coolPct = (s.storageByTier.cool.size / total * 100);
+        const archPct = (s.storageByTier.archive.size / total * 100);
+        bar.innerHTML = `
+            <div style="width:${hotPct}%;background:#ef4444;min-width:${s.storageByTier.hot.size?2:0}px;" title="Hot"></div>
+            <div style="width:${coolPct}%;background:#3b82f6;min-width:${s.storageByTier.cool.size?2:0}px;" title="Cool"></div>
+            <div style="width:${archPct}%;background:#6b7280;min-width:${s.storageByTier.archive.size?2:0}px;" title="Archive"></div>
+        `;
+        document.getElementById('storageTierLegend').innerHTML = `
+            <span><span style="display:inline-block;width:12px;height:12px;background:#ef4444;border-radius:3px;"></span> Hot: ${formatBytes(s.storageByTier.hot.size)} (${hotPct.toFixed(1)}%)</span>
+            <span><span style="display:inline-block;width:12px;height:12px;background:#3b82f6;border-radius:3px;"></span> Cool: ${formatBytes(s.storageByTier.cool.size)} (${coolPct.toFixed(1)}%)</span>
+            <span><span style="display:inline-block;width:12px;height:12px;background:#6b7280;border-radius:3px;"></span> Archive: ${formatBytes(s.storageByTier.archive.size)} (${archPct.toFixed(1)}%)</span>
+        `;
+
+        // Storage by file type
+        const typeContainer = document.getElementById('storageByTypeContent');
+        const typeLabels = { images: '🖼️ Images', videos: '🎬 Vidéos', documents: '📄 Documents', other: '📦 Autres' };
+        const typeColors = { images: '#639E30', videos: '#F8AA36', documents: '#003C61', other: '#64748b' };
+        const maxTypeSize = Math.max(...Object.values(s.storageByType).map(t => t.size), 1);
+        typeContainer.innerHTML = Object.entries(s.storageByType).map(([key, val]) => `
+            <div style="margin:12px 0;">
+                <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.9rem;">
+                    <span>${typeLabels[key] || key}</span>
+                    <span>${val.count} fichiers — ${formatBytes(val.size)}</span>
+                </div>
+                <div style="height:20px;background:#e5e7eb;border-radius:10px;overflow:hidden;">
+                    <div style="height:100%;width:${(val.size/maxTypeSize*100).toFixed(1)}%;background:${typeColors[key]};border-radius:10px;transition:width 0.3s;"></div>
+                </div>
+            </div>
+        `).join('');
+
+        // Top 10 biggest files
+        const topBody = document.getElementById('storTopFilesBody');
+        if (s.topFiles && s.topFiles.length > 0) {
+            topBody.innerHTML = s.topFiles.map(f => `
+                <tr>
+                    <td title="${f.blobName}">${f.name}</td>
+                    <td>${formatBytes(f.size)}</td>
+                    <td>${f.contentType || '—'}</td>
+                    <td><span class="badge badge-${f.tier === 'Hot' ? 'danger' : f.tier === 'Cool' ? 'info' : 'secondary'}">${f.tier}</span></td>
+                </tr>
+            `).join('');
+        } else {
+            topBody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#9ca3af;padding:24px;">Aucun fichier</td></tr>';
+        }
+
+        // Storage by team
+        const teamBody = document.getElementById('storByTeamBody');
+        if (s.storageByTeam && s.storageByTeam.length > 0) {
+            teamBody.innerHTML = s.storageByTeam.map(t => `
+                <tr>
+                    <td>${t.team_name}</td>
+                    <td>${t.file_count}</td>
+                    <td>${formatBytes(t.total_size)}</td>
+                    <td>${total > 0 ? (t.total_size / total * 100).toFixed(1) + '%' : '0%'}</td>
+                </tr>
+            `).join('');
+        } else {
+            teamBody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#9ca3af;padding:24px;">Aucune équipe</td></tr>';
+        }
+
+    } catch (error) {
+        console.error('Storage error:', error);
+        // Show error in the tables instead of silent fail
+        const topBody = document.getElementById('storTopFilesBody');
+        if (topBody) topBody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#c62828;padding:16px;">❌ Erreur de chargement : ' + (error.message || error) + '</td></tr>';
+        const teamBody = document.getElementById('storByTeamBody');
+        if (teamBody) teamBody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#c62828;padding:16px;">❌ Erreur de chargement : ' + (error.message || error) + '</td></tr>';
+    }
+}
+
+// ============================================
 // FILES
 // ============================================
 
@@ -384,20 +659,42 @@ function renderFilesTable(files) {
     const tbody = document.getElementById('filesTableBody');
     if (!tbody) return;
     if (files.length === 0) { tbody.innerHTML = '<tr><td colspan="7" class="loading">Aucun fichier</td></tr>'; return; }
-    tbody.innerHTML = files.map(file => `
-        <tr>
+    tbody.innerHTML = files.map((file, idx) => {
+        const tier = file.metadata?.accessTier || file.tier || 'Hot';
+        const tierBadge = tier === 'Hot' ? 'badge-danger' : tier === 'Cool' ? 'badge-info' : 'badge-secondary';
+        const safeName = file.name.replace(/'/g, "\\'");
+        return `<tr>
             <td><input type="checkbox" class="file-checkbox" data-blob-name="${file.name}"></td>
-            <td><div class="file-name"><span class="file-icon">${getFileIcon(file.contentType)}</span> <span class="file-name-text">${escapeHtml(file.metadata?.originalName || file.name)}</span></div></td>
+            <td><div class="file-name"><span class="file-icon">${getFileIcon(file.contentType)}</span> <span class="file-name-text">${escapeHtml(file.metadata?.originalName || file.originalName || file.name)}</span></div></td>
+            <td>${file.teamName ? `<span class="status-badge badge-info" style="font-size:0.8rem;">${escapeHtml(file.teamName)}</span>` : '<span style="color:#aaa;font-size:0.85rem;">Personnel</span>'}</td>
             <td>${getFileCategory(file.contentType)}</td>
             <td>${formatBytes(file.size)}</td>
-            <td>${new Date(file.lastModified).toLocaleString('fr-FR')}</td>
-            <td><span class="status-badge active">0</span></td>
-            <td><div class="table-actions">
-                <button class="btn btn-small btn-secondary" onclick="viewFileDetails('${file.name}')"><i class="fas fa-eye"></i></button>
-                <button class="btn btn-small btn-danger" onclick="deleteFile('${file.name}')"><i class="fas fa-trash"></i></button>
-            </div></td>
-        </tr>
-    `).join('');
+            <td>${new Date(file.lastModified || file.uploadedAt).toLocaleString('fr-FR')}</td>
+            <td><span class="status-badge ${tierBadge}" style="font-size:0.8rem;">${tier}</span></td>
+            <td style="position:relative;">
+                <button onclick="toggleFileMenu(event, ${idx})" style="border:none;background:none;font-size:1.2rem;cursor:pointer;padding:4px 8px;" title="Actions">⋯</button>
+                <div id="fileMenu-${idx}" class="file-context-menu" style="display:none;position:absolute;right:0;top:100%;background:#fff;border:1px solid #e0e0e0;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);z-index:100;min-width:220px;overflow:hidden;">
+                    <div onclick="viewFileDetails('${safeName}')" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:0.9rem;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='#fff'">
+                        <i class="fas fa-eye" style="color:#1565C0;width:16px;"></i> Voir les détails
+                    </div>
+                    <div style="border-top:1px solid #eee;padding:6px 16px;font-size:0.75rem;color:#888;font-weight:600;">CHANGER LE TIER</div>
+                    ${tier !== 'Hot' ? `<div onclick="changeFileTier('${safeName}', 'Hot')" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:0.9rem;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='#fff'">
+                        <i class="fas fa-fire" style="color:#ef4444;width:16px;"></i> Passer en Hot <span style="color:#888;font-size:0.8rem;">(accès rapide)</span>
+                    </div>` : ''}
+                    ${tier !== 'Cool' ? `<div onclick="changeFileTier('${safeName}', 'Cool')" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:0.9rem;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='#fff'">
+                        <i class="fas fa-snowflake" style="color:#3b82f6;width:16px;"></i> Passer en Cool <span style="color:#888;font-size:0.8rem;">(économique)</span>
+                    </div>` : ''}
+                    ${tier !== 'Archive' ? `<div onclick="changeFileTier('${safeName}', 'Archive')" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:0.9rem;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='#fff'">
+                        <i class="fas fa-box-archive" style="color:#6b7280;width:16px;"></i> Passer en Archive <span style="color:#888;font-size:0.8rem;">(froid)</span>
+                    </div>` : ''}
+                    <div style="border-top:1px solid #eee;"></div>
+                    <div onclick="deleteFile('${safeName}')" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:0.9rem;color:#c62828;" onmouseover="this.style.background='#fce4ec'" onmouseout="this.style.background='#fff'">
+                        <i class="fas fa-trash" style="width:16px;"></i> Supprimer
+                    </div>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
     document.querySelectorAll('.file-checkbox').forEach(cb => cb.addEventListener('change', updateSelectedFiles));
 }
 
@@ -433,6 +730,41 @@ function updateSelectedFiles() {
     selectedFiles = Array.from(document.querySelectorAll('.file-checkbox:checked')).map(cb => cb.dataset.blobName);
     document.getElementById('deleteSelectedBtn').disabled = selectedFiles.length === 0;
 }
+
+// File context menu
+window.toggleFileMenu = (event, idx) => {
+    event.stopPropagation();
+    document.querySelectorAll('.file-context-menu').forEach(m => {
+        if (m.id !== `fileMenu-${idx}`) m.style.display = 'none';
+    });
+    const menu = document.getElementById(`fileMenu-${idx}`);
+    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+};
+
+document.addEventListener('click', () => {
+    document.querySelectorAll('.file-context-menu').forEach(m => m.style.display = 'none');
+});
+
+// Change file tier (Hot/Cool/Archive)
+window.changeFileTier = async (blobName, targetTier) => {
+    document.querySelectorAll('.file-context-menu').forEach(m => m.style.display = 'none');
+    const tierLabels = { Hot: '🔥 Hot', Cool: '❄️ Cool', Archive: '🧊 Archive' };
+    if (!confirm(`Changer le tier de ce fichier vers ${tierLabels[targetTier]} ?`)) return;
+    try {
+        const res = await fetch(`${API_URL}/files/${encodeURIComponent(blobName)}/archive`, {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tier: targetTier, reason: 'Manuel depuis admin' })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showNotification(`Tier changé vers ${tierLabels[targetTier]}`, 'success');
+            loadFiles();
+        } else {
+            showNotification('Erreur: ' + (data.error || 'Échec'), 'error');
+        }
+    } catch (e) { showNotification('Erreur: ' + e.message, 'error'); }
+};
 
 window.deleteFile = async (blobName) => {
     if (!await showConfirmDialog('Supprimer le fichier', 'Supprimer ce fichier ?')) return;
@@ -541,23 +873,159 @@ async function loadTeams() {
             return;
         }
         container.innerHTML = `<table class="data-table">
-            <thead><tr><th>Nom</th><th>Nom affiche</th><th>Membres</th><th>Fichiers</th><th>Taille</th><th>Creee le</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Nom</th><th>Nom affiché</th><th>Membres</th><th>Fichiers</th><th>Taille</th><th>Créée le</th><th style="width:50px;"></th></tr></thead>
             <tbody>${res.teams.map(t => `<tr>
                 <td><strong>${escapeHtml(t.name)}</strong></td>
                 <td>${escapeHtml(t.display_name)}</td>
-                <td>${t.stats?.memberCount || 0}</td>
+                <td><span class="badge-info">${t.stats?.memberCount || 0}</span></td>
                 <td>${t.stats?.fileCount || 0}</td>
                 <td>${formatBytes(t.stats?.totalSize || 0)}</td>
                 <td>${formatDate(t.created_at)}</td>
-                <td><div class="table-actions">
-                    <button class="btn btn-small btn-secondary" onclick="viewTeam(${t.id})"><i class="fas fa-eye"></i></button>
-                    <button class="btn btn-small btn-danger" onclick="deleteTeam(${t.id})"><i class="fas fa-trash"></i></button>
-                </div></td>
+                <td style="position:relative;">
+                    <button class="btn btn-small btn-secondary" onclick="toggleTeamMenu(event, ${t.id})" style="border:none;background:none;font-size:1.2rem;cursor:pointer;padding:4px 8px;" title="Actions">⋯</button>
+                    <div id="teamMenu-${t.id}" class="team-context-menu" style="display:none;position:absolute;right:0;top:100%;background:#fff;border:1px solid #e0e0e0;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);z-index:100;min-width:200px;overflow:hidden;">
+                        <div onclick="viewTeam(${t.id})" class="ctx-item" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:0.9rem;transition:background 0.15s;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='#fff'">
+                            <i class="fas fa-eye" style="color:#1565C0;width:16px;"></i> Voir les détails
+                        </div>
+                        <div onclick="openAddMember(${t.id}, '${escapeHtml(t.display_name || t.name)}')" class="ctx-item" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:0.9rem;transition:background 0.15s;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='#fff'">
+                            <i class="fas fa-user-plus" style="color:#2e7d32;width:16px;"></i> Ajouter un membre
+                        </div>
+                        <div onclick="editTeam(${t.id}, '${escapeHtml(t.name)}', '${escapeHtml(t.display_name || '')}', '${escapeHtml(t.description || '')}')" class="ctx-item" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:0.9rem;transition:background 0.15s;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='#fff'">
+                            <i class="fas fa-pen" style="color:#e65100;width:16px;"></i> Modifier l'équipe
+                        </div>
+                        <div onclick="manageTeamFiles(${t.id}, '${escapeHtml(t.display_name || t.name)}')" class="ctx-item" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:0.9rem;transition:background 0.15s;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='#fff'">
+                            <i class="fas fa-folder-open" style="color:#6a1b9a;width:16px;"></i> Voir les fichiers
+                        </div>
+                        <div style="border-top:1px solid #eee;"></div>
+                        <div onclick="deleteTeam(${t.id})" class="ctx-item" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:0.9rem;color:#c62828;transition:background 0.15s;" onmouseover="this.style.background='#fce4ec'" onmouseout="this.style.background='#fff'">
+                            <i class="fas fa-trash" style="width:16px;"></i> Supprimer l'équipe
+                        </div>
+                    </div>
+                </td>
             </tr>`).join('')}</tbody></table>`;
     } catch (e) {
         container.innerHTML = '<p class="loading" style="color: var(--danger-color);">Erreur chargement</p>';
     }
 }
+
+// Toggle team context menu
+window.toggleTeamMenu = (event, teamId) => {
+    event.stopPropagation();
+    // Close all other menus
+    document.querySelectorAll('.team-context-menu').forEach(m => {
+        if (m.id !== `teamMenu-${teamId}`) m.style.display = 'none';
+    });
+    const menu = document.getElementById(`teamMenu-${teamId}`);
+    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+};
+
+// Close menus on click outside
+document.addEventListener('click', () => {
+    document.querySelectorAll('.team-context-menu').forEach(m => m.style.display = 'none');
+});
+
+// Add member to team
+window.openAddMember = async (teamId, teamName) => {
+    document.querySelectorAll('.team-context-menu').forEach(m => m.style.display = 'none');
+    try {
+        const usersRes = await apiRequest('/admin/users');
+        const teamRes = await apiRequest(`/teams/${teamId}`);
+        const existingIds = (teamRes.team?.members || []).map(m => m.id || m.user_id);
+        const available = (usersRes.users || []).filter(u => !existingIds.includes(u.id) && u.is_active !== 0);
+        
+        if (available.length === 0) {
+            showNotification('Tous les utilisateurs sont déjà membres de cette équipe', 'info');
+            return;
+        }
+        
+        const html = `
+            <div style="padding:8px 0;">
+                <p style="margin-bottom:12px;">Ajouter un membre à <strong>${escapeHtml(teamName)}</strong></p>
+                <select id="addMemberSelect" class="form-input" style="width:100%;margin-bottom:12px;">
+                    ${available.map(u => `<option value="${u.id}">${escapeHtml(u.username)} — ${escapeHtml(u.name || u.full_name || '')}</option>`).join('')}
+                </select>
+                <select id="addMemberRole" class="form-input" style="width:100%;margin-bottom:16px;">
+                    <option value="member">Membre</option>
+                    <option value="admin">Admin équipe</option>
+                </select>
+                <button class="btn btn-primary" onclick="confirmAddMember(${teamId})" style="width:100%;">
+                    <i class="fas fa-user-plus"></i> Ajouter
+                </button>
+            </div>`;
+        document.getElementById('teamDetailTitle').textContent = `Ajouter un membre`;
+        document.getElementById('teamDetailBody').innerHTML = html;
+        showModal('teamDetailModal');
+    } catch (e) { showNotification('Erreur: ' + e.message, 'error'); }
+};
+
+window.confirmAddMember = async (teamId) => {
+    const userId = document.getElementById('addMemberSelect').value;
+    const role = document.getElementById('addMemberRole').value;
+    try {
+        await apiRequest(`/teams/${teamId}/members`, 'POST', { userId: parseInt(userId), role });
+        showNotification('Membre ajouté', 'success');
+        closeModal('teamDetailModal');
+        loadTeams();
+    } catch (e) { showNotification('Erreur: ' + e.message, 'error'); }
+};
+
+// Edit team
+window.editTeam = (teamId, name, displayName, description) => {
+    document.querySelectorAll('.team-context-menu').forEach(m => m.style.display = 'none');
+    const html = `
+        <div style="padding:8px 0;">
+            <label style="font-weight:600;display:block;margin-bottom:4px;">Nom</label>
+            <input type="text" id="editTeamName" class="form-input" value="${escapeHtml(name)}" style="width:100%;margin-bottom:12px;">
+            <label style="font-weight:600;display:block;margin-bottom:4px;">Nom affiché</label>
+            <input type="text" id="editTeamDisplay" class="form-input" value="${escapeHtml(displayName)}" style="width:100%;margin-bottom:12px;">
+            <label style="font-weight:600;display:block;margin-bottom:4px;">Description</label>
+            <textarea id="editTeamDesc" class="form-input" rows="3" style="width:100%;margin-bottom:16px;">${escapeHtml(description)}</textarea>
+            <button class="btn btn-primary" onclick="confirmEditTeam(${teamId})" style="width:100%;">
+                <i class="fas fa-save"></i> Enregistrer
+            </button>
+        </div>`;
+    document.getElementById('teamDetailTitle').textContent = 'Modifier l\'équipe';
+    document.getElementById('teamDetailBody').innerHTML = html;
+    showModal('teamDetailModal');
+};
+
+window.confirmEditTeam = async (teamId) => {
+    const name = document.getElementById('editTeamName').value.trim();
+    const displayName = document.getElementById('editTeamDisplay').value.trim();
+    const description = document.getElementById('editTeamDesc').value.trim();
+    try {
+        await apiRequest(`/teams/${teamId}`, 'PUT', { name, display_name: displayName, description });
+        showNotification('Équipe modifiée', 'success');
+        closeModal('teamDetailModal');
+        loadTeams();
+    } catch (e) { showNotification('Erreur: ' + e.message, 'error'); }
+};
+
+// View team files
+window.manageTeamFiles = async (teamId, teamName) => {
+    document.querySelectorAll('.team-context-menu').forEach(m => m.style.display = 'none');
+    try {
+        const res = await fetch(`${API_URL}/files?teamId=${teamId}`, { headers: getAuthHeaders() });
+        const data = await res.json();
+        const files = data.files || [];
+        const html = `
+            <div style="padding:8px 0;">
+                <p style="margin-bottom:12px;"><strong>${files.length}</strong> fichier(s) dans <strong>${escapeHtml(teamName)}</strong></p>
+                ${files.length > 0 ? `<table class="data-table">
+                    <thead><tr><th>Fichier</th><th>Taille</th><th>Type</th><th>Uploadé le</th></tr></thead>
+                    <tbody>${files.map(f => `<tr>
+                        <td>${escapeHtml(f.originalName || f.name)}</td>
+                        <td>${formatBytes(f.size)}</td>
+                        <td>${f.contentType || '—'}</td>
+                        <td>${formatDate(f.uploadedAt)}</td>
+                    </tr>`).join('')}</tbody>
+                </table>` : '<p style="color:#888;text-align:center;padding:20px;">Aucun fichier dans cette équipe</p>'}
+            </div>`;
+        document.getElementById('teamDetailTitle').textContent = `Fichiers — ${escapeHtml(teamName)}`;
+        document.getElementById('teamDetailBody').innerHTML = html;
+        showModal('teamDetailModal');
+    } catch (e) { showNotification('Erreur: ' + e.message, 'error'); }
+};
 
 window.viewTeam = async (teamId) => {
     try {
@@ -574,18 +1042,34 @@ window.viewTeam = async (teamId) => {
                 <p><strong>Creee le :</strong> ${formatDate(t.created_at)}</p>
                 <p><strong>Fichiers :</strong> ${t.stats?.fileCount || 0} (${formatBytes(t.stats?.totalSize || 0)})</p>
             </div>
-            <h4>Membres (${members.length})</h4>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <h4 style="margin:0;">Membres (${members.length})</h4>
+                <button class="btn btn-small btn-primary" onclick="closeModal('teamDetailModal');openAddMember(${teamId}, '${escapeHtml(t.display_name || t.name)}')">
+                    <i class="fas fa-user-plus"></i> Ajouter
+                </button>
+            </div>
             ${members.length > 0 ? `<table class="data-table">
-                <thead><tr><th>Username</th><th>Nom</th><th>Email</th><th>Role</th><th>Rejoint le</th></tr></thead>
+                <thead><tr><th>Username</th><th>Nom</th><th>Email</th><th>Rôle</th><th>Rejoint le</th><th></th></tr></thead>
                 <tbody>${members.map(m => `<tr>
                     <td><strong>${escapeHtml(m.username)}</strong></td>
                     <td>${escapeHtml(m.full_name || '-')}</td>
                     <td>${escapeHtml(m.email || '-')}</td>
                     <td><span class="badge-info">${m.role}</span></td>
                     <td>${formatDate(m.joined_at)}</td>
-                </tr>`).join('')}</tbody></table>` : '<p style="color:#888;">Aucun membre</p>'}`;
+                    <td><button class="btn btn-small btn-danger" onclick="removeMember(${teamId}, ${m.id || m.user_id})" title="Retirer"><i class="fas fa-user-minus"></i></button></td>
+                </tr>`).join('')}</tbody></table>` : '<p style="color:#888;text-align:center;padding:16px;">Aucun membre — cliquez sur "Ajouter" pour commencer</p>'}`;
         showModal('teamDetailModal');
     } catch (e) { showNotification('Erreur chargement equipe', 'error'); }
+};
+
+window.removeMember = async (teamId, userId) => {
+    if (!confirm('Retirer ce membre de l\'équipe ?')) return;
+    try {
+        await apiRequest(`/teams/${teamId}/members/${userId}`, 'DELETE');
+        showNotification('Membre retiré', 'success');
+        viewTeam(teamId); // Refresh the modal
+        loadTeams();
+    } catch (e) { showNotification('Erreur: ' + e.message, 'error'); }
 };
 
 window.deleteTeam = async (teamId) => {
@@ -672,8 +1156,8 @@ async function loadUsers() {
         if (users.length === 0) { container.innerHTML = '<p class="loading">Aucun utilisateur</p>'; return; }
 
         const roleBadge = (role) => {
-            const colors = { admin: 'background:rgba(239,68,68,0.1);color:#ef4444;', april_user: 'background:rgba(245,158,11,0.1);color:#f59e0b;', user: 'background:rgba(59,130,246,0.1);color:#3b82f6;' };
-            const labels = { admin: 'Admin', april_user: 'Responsable', user: 'Utilisateur' };
+            const colors = { admin: 'background:rgba(239,68,68,0.1);color:#ef4444;', com: 'background:rgba(245,158,11,0.1);color:#f59e0b;', user: 'background:rgba(59,130,246,0.1);color:#3b82f6;', viewer: 'background:rgba(107,114,128,0.1);color:#6b7280;' };
+            const labels = { admin: 'Admin', com: 'COM', user: 'Utilisateur', viewer: 'Lecteur' };
             return `<span class="status-badge" style="${colors[role] || colors.user}">${labels[role] || role}</span>`;
         };
 
@@ -943,17 +1427,19 @@ function renderGuestsTable(guests) {
         <td>${getGuestStatusBadge(g)}</td>
         <td><div class="table-actions">
             <button class="btn btn-icon btn-small" onclick="viewGuestDetails('${g.guest_id}')"><i class="fas fa-eye"></i></button>
-            ${g.is_active === 1 ? `<button class="btn btn-icon btn-small btn-warning" onclick="disableGuest('${g.guest_id}', '${escapeHtml(g.email)}')"><i class="fas fa-ban"></i></button>` : ''}
+            ${g.pending_approval ? `<button class="btn btn-small btn-success" onclick="approveGuest('${g.guest_id}', '${escapeHtml(g.email)}')"><i class="fas fa-check"></i> Approuver</button>` : ''}
+            ${g.is_active === 1 && !g.pending_approval ? `<button class="btn btn-icon btn-small btn-warning" onclick="disableGuest('${g.guest_id}', '${escapeHtml(g.email)}')"><i class="fas fa-ban"></i></button>` : ''}
             <button class="btn btn-icon btn-small btn-danger" onclick="deleteGuest('${g.guest_id}', '${escapeHtml(g.email)}')"><i class="fas fa-trash"></i></button>
         </div></td>
     </tr>`).join('');
 }
 
 function getGuestStatusBadge(g) {
-    if (!g.is_active) return '<span class="badge-danger">Desactive</span>';
-    if (g.isExpired) return '<span class="badge-danger">Expire</span>';
-    if (g.hoursRemaining <= 24) return '<span class="badge-warning">Expire bientot</span>';
-    return '<span class="badge-success">Actif</span>';
+    if (g.pending_approval) return '<span class="badge-warning">⏳ Approbation</span>';
+    if (!g.is_active) return '<span class="badge-danger">Désactivé</span>';
+    if (g.isExpired) return '<span class="badge-danger">Expiré</span>';
+    if (g.hoursRemaining <= 24) return '<span class="badge-warning">Expire bientôt</span>';
+    return '<span class="badge-success">Actif</span>' + (g.is_unlimited ? ' <span class="badge-info">♾️</span>' : '');
 }
 
 function formatTimeRemaining(g) {
@@ -1012,6 +1498,19 @@ window.viewGuestDetails = (guestId) => {
             <div><h4 style="margin-bottom: 1rem;"><i class="fas fa-file"></i> Fichiers: ${g.file_count || 0}</h4></div>
         </div>`;
     showModal('guestDetailsModal');
+};
+
+window.approveGuest = async (guestId, email) => {
+    if (!confirm(`Approuver l'accès illimité pour ${email} ?`)) return;
+    try {
+        const res = await apiRequest(`/admin/guest-accounts/${guestId}/approve`, 'PUT');
+        if (res.success) {
+            showNotification('Invité approuvé — accès illimité activé', 'success');
+            loadGuests();
+        } else {
+            showNotification(res.error || 'Erreur', 'error');
+        }
+    } catch (e) { showNotification('Erreur: ' + e.message, 'error'); }
 };
 
 window.disableGuest = async (guestId, email) => {
@@ -1176,6 +1675,9 @@ async function loadSettings() {
         if (s.notifyUploads) document.getElementById('notifyUploads').checked = s.notifyUploads.value === 'true';
         if (s.notifyShares) document.getElementById('notifyShares').checked = s.notifyShares.value === 'true';
         if (s.notifyQuota) document.getElementById('notifyQuota').checked = s.notifyQuota.value === 'true';
+        if (s.virusScanEnabled) document.getElementById('virusScanEnabled').checked = s.virusScanEnabled.value === 'true';
+        if (s.virusScanOnUpload) document.getElementById('virusScanOnUpload').checked = s.virusScanOnUpload.value === 'true';
+        if (s.virusQuarantineNotifyAdmin) document.getElementById('virusQuarantineNotifyAdmin').checked = s.virusQuarantineNotifyAdmin.value === 'true';
     } catch (e) { console.error('Settings error:', e); }
 }
 
@@ -1193,7 +1695,10 @@ async function saveSettings() {
             enableAudit: document.getElementById('enableAudit').checked.toString(),
             notifyUploads: document.getElementById('notifyUploads').checked.toString(),
             notifyShares: document.getElementById('notifyShares').checked.toString(),
-            notifyQuota: document.getElementById('notifyQuota').checked.toString()
+            notifyQuota: document.getElementById('notifyQuota').checked.toString(),
+            virusScanEnabled: document.getElementById('virusScanEnabled').checked.toString(),
+            virusScanOnUpload: document.getElementById('virusScanOnUpload').checked.toString(),
+            virusQuarantineNotifyAdmin: document.getElementById('virusQuarantineNotifyAdmin').checked.toString()
         });
         showNotification('Parametres enregistres', 'success');
     } catch (e) { showNotification('Erreur sauvegarde', 'error'); }
@@ -1206,6 +1711,365 @@ async function resetSettings() {
         await loadSettings();
         showNotification('Parametres reinitialises', 'success');
     } catch (e) { showNotification('Erreur', 'error'); }
+}
+
+// ============================================
+// AUTH SETTINGS
+// ============================================
+
+function toggleEntraConfig() {
+    const mode = document.querySelector('input[name="authMode"]:checked')?.value || 'local';
+    const section = document.getElementById('entraConfigSection');
+    if (section) {
+        section.style.display = (mode === 'entra' || mode === 'hybrid') ? 'block' : 'none';
+    }
+}
+
+// ============================================
+// EMAIL CONFIGURATION
+// ============================================
+
+// Provider presets
+const EMAIL_PROVIDER_PRESETS = {
+    smtp: { host: '', port: 587, secure: false },
+    ovh: { host: 'ssl0.ovh.net', port: 465, secure: true },
+    ionos: { host: 'smtp.ionos.fr', port: 465, secure: true },
+    gandi: { host: 'mail.gandi.net', port: 465, secure: true },
+    infomaniak: { host: 'mail.infomaniak.com', port: 465, secure: true },
+    gmail: { host: 'smtp.gmail.com', port: 587, secure: false },
+    yahoo: { host: 'smtp.mail.yahoo.com', port: 465, secure: true },
+    outlook: { host: 'smtp.office365.com', port: 587, secure: false },
+    zoho: { host: 'smtp.zoho.eu', port: 465, secure: true },
+    protonmail: { host: '127.0.0.1', port: 1025, secure: false },
+    free: { host: 'smtp.free.fr', port: 465, secure: true },
+    orange: { host: 'smtp.orange.fr', port: 465, secure: true },
+    sfr: { host: 'smtp.sfr.fr', port: 465, secure: true },
+    laposte: { host: 'smtp.laposte.net', port: 465, secure: true },
+    sendgrid: { host: 'smtp.sendgrid.net', port: 587, secure: false },
+    brevo: { host: 'smtp-relay.brevo.com', port: 587, secure: false },
+    ses: { host: 'email-smtp.eu-west-3.amazonaws.com', port: 587, secure: false },
+    mailjet: { host: 'in-v3.mailjet.com', port: 587, secure: false },
+    postmark: { host: 'smtp.postmarkapp.com', port: 587, secure: false },
+    sparkpost: { host: 'smtp.sparkpostmail.com', port: 587, secure: false },
+    mailgun: { host: 'smtp.mailgun.org', port: 587, secure: false }
+};
+
+function onEmailProviderChange() {
+    const provider = document.getElementById('emailProvider').value;
+    const preset = EMAIL_PROVIDER_PRESETS[provider];
+    if (preset && provider !== 'mailjet') {
+        if (preset.host) document.getElementById('smtpHost').value = preset.host;
+        if (preset.port) document.getElementById('smtpPort').value = preset.port;
+        document.getElementById('smtpSecure').checked = preset.secure;
+    }
+    // Show/hide mailjet tab based on provider
+    if (provider === 'mailjet') {
+        showEmailTab('mailjet');
+    } else {
+        showEmailTab('smtp');
+    }
+}
+
+function showEmailTab(tab) {
+    document.getElementById('emailPanelSmtp').style.display = tab === 'smtp' ? '' : 'none';
+    document.getElementById('emailPanelMailjet').style.display = tab === 'mailjet' ? '' : 'none';
+    document.querySelectorAll('.emailTab').forEach(b => b.classList.remove('btn-primary'));
+    document.querySelectorAll('.emailTab').forEach(b => b.classList.add('btn-secondary'));
+    const activeBtn = document.getElementById('emailTab' + tab.charAt(0).toUpperCase() + tab.slice(1));
+    if (activeBtn) { activeBtn.classList.remove('btn-secondary'); activeBtn.classList.add('btn-primary'); }
+}
+
+async function loadEmailConfig() {
+    try {
+        const res = await fetch(`${API_URL}/admin/email/config`, { headers: getAuthHeaders() });
+        const data = await res.json();
+        if (data.success) {
+            document.getElementById('emailProvider').value = data.config.provider || 'smtp';
+            document.getElementById('smtpHost').value = data.config.host || '';
+            document.getElementById('smtpPort').value = data.config.port || '';
+            document.getElementById('smtpUser').value = data.config.user || '';
+            document.getElementById('smtpPassword').value = data.config.password || '';
+            document.getElementById('smtpFromEmail').value = data.config.fromEmail || '';
+            document.getElementById('smtpFromName').value = data.config.fromName || '';
+            document.getElementById('smtpSecure').checked = data.config.secure;
+            document.getElementById('emailEnabled').checked = data.config.enabled;
+            // Mailjet fields
+            document.getElementById('mailjetApiKey').value = data.config.mailjetApiKey || '';
+            document.getElementById('mailjetSecretKey').value = data.config.mailjetSecretKey || '';
+            document.getElementById('mailjetFromEmail').value = data.config.fromEmail || '';
+            document.getElementById('mailjetFromName').value = data.config.fromName || '';
+            document.getElementById('mailjetEnabled').checked = data.config.enabled;
+            // Show correct tab
+            if (data.config.provider === 'mailjet') showEmailTab('mailjet');
+            else showEmailTab('smtp');
+        }
+    } catch(e) { console.error('Email config load error:', e); }
+}
+
+async function saveEmailConfig() {
+    const provider = document.getElementById('emailProvider').value;
+    const config = {
+        provider,
+        host: document.getElementById('smtpHost').value,
+        port: parseInt(document.getElementById('smtpPort').value),
+        secure: document.getElementById('smtpSecure').checked,
+        user: document.getElementById('smtpUser').value,
+        password: document.getElementById('smtpPassword').value,
+        fromEmail: document.getElementById('smtpFromEmail').value,
+        fromName: document.getElementById('smtpFromName').value,
+        enabled: document.getElementById('emailEnabled').checked
+    };
+    await fetch(`${API_URL}/admin/email/config`, {
+        method: 'PUT',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+    });
+    showNotification('Configuration email SMTP enregistrée', 'success');
+}
+
+async function saveMailjetConfig() {
+    const config = {
+        provider: 'mailjet',
+        mailjetApiKey: document.getElementById('mailjetApiKey').value,
+        mailjetSecretKey: document.getElementById('mailjetSecretKey').value,
+        fromEmail: document.getElementById('mailjetFromEmail').value,
+        fromName: document.getElementById('mailjetFromName').value,
+        enabled: document.getElementById('mailjetEnabled').checked
+    };
+    document.getElementById('emailProvider').value = 'mailjet';
+    await fetch(`${API_URL}/admin/email/config`, {
+        method: 'PUT',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+    });
+    showNotification('Configuration Mailjet enregistrée', 'success');
+}
+
+async function testEmailConnection() {
+    const resultDiv = document.getElementById('emailTestResult');
+    resultDiv.innerHTML = '<span style="color:#666;">⏳ Test en cours...</span>';
+    const res = await fetch(`${API_URL}/admin/email/test`, { method: 'POST', headers: getAuthHeaders() });
+    const data = await res.json();
+    resultDiv.innerHTML = data.success 
+        ? '<span style="color:#2e7d32;">✅ Connexion SMTP réussie</span>'
+        : `<span style="color:#c62828;">❌ Échec : ${data.error}</span>`;
+}
+
+async function testMailjetConnection() {
+    // Save first so the server has latest keys
+    await saveMailjetConfig();
+    const resultDiv = document.getElementById('mailjetTestResult');
+    resultDiv.innerHTML = '<span style="color:#666;">⏳ Test en cours...</span>';
+    const res = await fetch(`${API_URL}/admin/email/test`, { method: 'POST', headers: getAuthHeaders() });
+    const data = await res.json();
+    resultDiv.innerHTML = data.success 
+        ? `<span style="color:#2e7d32;">✅ ${data.message || 'Connexion Mailjet réussie'}</span>`
+        : `<span style="color:#c62828;">❌ Échec : ${data.error}</span>`;
+}
+
+async function sendTestEmail() {
+    const to = prompt('Adresse email de test :');
+    if (!to) return;
+    const provider = document.getElementById('emailProvider').value;
+    const resultDiv = document.getElementById(provider === 'mailjet' ? 'mailjetTestResult' : 'emailTestResult');
+    resultDiv.innerHTML = '<span style="color:#666;">📤 Envoi en cours...</span>';
+    const res = await fetch(`${API_URL}/admin/email/send-test`, {
+        method: 'POST',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to })
+    });
+    const data = await res.json();
+    if (data.success) {
+        resultDiv.innerHTML = `<div style="background:#e8f5e9;padding:12px;border-radius:6px;margin-top:8px;">
+            <span style="color:#2e7d32;">✅ Email envoyé à <strong>${escapeHtml(to)}</strong></span>
+            ${data.messageId ? `<br><small style="color:#666;">Message ID: ${escapeHtml(String(data.messageId))}</small>` : ''}
+            ${data.provider ? `<br><small style="color:#666;">Provider: ${escapeHtml(data.provider)}</small>` : ''}
+        </div>`;
+    } else {
+        resultDiv.innerHTML = `<div style="background:#ffebee;padding:12px;border-radius:6px;margin-top:8px;">
+            <span style="color:#c62828;">❌ <strong>Échec de l'envoi</strong></span>
+            <br><span style="color:#c62828;">${escapeHtml(data.error || 'Erreur inconnue')}</span>
+            ${data.details ? `<br><small style="color:#888;margin-top:6px;display:block;word-break:break-all;">${escapeHtml(data.details)}</small>` : ''}
+            ${data.provider ? `<br><small style="color:#888;">Provider: ${escapeHtml(data.provider)}</small>` : ''}
+        </div>`;
+    }
+}
+
+async function loadAuthSettings() {
+    try {
+        const res = await apiRequest('/settings/auth');
+        if (!res.success) return;
+        const auth = res.auth;
+
+        // Set radio
+        const radio = document.getElementById(`authMode${auth.authMode === 'entra' ? 'Entra' : auth.authMode === 'hybrid' ? 'Hybrid' : 'Local'}`);
+        if (radio) radio.checked = true;
+
+        if (auth.entraTenantId) document.getElementById('entraTenantId').value = auth.entraTenantId;
+        if (auth.entraClientId) document.getElementById('entraClientId').value = auth.entraClientId;
+        if (auth.entraRedirectUri) document.getElementById('entraRedirectUri').value = auth.entraRedirectUri;
+        else document.getElementById('entraRedirectUri').value = window.location.origin + '/api/auth/callback';
+
+        // Secret placeholder
+        if (auth.entraClientSecretSet) {
+            document.getElementById('entraClientSecret').placeholder = '••••••• (deja configure)';
+        }
+
+        toggleEntraConfig();
+    } catch (e) { console.error('Auth settings error:', e); }
+}
+
+async function saveAuthSettings() {
+    const mode = document.querySelector('input[name="authMode"]:checked')?.value || 'local';
+    const payload = {
+        authMode: mode,
+        entraTenantId: document.getElementById('entraTenantId').value.trim(),
+        entraClientId: document.getElementById('entraClientId').value.trim(),
+        entraClientSecret: document.getElementById('entraClientSecret').value.trim(),
+        entraRedirectUri: document.getElementById('entraRedirectUri').value.trim()
+    };
+    try {
+        await apiRequest('/settings/auth', 'PUT', payload);
+        showNotification('Configuration authentification enregistree', 'success');
+        loadAuthSettings();
+    } catch (e) { showNotification(e.message || 'Erreur sauvegarde auth', 'error'); }
+}
+
+async function testEntraConnection() {
+    const resultEl = document.getElementById('entraTestResult');
+    resultEl.style.display = 'block';
+    resultEl.style.background = '#f0f0f0';
+    resultEl.style.color = '#333';
+    resultEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Test en cours...';
+
+    try {
+        const res = await apiRequest('/settings/auth/test', 'POST', {
+            entraTenantId: document.getElementById('entraTenantId').value.trim(),
+            entraClientId: document.getElementById('entraClientId').value.trim(),
+            entraClientSecret: document.getElementById('entraClientSecret').value.trim()
+        });
+        if (res.success) {
+            resultEl.style.background = '#d4edda';
+            resultEl.style.color = '#155724';
+            resultEl.innerHTML = '<i class="fas fa-check-circle"></i> ' + (res.message || 'Connexion reussie !');
+        } else {
+            resultEl.style.background = '#f8d7da';
+            resultEl.style.color = '#721c24';
+            resultEl.innerHTML = '<i class="fas fa-times-circle"></i> ' + (res.error || 'Echec');
+        }
+    } catch (e) {
+        resultEl.style.background = '#f8d7da';
+        resultEl.style.color = '#721c24';
+        resultEl.innerHTML = '<i class="fas fa-times-circle"></i> ' + (e.message || 'Erreur de connexion');
+    }
+}
+
+// ============================================
+// ENTRA ROLE MAPPINGS
+// ============================================
+
+async function loadEntraMappings() {
+    try {
+        const res = await apiRequest('/admin/entra/role-mappings');
+        if (!res.success) return;
+
+        // Update sync settings UI
+        const syncCheckbox = document.getElementById('entraGroupSyncEnabled');
+        if (syncCheckbox) syncCheckbox.checked = res.syncEnabled !== false;
+        const defaultRoleSelect = document.getElementById('entraDefaultRole');
+        if (defaultRoleSelect) defaultRoleSelect.value = res.defaultRole || 'viewer';
+
+        const tbody = document.getElementById('entraMappingsBody');
+        if (!tbody) return;
+
+        const roleLabels = { admin: 'Administrateur', com: 'COM', user: 'Utilisateur', viewer: 'Lecteur' };
+        const roleColors = { admin: '#ef4444', com: '#f59e0b', user: '#3b82f6', viewer: '#6b7280' };
+
+        tbody.innerHTML = res.mappings.map(m => `
+            <tr>
+                <td><span class="status-badge" style="background:${roleColors[m.role]}20;color:${roleColors[m.role]};">${roleLabels[m.role] || m.role}</span></td>
+                <td><input type="text" id="entraGroupId_${m.role}" value="${escapeHtml(m.entra_group_id || '')}" placeholder="xxxxxxxx-xxxx-..." style="width:100%;padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:0.85rem;font-family:monospace;"></td>
+                <td><input type="text" id="entraGroupName_${m.role}" value="${escapeHtml(m.entra_group_name || '')}" placeholder="Nom du groupe" style="width:100%;padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:0.85rem;"></td>
+                <td style="text-align:center;font-weight:600;color:#666;">${m.priority}</td>
+                <td><button class="btn btn-primary btn-small" onclick="saveEntraMapping('${m.role}')"><i class="fas fa-save"></i></button></td>
+            </tr>
+        `).join('');
+    } catch (e) {
+        console.error('Entra mappings error:', e);
+    }
+}
+
+window.saveEntraMapping = async (role) => {
+    const groupId = document.getElementById(`entraGroupId_${role}`)?.value.trim() || '';
+    const groupName = document.getElementById(`entraGroupName_${role}`)?.value.trim() || '';
+    try {
+        await apiRequest(`/admin/entra/role-mappings/${role}`, 'PUT', {
+            entra_group_id: groupId,
+            entra_group_name: groupName
+        });
+        showNotification(`Mapping "${role}" mis à jour`, 'success');
+    } catch (e) {
+        showNotification(e.message || 'Erreur sauvegarde mapping', 'error');
+    }
+};
+
+async function saveEntraSyncSettings() {
+    const syncEnabled = document.getElementById('entraGroupSyncEnabled')?.checked ?? true;
+    const defaultRole = document.getElementById('entraDefaultRole')?.value || 'viewer';
+    try {
+        await apiRequest('/admin/entra/sync-settings', 'PUT', { syncEnabled, defaultRole });
+        showNotification('Paramètres de synchronisation enregistrés', 'success');
+    } catch (e) {
+        showNotification(e.message || 'Erreur', 'error');
+    }
+}
+
+async function fetchEntraGroups() {
+    const container = document.getElementById('entraGroupsList');
+    if (!container) return;
+    container.style.display = 'block';
+    container.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Chargement des groupes...';
+    try {
+        const res = await apiRequest('/admin/entra/groups');
+        if (!res.success) {
+            container.innerHTML = `<span style="color:#ef4444;"><i class="fas fa-times-circle"></i> ${escapeHtml(res.error || 'Erreur')}</span>`;
+            return;
+        }
+        if (res.groups.length === 0) {
+            container.innerHTML = '<span style="color:#888;">Aucun groupe trouvé</span>';
+            return;
+        }
+        container.innerHTML = '<strong>Groupes Entra ID disponibles :</strong><br>' +
+            res.groups.map(g => `<div style="margin:4px 0;padding:4px 8px;background:white;border-radius:4px;display:flex;justify-content:space-between;align-items:center;">
+                <span><strong>${escapeHtml(g.displayName)}</strong> <code style="font-size:0.8rem;color:#666;">${g.id}</code></span>
+                <button class="btn btn-secondary" style="padding:2px 8px;font-size:0.75rem;" onclick="navigator.clipboard.writeText('${g.id}');showNotification('ID copié','success')"><i class="fas fa-copy"></i></button>
+            </div>`).join('');
+    } catch (e) {
+        container.innerHTML = `<span style="color:#ef4444;"><i class="fas fa-times-circle"></i> ${escapeHtml(e.message)}</span>`;
+    }
+}
+
+async function testEntraMapping() {
+    const email = document.getElementById('testMappingEmail')?.value.trim();
+    const resultEl = document.getElementById('testMappingResult');
+    if (!email || !resultEl) return;
+    resultEl.style.display = 'block';
+    resultEl.style.background = '#f0f0f0';
+    resultEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Test en cours...';
+    try {
+        const res = await apiRequest('/admin/entra/test-mapping', 'POST', { email });
+        if (!res.success) {
+            resultEl.style.background = '#f8d7da'; resultEl.style.color = '#721c24';
+            resultEl.innerHTML = `<i class="fas fa-times-circle"></i> ${escapeHtml(res.error || 'Erreur')}`;
+            return;
+        }
+        const roleLabels = { admin: 'Administrateur', com: 'COM', user: 'Utilisateur', viewer: 'Lecteur' };
+        resultEl.style.background = '#d4edda'; resultEl.style.color = '#155724';
+        resultEl.innerHTML = `<i class="fas fa-check-circle"></i> <strong>${escapeHtml(email)}</strong> → Rôle : <strong>${roleLabels[res.mappedRole] || res.mappedRole}</strong> (${res.totalGroups} groupe(s) trouvé(s))`;
+    } catch (e) {
+        resultEl.style.background = '#f8d7da'; resultEl.style.color = '#721c24';
+        resultEl.innerHTML = `<i class="fas fa-times-circle"></i> ${escapeHtml(e.message)}`;
+    }
 }
 
 // ============================================
@@ -1230,12 +2094,39 @@ async function loadEmailDomains() {
     }
 }
 
+function formatCreationDate(d) {
+    if (!d.creation_date) return '—';
+    const date = new Date(d.creation_date);
+    const now = new Date();
+    const sixMonthsAgo = new Date(now);
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const dateStr = date.toLocaleDateString('fr-FR');
+    if (date > sixMonthsAgo) {
+        return `<span style="background: #EF4444; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem;" title="Créé le ${dateStr}">⚠ Domaine récent</span>`;
+    }
+    return `<span style="color: #10B981; font-size: 0.85rem;">${dateStr}</span>`;
+}
+
+function formatDmarcStatus(d) {
+    if (d.has_dmarc === 1) return '<i class="fas fa-shield-alt" style="color: #10B981;" title="DMARC configuré"></i>';
+    if (d.has_dmarc === 0) return '<i class="fas fa-exclamation-triangle" style="color: #F59E0B;" title="Pas de DMARC — risque de phishing"></i>';
+    return '<i class="fas fa-question-circle" style="color: #9CA3AF;" title="Non vérifié"></i>';
+}
+
+function getDomainLogo(d) {
+    // BIMI logo (Verified Mark Certificate) en priorité, sinon favicon Google
+    const logoUrl = d.bimi_logo || `https://icons.duckduckgo.com/ip3/${encodeURIComponent(d.domain)}.ico`;
+    const title = d.bimi_logo ? 'Logo vérifié (BIMI/VMC)' : 'Favicon du domaine';
+    const badge = d.bimi_logo ? '<span style="position:absolute;bottom:-2px;right:-2px;width:12px;height:12px;border-radius:50%;background:#10B981;border:2px solid white;display:flex;align-items:center;justify-content:center;" title="Certificat VMC vérifié"><i class="fas fa-check" style="font-size:6px;color:white;"></i></span>' : '';
+    return `<span style="position:relative;display:inline-flex;margin-right:8px;vertical-align:middle;"><img src="${logoUrl}" alt="" style="width:24px;height:24px;border-radius:4px;vertical-align:middle;" onerror="this.style.display='none'" title="${title}">${badge}</span>`;
+}
+
 function renderEmailDomains() {
     const tbody = document.getElementById('emailDomainsTableBody');
     const pagination = document.getElementById('emailDomainsPagination');
 
     if (allDomains.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" style="color: var(--text-secondary); font-style: italic;">Aucun domaine configure</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="color: var(--text-secondary); font-style: italic;">Aucun domaine configure</td></tr>';
         pagination.style.display = 'none';
         return;
     }
@@ -1247,10 +2138,13 @@ function renderEmailDomains() {
 
     tbody.innerHTML = pageDomains.map(d => `
         <tr>
-            <td><strong style="color: var(--primary-color);">${escapeHtml(d.domain)}</strong></td>
+            <td>${getDomainLogo(d)}<strong style="color: var(--primary-color);">${escapeHtml(d.domain)}</strong></td>
+            <td>${formatCreationDate(d)}</td>
+            <td>${formatDmarcStatus(d)}</td>
             <td>${d.is_active === 1 ? '<span class="status-badge active">Actif</span>' : '<span class="status-badge expired">Inactif</span>'}</td>
             <td>${d.created_at ? new Date(d.created_at).toLocaleDateString('fr-FR') : '-'}</td>
             <td><div class="table-actions">
+                <button class="btn btn-secondary btn-small" onclick="recheckEmailDomain(${d.id})" title="Revérifier"><i class="fas fa-sync-alt"></i></button>
                 ${d.is_active === 1 ?
                     `<button class="btn btn-secondary btn-small" onclick="deactivateEmailDomain('${escapeHtml(d.domain)}')" title="Desactiver"><i class="fas fa-ban"></i></button>` :
                     `<button class="btn btn-primary btn-small" onclick="activateEmailDomain('${escapeHtml(d.domain)}')" title="Activer"><i class="fas fa-check"></i></button>`}
@@ -1310,6 +2204,50 @@ window.deactivateEmailDomain = async (domain) => {
     try { await apiRequest(`/admin/email-domains/${encodeURIComponent(domain)}/deactivate`, 'PUT'); showNotification('Desactive', 'success'); loadEmailDomains(); }
     catch (e) { showNotification('Erreur', 'error'); }
 };
+
+window.recheckEmailDomain = async (id) => {
+    try {
+        showNotification('Vérification en cours...', 'info');
+        await apiRequest(`/admin/email-domains/${id}/recheck`, 'POST');
+        showNotification('Vérification terminée', 'success');
+        loadEmailDomains();
+    } catch (e) { showNotification('Erreur vérification', 'error'); }
+};
+
+function initImportDomains() {
+    const btn = document.getElementById('importEmailDomainsBtn');
+    const fileInput = document.getElementById('importEmailDomainsFile');
+    if (!btn || !fileInput) return;
+
+    btn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        fileInput.value = '';
+
+        const text = await file.text();
+        const lines = text.split(/\r?\n/);
+        const domains = lines
+            .map(l => l.trim())
+            .filter(l => l && !l.startsWith('#'));
+
+        if (domains.length === 0) {
+            showNotification('Aucun domaine trouvé dans le fichier', 'error');
+            return;
+        }
+        if (domains.length > 100) {
+            showNotification('Maximum 100 domaines par import', 'error');
+            return;
+        }
+
+        try {
+            const res = await apiRequest('/admin/email-domains/bulk', 'POST', { domains });
+            showNotification(`${res.imported} domaine(s) importé(s), ${res.skipped} ignoré(s) (doublons)`, 'success');
+            loadEmailDomains();
+        } catch (e) { showNotification(e.message || 'Erreur import', 'error'); }
+    });
+}
+initImportDomains();
 
 // ============================================
 // MODALS
@@ -1452,9 +2390,9 @@ function initAITabs() {
     // Reindex button
     document.getElementById('reindexBtn')?.addEventListener('click', async () => {
         try {
-            const resp = await fetch(`${API_BASE_URL}/admin/ai/reindex`, {
+            const resp = await fetch(`${API_URL}/admin/ai/reindex`, {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${authToken}` }
+                headers: getAuthHeaders()
             });
             const data = await resp.json();
             if (data.success) {
@@ -1470,8 +2408,8 @@ function initAITabs() {
 
 async function loadAIDashboard() {
     try {
-        const resp = await fetch(`${API_BASE_URL}/admin/ai/dashboard`, {
-            headers: { 'Authorization': `Bearer ${authToken}` }
+        const resp = await fetch(`${API_URL}/admin/ai/dashboard`, {
+            headers: getAuthHeaders()
         });
         const data = await resp.json();
 
@@ -1509,8 +2447,8 @@ async function loadAIDashboard() {
 
 async function loadAIServices() {
     try {
-        const resp = await fetch(`${API_BASE_URL}/admin/settings`, {
-            headers: { 'Authorization': `Bearer ${authToken}` }
+        const resp = await fetch(`${API_URL}/admin/settings`, {
+            headers: getAuthHeaders()
         });
         const data = await resp.json();
         if (!data.success) return;
@@ -1551,11 +2489,11 @@ async function saveAIServices() {
     }
 
     try {
-        const resp = await fetch(`${API_BASE_URL}/admin/ai/settings`, {
+        const resp = await fetch(`${API_URL}/admin/ai/settings`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`
+                ...getAuthHeaders()
             },
             body: JSON.stringify(payload)
         });
@@ -1572,8 +2510,8 @@ async function saveAIServices() {
 
 async function loadAISettings() {
     try {
-        const resp = await fetch(`${API_BASE_URL}/admin/settings`, {
-            headers: { 'Authorization': `Bearer ${authToken}` }
+        const resp = await fetch(`${API_URL}/admin/settings`, {
+            headers: getAuthHeaders()
         });
         const data = await resp.json();
         if (!data.success) return;
@@ -1614,11 +2552,11 @@ async function saveAIParams() {
     }
 
     try {
-        const resp = await fetch(`${API_BASE_URL}/admin/ai/settings`, {
+        const resp = await fetch(`${API_URL}/admin/ai/settings`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`
+                ...getAuthHeaders()
             },
             body: JSON.stringify(payload)
         });
@@ -1642,8 +2580,8 @@ const SCAN_TYPE_LABELS = {
 
 async function loadAIScans() {
     try {
-        const resp = await fetch(`${API_BASE_URL}/admin/ai/scans`, {
-            headers: { 'Authorization': `Bearer ${authToken}` }
+        const resp = await fetch(`${API_URL}/admin/ai/scans`, {
+            headers: getAuthHeaders()
         });
         const data = await resp.json();
         if (!data.success) return;
@@ -1687,11 +2625,11 @@ async function loadAIScans() {
 
 async function updateScanSchedule(scanId, schedule) {
     try {
-        const resp = await fetch(`${API_BASE_URL}/admin/ai/scans/${scanId}`, {
+        const resp = await fetch(`${API_URL}/admin/ai/scans/${scanId}`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`
+                ...getAuthHeaders()
             },
             body: JSON.stringify({ schedule })
         });
@@ -1708,11 +2646,11 @@ async function updateScanSchedule(scanId, schedule) {
 
 async function updateScanEnabled(scanId, enabled) {
     try {
-        const resp = await fetch(`${API_BASE_URL}/admin/ai/scans/${scanId}`, {
+        const resp = await fetch(`${API_URL}/admin/ai/scans/${scanId}`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`
+                ...getAuthHeaders()
             },
             body: JSON.stringify({ isEnabled: enabled })
         });
@@ -1730,9 +2668,9 @@ async function updateScanEnabled(scanId, enabled) {
 async function runScanNow(scanId) {
     try {
         showNotification('Scan en cours de lancement...', 'info');
-        const resp = await fetch(`${API_BASE_URL}/admin/ai/scans/${scanId}/run`, {
+        const resp = await fetch(`${API_URL}/admin/ai/scans/${scanId}/run`, {
             method: 'POST',
-            headers: { 'Authorization': `Bearer ${authToken}` }
+            headers: getAuthHeaders()
         });
         const data = await resp.json();
         if (data.success) {
@@ -1770,8 +2708,8 @@ async function loadAIMap() {
 
     // Load geotagged files
     try {
-        const resp = await fetch(`${API_BASE_URL}/ai/map`, {
-            headers: { 'Authorization': `Bearer ${authToken}` }
+        const resp = await fetch(`${API_URL}/ai/map`, {
+            headers: getAuthHeaders()
         });
         const data = await resp.json();
         if (!data.success) return;
@@ -1809,4 +2747,712 @@ async function loadAIMap() {
     } catch (e) {
         console.error('Load AI map error:', e);
     }
+}
+
+// ============================================
+// FACES MANAGEMENT
+// ============================================
+let currentProfileId = null;
+let facesProfiles = [];
+
+async function loadFacesSection() { await loadProfiles(); }
+
+async function loadProfiles() {
+    try {
+        const res = await fetch(`${API_URL}/admin/faces/profiles`, { headers: getAuthHeaders() });
+        facesProfiles = await res.json();
+        renderProfiles();
+    } catch(e) {
+        document.getElementById('profilesGrid').innerHTML = '<p class="empty-state">Erreur de chargement</p>';
+    }
+}
+
+function renderProfiles() {
+    const grid = document.getElementById('profilesGrid');
+    if (!facesProfiles.length) {
+        grid.innerHTML = '<p class="empty-state">Aucun profil cree. Les visages detectes apparaitront dans "Non identifies".</p>';
+        return;
+    }
+    grid.innerHTML = facesProfiles.map(p => `
+        <div class="face-card" onclick="openProfileDetail(${p.id})">
+            <div class="face-thumbnail">👤</div>
+            <div class="face-name">${escapeHtml(p.name)}</div>
+            <div class="face-count">${p.photo_count || 0} photo(s)</div>
+        </div>
+    `).join('');
+}
+
+async function openProfileDetail(id) {
+    currentProfileId = id;
+    const profile = facesProfiles.find(p => p.id === id);
+    document.getElementById('profileDetailName').textContent = profile?.name || 'Profil';
+    document.getElementById('profileNameInput').value = profile?.name || '';
+    document.getElementById('profileDetailModal').style.display = 'flex';
+    try {
+        const res = await fetch(`${API_URL}/admin/faces/profiles/${id}/files`, { headers: getAuthHeaders() });
+        const files = await res.json();
+        document.getElementById('profilePhotoCount').textContent = files.length;
+        const photosGrid = document.getElementById('profilePhotosGrid');
+        if (!files.length) {
+            photosGrid.innerHTML = '<p>Aucune photo associee</p>';
+        } else {
+            photosGrid.innerHTML = files.map(f =>
+                `<img src="${API_URL.replace('/api','')}/api/files/preview/${encodeURIComponent(f.blob_name)}" alt="${escapeHtml(f.blob_name)}" title="${escapeHtml(f.blob_name)}">`
+            ).join('');
+        }
+    } catch(e) {
+        document.getElementById('profilePhotosGrid').innerHTML = '<p>Erreur</p>';
+    }
+}
+
+function closeProfileDetail() {
+    document.getElementById('profileDetailModal').style.display = 'none';
+    currentProfileId = null;
+}
+
+async function saveProfileName() {
+    if (!currentProfileId) return;
+    const name = document.getElementById('profileNameInput').value.trim();
+    if (!name) return;
+    await fetch(`${API_URL}/admin/faces/profiles/${currentProfileId}`, {
+        method: 'PUT', headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+    });
+    await loadProfiles();
+    document.getElementById('profileDetailName').textContent = name;
+}
+
+async function loadUnassigned() {
+    try {
+        const res = await fetch(`${API_URL}/admin/faces/occurrences/unassigned`, { headers: getAuthHeaders() });
+        const occurrences = await res.json();
+        const grid = document.getElementById('unassignedGrid');
+        if (!occurrences.length) {
+            grid.innerHTML = '<p class="empty-state">🎉 Tous les visages detectes ont ete identifies !</p>';
+            return;
+        }
+        const profileOptions = facesProfiles.map(p =>
+            `<option value="${p.id}">${escapeHtml(p.name)}</option>`
+        ).join('');
+        grid.innerHTML = occurrences.map(o => `
+            <div class="face-occurrence-card">
+                <img src="${API_URL.replace('/api','')}/api/files/preview/${encodeURIComponent(o.blob_name)}" alt="Visage detecte">
+                <div style="font-size:0.8rem;color:#666;margin-bottom:4px;">Confiance: ${Math.round((o.confidence || 0) * 100)}%</div>
+                <select onchange="assignFace(${o.id}, this.value)">
+                    <option value="">— Assigner a —</option>
+                    <option value="new">+ Nouveau profil</option>
+                    ${profileOptions}
+                </select>
+            </div>
+        `).join('');
+    } catch(e) {
+        document.getElementById('unassignedGrid').innerHTML = '<p class="empty-state">Erreur de chargement</p>';
+    }
+}
+
+async function assignFace(occurrenceId, value) {
+    if (!value) return;
+    let profileId = value;
+    if (value === 'new') {
+        const name = prompt('Nom de la personne :');
+        if (!name) return;
+        const res = await fetch(`${API_URL}/admin/faces/profiles`, {
+            method: 'POST', headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
+        const profile = await res.json();
+        profileId = profile.id;
+        await loadProfiles();
+    }
+    await fetch(`${API_URL}/admin/faces/occurrences/${occurrenceId}/assign`, {
+        method: 'PUT', headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileId: parseInt(profileId) })
+    });
+    await loadUnassigned();
+}
+
+function switchFaceTab(tab) {
+    document.getElementById('tabProfiles').classList.toggle('active', tab === 'profiles');
+    document.getElementById('tabUnassigned').classList.toggle('active', tab === 'unassigned');
+    document.getElementById('facesProfilesView').style.display = tab === 'profiles' ? 'block' : 'none';
+    document.getElementById('facesUnassignedView').style.display = tab === 'unassigned' ? 'block' : 'none';
+    if (tab === 'unassigned') loadUnassigned();
+    if (tab === 'profiles') loadProfiles();
+}
+
+document.getElementById('createProfileBtn')?.addEventListener('click', async () => {
+    const name = prompt('Nom de la personne :');
+    if (!name) return;
+    await fetch(`${API_URL}/admin/faces/profiles`, {
+        method: 'POST', headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+    });
+    await loadProfiles();
+});
+
+// ============================================
+// QUOTAS
+// ============================================
+
+async function loadQuotas() {
+    try {
+        // Load defaults
+        const defRes = await fetch(`${API_URL}/admin/quotas/defaults`, { headers: getAuthHeaders() });
+        const defData = await defRes.json();
+        if (defData.success) {
+            document.getElementById('defaultMaxStorageGb').value = defData.defaults.max_storage_gb;
+            document.getElementById('defaultMaxFiles').value = defData.defaults.max_files;
+            document.getElementById('defaultMaxFileSizeMb').value = defData.defaults.max_file_size_mb;
+            document.getElementById('defaultMaxSharesPerUser').value = defData.defaults.max_shares_per_user;
+            document.getElementById('defaultMaxShareDurationDays').value = defData.defaults.max_share_duration_days;
+        }
+
+        // Load team quotas with usage
+        const usageRes = await fetch(`${API_URL}/admin/quotas/usage`, { headers: getAuthHeaders() });
+        const usageData = await usageRes.json();
+
+        const container = document.getElementById('teamQuotasTable');
+        if (!usageData.success || usageData.usage.length === 0) {
+            container.innerHTML = '<p style="color:#666;">Aucune équipe créée.</p>';
+            return;
+        }
+
+        let html = `<table class="data-table" style="width:100%;">
+            <thead><tr>
+                <th>Équipe</th>
+                <th>Stockage</th>
+                <th>Fichiers</th>
+                <th>Partages</th>
+                <th>Taille max fichier</th>
+                <th>Durée max partage</th>
+                <th>Actions</th>
+            </tr></thead><tbody>`;
+
+        usageData.usage.forEach(u => {
+            const q = u.quota;
+            const storagePct = q.max_storage_gb ? Math.round((u.storage_used_gb / q.max_storage_gb) * 100) : 0;
+            const filesPct = q.max_files ? Math.round((u.file_count / q.max_files) * 100) : 0;
+            const barColor = (pct) => pct > 90 ? '#e74c3c' : pct > 70 ? '#f39c12' : '#639E30';
+
+            html += `<tr>
+                <td><strong>${u.team_display_name || u.team_name}</strong><br><small style="color:#888;">${u.member_count} membre(s)</small></td>
+                <td>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <div style="flex:1;height:8px;background:#eee;border-radius:4px;overflow:hidden;">
+                            <div style="width:${Math.min(storagePct,100)}%;height:100%;background:${barColor(storagePct)};border-radius:4px;"></div>
+                        </div>
+                        <small>${u.storage_used_gb}/${q.max_storage_gb} Go</small>
+                    </div>
+                </td>
+                <td>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <div style="flex:1;height:8px;background:#eee;border-radius:4px;overflow:hidden;">
+                            <div style="width:${Math.min(filesPct,100)}%;height:100%;background:${barColor(filesPct)};border-radius:4px;"></div>
+                        </div>
+                        <small>${u.file_count}/${q.max_files}</small>
+                    </div>
+                </td>
+                <td>${u.share_count}/${q.max_shares_per_user}</td>
+                <td>${q.max_file_size_mb} Mo</td>
+                <td>${q.max_share_duration_days} j</td>
+                <td>
+                    <button class="btn btn-secondary" style="padding:4px 10px;font-size:0.8rem;" onclick="openQuotaModal(${u.team_id}, '${(u.team_display_name || u.team_name).replace(/'/g,"\\'")}', ${JSON.stringify(q).replace(/"/g,'&quot;')})">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                </td>
+            </tr>`;
+        });
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    } catch (e) {
+        console.error('Erreur chargement quotas:', e);
+    }
+}
+
+async function saveDefaultQuotas() {
+    try {
+        const body = {
+            max_storage_gb: parseFloat(document.getElementById('defaultMaxStorageGb').value),
+            max_files: parseInt(document.getElementById('defaultMaxFiles').value),
+            max_file_size_mb: parseFloat(document.getElementById('defaultMaxFileSizeMb').value),
+            max_shares_per_user: parseInt(document.getElementById('defaultMaxSharesPerUser').value),
+            max_share_duration_days: parseInt(document.getElementById('defaultMaxShareDurationDays').value)
+        };
+        const res = await fetch(`${API_URL}/admin/quotas/defaults`, {
+            method: 'PUT',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (data.success) {
+            showNotification('Quotas par défaut enregistrés', 'success');
+        } else {
+            showNotification(data.error || 'Erreur', 'error');
+        }
+    } catch (e) {
+        showNotification('Erreur: ' + e.message, 'error');
+    }
+}
+
+function openQuotaModal(teamId, teamName, quota) {
+    document.getElementById('editQuotaTeamId').value = teamId;
+    document.getElementById('editQuotaTeamName').textContent = teamName;
+    document.getElementById('editMaxStorageGb').value = quota.max_storage_gb;
+    document.getElementById('editMaxFiles').value = quota.max_files;
+    document.getElementById('editMaxFileSizeMb').value = quota.max_file_size_mb;
+    document.getElementById('editMaxSharesPerUser').value = quota.max_shares_per_user;
+    document.getElementById('editMaxShareDurationDays').value = quota.max_share_duration_days;
+    document.getElementById('editQuotaModal').style.display = 'flex';
+}
+
+function closeQuotaModal() {
+    document.getElementById('editQuotaModal').style.display = 'none';
+}
+
+async function saveTeamQuota() {
+    try {
+        const teamId = document.getElementById('editQuotaTeamId').value;
+        const body = {
+            max_storage_gb: parseFloat(document.getElementById('editMaxStorageGb').value),
+            max_files: parseInt(document.getElementById('editMaxFiles').value),
+            max_file_size_mb: parseFloat(document.getElementById('editMaxFileSizeMb').value),
+            max_shares_per_user: parseInt(document.getElementById('editMaxSharesPerUser').value),
+            max_share_duration_days: parseInt(document.getElementById('editMaxShareDurationDays').value)
+        };
+        const res = await fetch(`${API_URL}/admin/quotas/team/${teamId}`, {
+            method: 'PUT',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (data.success) {
+            showNotification('Quotas de l\'équipe enregistrés', 'success');
+            closeQuotaModal();
+            loadQuotas();
+        } else {
+            showNotification(data.error || 'Erreur', 'error');
+        }
+    } catch (e) {
+        showNotification('Erreur: ' + e.message, 'error');
+    }
+}
+
+// ============================================
+// ANTIVIRUS / QUARANTAINE
+// ============================================
+
+async function loadVirusScan() {
+    try {
+        const res = await apiRequest('/admin/security/scan-stats');
+        if (res.success) {
+            const s = res.stats;
+            document.getElementById('clamAvStatus').innerHTML = s.clamAvAvailable
+                ? '<span style="color:#22c55e;">✅ ClamAV actif</span>'
+                : '<span style="color:#ef4444;">❌ ClamAV non disponible</span>';
+            document.getElementById('virusThreatsCount').textContent = s.total || 0;
+            document.getElementById('virusPendingCount').textContent = s.pending || 0;
+        }
+    } catch (e) {
+        document.getElementById('clamAvStatus').textContent = 'Erreur de chargement';
+    }
+
+    // Charger la liste de quarantaine
+    try {
+        const res = await apiRequest('/admin/security/quarantine');
+        if (res.success) {
+            renderQuarantineList(res.items);
+        }
+    } catch (e) {
+        document.getElementById('quarantineList').innerHTML = '<p style="color:#ef4444;">Erreur de chargement</p>';
+    }
+}
+
+function renderQuarantineList(items) {
+    const container = document.getElementById('quarantineList');
+    if (!items || items.length === 0) {
+        container.innerHTML = '<p style="color:#22c55e; font-size: 0.9rem;">🎉 Aucune menace en quarantaine</p>';
+        return;
+    }
+
+    let html = '<table style="width:100%; font-size:0.85rem; border-collapse:collapse;">';
+    html += '<tr style="background:var(--bg-tertiary,#f0f0f5);"><th style="padding:6px;text-align:left;">Fichier</th><th style="padding:6px;">Menace</th><th style="padding:6px;">Date</th><th style="padding:6px;">Statut</th><th style="padding:6px;">Actions</th></tr>';
+
+    for (const item of items) {
+        const status = item.resolved
+            ? '<span style="color:#22c55e;">Résolu</span>'
+            : '<span style="color:#ef4444;">En attente</span>';
+        const date = item.detected_at ? new Date(item.detected_at + 'Z').toLocaleString('fr-FR') : '-';
+        html += `<tr style="border-bottom:1px solid #eee;">
+            <td style="padding:6px;" title="${item.blob_name}">${(item.blob_name || '').substring(0, 30)}</td>
+            <td style="padding:6px;color:#ef4444;font-weight:600;">${item.virus_name || '-'}</td>
+            <td style="padding:6px;">${date}</td>
+            <td style="padding:6px;">${status}</td>
+            <td style="padding:6px;">
+                ${!item.resolved ? `<button class="btn btn-sm" onclick="resolveQuarantine(${item.id})" title="Résoudre" style="padding:2px 8px;font-size:0.8rem;">✅</button>` : ''}
+                <button class="btn btn-sm btn-danger" onclick="deleteQuarantine(${item.id})" title="Supprimer" style="padding:2px 8px;font-size:0.8rem;">🗑️</button>
+            </td>
+        </tr>`;
+    }
+    html += '</table>';
+    container.innerHTML = html;
+}
+
+async function resolveQuarantine(id) {
+    try {
+        await apiRequest(`/admin/security/quarantine/${id}/resolve`, 'PUT');
+        showNotification('Menace marquée comme résolue', 'success');
+        loadVirusScan();
+    } catch (e) {
+        showNotification('Erreur: ' + e.message, 'error');
+    }
+}
+
+async function deleteQuarantine(id) {
+    if (!confirm('Supprimer ce fichier en quarantaine ?')) return;
+    try {
+        await apiRequest(`/admin/security/quarantine/${id}`, 'DELETE');
+        showNotification('Fichier en quarantaine supprimé', 'success');
+        loadVirusScan();
+    } catch (e) {
+        showNotification('Erreur: ' + e.message, 'error');
+    }
+}
+
+// ============================================================================
+// ROLES & PERMISSIONS
+// ============================================================================
+
+const ROLE_LABELS = { admin: 'Admin', com: 'COM', user: 'Utilisateur', viewer: 'Lecteur' };
+const ROLES_LIST = ['admin', 'com', 'user', 'viewer'];
+
+async function loadPermissions() {
+    try {
+        const res = await fetch(`${API_URL}/admin/roles`, { headers: getAuthHeaders() });
+        const data = await res.json();
+        if (data.success) renderPermissionsMatrix(data);
+    } catch (e) {
+        console.error('Erreur chargement permissions:', e);
+    }
+}
+
+function renderPermissionsMatrix(rolesData) {
+    const tbody = document.getElementById('permissionsMatrixBody');
+    if (!tbody) return;
+    
+    const allPerms = new Set();
+    for (const role of Object.values(rolesData.roles || {})) {
+        for (const p of role) allPerms.add(p.permission);
+    }
+    
+    tbody.innerHTML = '';
+    for (const perm of allPerms) {
+        const tr = document.createElement('tr');
+        const labelTd = document.createElement('td');
+        labelTd.textContent = rolesData.permissionLabels?.[perm] || perm;
+        labelTd.style.fontWeight = '500';
+        tr.appendChild(labelTd);
+        
+        for (const role of ROLES_LIST) {
+            const td = document.createElement('td');
+            td.style.textAlign = 'center';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.dataset.role = role;
+            checkbox.dataset.permission = perm;
+            const rolePerms = (rolesData.roles || {})[role] || [];
+            const permObj = rolePerms.find(p => p.permission === perm);
+            checkbox.checked = permObj ? permObj.enabled === 1 : false;
+            if (role === 'admin') { checkbox.checked = true; checkbox.disabled = true; }
+            td.appendChild(checkbox);
+            tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+    }
+}
+
+async function savePermissions() {
+    const checkboxes = document.querySelectorAll('#permissionsMatrixBody input[type="checkbox"]:not(:disabled)');
+    const updates = {};
+    for (const cb of checkboxes) {
+        const role = cb.dataset.role;
+        if (!updates[role]) updates[role] = [];
+        updates[role].push({ permission: cb.dataset.permission, enabled: cb.checked });
+    }
+    
+    for (const [role, permissions] of Object.entries(updates)) {
+        await fetch(`${API_URL}/admin/roles/${role}/permissions`, {
+            method: 'PUT',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ permissions })
+        });
+    }
+    showNotification('Permissions enregistrées', 'success');
+}
+
+// ============================================
+// SECURITY AUDIT FUNCTIONS
+// ============================================
+
+async function loadAuditDashboard() {
+    try {
+        const res = await fetch(`${API_URL}/audit/shares/stats`, { headers: getAuthHeaders() });
+        if (res.status === 403) {
+            document.getElementById('audit').innerHTML = '<div class="empty-state"><i class="fas fa-lock" style="font-size:3rem;color:#ccc;"></i><h3>Accès restreint</h3><p>Vous n\'avez pas la permission d\'audit sécurité.<br>Demandez à un administrateur d\'activer cette permission pour votre rôle.</p></div>';
+            return;
+        }
+        const data = await res.json();
+        if (data.success) {
+            document.getElementById('auditActiveShares').textContent = data.stats.activeShares;
+            document.getElementById('auditTotalDownloads').textContent = data.stats.totalDownloads;
+            document.getElementById('auditNoPassword').textContent = data.stats.sharesWithoutPassword;
+            document.getElementById('auditExpired').textContent = data.stats.expiredShares;
+            
+            // Show empty state banner if everything is zero
+            const total = data.stats.activeShares + data.stats.totalDownloads + data.stats.expiredShares;
+            const banner = document.getElementById('auditEmptyBanner');
+            if (banner) banner.style.display = total === 0 ? 'block' : 'none';
+        }
+        await loadAuditShares();
+    } catch(e) { console.error('Audit load error:', e); }
+}
+
+async function loadAuditShares() {
+    const res = await fetch(`${API_URL}/audit/shares`, { headers: getAuthHeaders() });
+    const data = await res.json();
+    const tbody = document.getElementById('auditSharesBody');
+    if (!data.shares?.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty-state">Aucun partage actif</td></tr>'; return; }
+    tbody.innerHTML = data.shares.map(s => `<tr>
+        <td title="${escapeHtml(s.blob_name)}">${escapeHtml(s.original_name || s.blob_name)}</td>
+        <td>${escapeHtml(s.created_by_name || s.created_by || '—')}</td>
+        <td>${escapeHtml(s.recipient_email || '—')}</td>
+        <td>${new Date(s.expires_at).toLocaleString('fr-FR')}</td>
+        <td>${s.download_count || 0}</td>
+        <td>${s.password_hash ? '✅' : '⚠️'}</td>
+        <td><button class="btn btn-danger btn-sm" onclick="revokeShare('${s.link_id}')"><i class="fas fa-ban"></i> Révoquer</button></td>
+    </tr>`).join('');
+}
+
+async function loadAuditDownloads() {
+    const res = await fetch(`${API_URL}/audit/downloads`, { headers: getAuthHeaders() });
+    const data = await res.json();
+    const tbody = document.getElementById('auditDownloadsBody');
+    if (!data.downloads?.length) { tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Aucun téléchargement</td></tr>'; return; }
+    tbody.innerHTML = data.downloads.map(d => `<tr>
+        <td>${escapeHtml(d.original_name || d.blob_name)}</td>
+        <td>${escapeHtml(d.created_by || '—')}</td>
+        <td>${escapeHtml(d.recipient_email || '—')}</td>
+        <td>${new Date(d.downloaded_at).toLocaleString('fr-FR')}</td>
+        <td>${escapeHtml(d.ip_address || '—')}</td>
+    </tr>`).join('');
+}
+
+async function loadAuditFiles() {
+    const res = await fetch(`${API_URL}/audit/files`, { headers: getAuthHeaders() });
+    const data = await res.json();
+    const tbody = document.getElementById('auditFilesBody');
+    if (!data.files?.length) { tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Aucun fichier</td></tr>'; return; }
+    tbody.innerHTML = data.files.map(f => `<tr>
+        <td>${escapeHtml(f.original_name || f.blob_name)}</td>
+        <td>${escapeHtml(f.full_name || f.username || '—')}</td>
+        <td>${f.file_size ? (f.file_size / 1024 / 1024).toFixed(1) + ' Mo' : '—'}</td>
+        <td>${new Date(f.uploaded_at).toLocaleString('fr-FR')}</td>
+        <td>${f.active_shares > 0 ? '<span style="color:#c62828;font-weight:600;">' + f.active_shares + '</span>' : '0'}</td>
+    </tr>`).join('');
+}
+
+function switchAuditTab(tab) {
+    ['shares', 'downloads', 'files'].forEach(t => {
+        document.getElementById(`auditTab${t.charAt(0).toUpperCase()+t.slice(1)}`).classList.toggle('active', t === tab);
+        document.getElementById(`audit${t.charAt(0).toUpperCase()+t.slice(1)}View`).style.display = t === tab ? 'block' : 'none';
+    });
+    if (tab === 'shares') loadAuditShares();
+    if (tab === 'downloads') loadAuditDownloads();
+    if (tab === 'files') loadAuditFiles();
+}
+
+async function revokeShare(linkId) {
+    if (!confirm('Révoquer ce partage ? Le lien ne fonctionnera plus.')) return;
+    await fetch(`${API_URL}/audit/shares/${linkId}/revoke`, { method: 'POST', headers: getAuthHeaders() });
+    showNotification('Partage révoqué', 'success');
+    await loadAuditShares();
+    await loadAuditDashboard();
+}
+
+// ============================================
+// TIERING AUTOMATIQUE
+// ============================================
+
+async function loadTieringSettings() {
+  try {
+    const res = await fetch(`${API_URL}/admin/tiering/policies`, { headers: getAuthHeaders() });
+    const data = await res.json();
+    if (!data.success) return;
+
+    const globalPolicy = data.policies.find(p => !p.team_id);
+    if (globalPolicy) {
+      document.getElementById('tieringHotToCool').value = globalPolicy.hot_to_cool_days;
+      document.getElementById('tieringCoolToArchive').value = globalPolicy.cool_to_archive_days;
+      document.getElementById('tieringEnabled').checked = !!globalPolicy.enabled;
+    }
+
+    const teamPolicies = data.policies.filter(p => p.team_id);
+    const container = document.getElementById('tieringTeamOverrides');
+    if (teamPolicies.length === 0) {
+      container.innerHTML = '<p style="color:#999;font-style:italic;">Aucune surcharge — Politique globale appliquée pour toutes les équipes</p>';
+    } else {
+      container.innerHTML = `<table class="data-table" style="width:100%;"><thead><tr>
+        <th>Équipe</th><th>Hot → Cool (jours)</th><th>Cool → Archive (jours)</th><th>Actif</th><th>Actions</th>
+      </tr></thead><tbody>${teamPolicies.map(p => `<tr>
+        <td>${p.team_name || 'Équipe #' + p.team_id}</td>
+        <td><input type="number" value="${p.hot_to_cool_days}" min="1" id="tieringTeamHot_${p.team_id}" style="width:80px;"></td>
+        <td><input type="number" value="${p.cool_to_archive_days}" min="1" id="tieringTeamCool_${p.team_id}" style="width:80px;"></td>
+        <td><input type="checkbox" ${p.enabled ? 'checked' : ''} id="tieringTeamEnabled_${p.team_id}"></td>
+        <td>
+          <button class="btn btn-primary btn-small" onclick="saveTieringTeam(${p.team_id})"><i class="fas fa-save"></i></button>
+          <button class="btn btn-danger btn-small" onclick="deleteTieringTeam(${p.team_id})"><i class="fas fa-trash"></i></button>
+        </td>
+      </tr>`).join('')}</tbody></table>`;
+    }
+
+    // Load teams for dropdown
+    try {
+      const teamsRes = await fetch(`${API_URL}/admin/teams`, { headers: getAuthHeaders() });
+      const teamsData = await teamsRes.json();
+      const select = document.getElementById('tieringTeamSelect');
+      const existingTeamIds = teamPolicies.map(p => p.team_id);
+      select.innerHTML = '<option value="">-- Choisir une équipe --</option>';
+      (teamsData.teams || teamsData || []).forEach(t => {
+        if (!existingTeamIds.includes(t.id)) {
+          select.innerHTML += `<option value="${t.id}">${t.name}</option>`;
+        }
+      });
+    } catch (e) { /* teams endpoint may not exist */ }
+  } catch (error) {
+    console.error('Erreur chargement tiering:', error);
+  }
+}
+
+async function saveTieringGlobal() {
+  try {
+    const res = await fetch(`${API_URL}/admin/tiering/global`, {
+      method: 'PUT',
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        hotToCoolDays: parseInt(document.getElementById('tieringHotToCool').value),
+        coolToArchiveDays: parseInt(document.getElementById('tieringCoolToArchive').value),
+        enabled: document.getElementById('tieringEnabled').checked
+      })
+    });
+    const data = await res.json();
+    if (data.success) showNotification('Politique de tiering globale enregistrée', 'success');
+    else showNotification('Erreur: ' + data.error, 'error');
+  } catch (error) {
+    showNotification('Erreur: ' + error.message, 'error');
+  }
+}
+
+async function saveTieringTeam(teamId) {
+  try {
+    const res = await fetch(`${API_URL}/admin/tiering/team/${teamId}`, {
+      method: 'PUT',
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        hotToCoolDays: parseInt(document.getElementById(`tieringTeamHot_${teamId}`).value),
+        coolToArchiveDays: parseInt(document.getElementById(`tieringTeamCool_${teamId}`).value),
+        enabled: document.getElementById(`tieringTeamEnabled_${teamId}`).checked
+      })
+    });
+    const data = await res.json();
+    if (data.success) showNotification('Politique équipe enregistrée', 'success');
+    else showNotification('Erreur: ' + data.error, 'error');
+  } catch (error) {
+    showNotification('Erreur: ' + error.message, 'error');
+  }
+}
+
+async function deleteTieringTeam(teamId) {
+  if (!confirm('Supprimer cette surcharge ? La politique globale sera appliquée.')) return;
+  try {
+    const res = await fetch(`${API_URL}/admin/tiering/team/${teamId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+    const data = await res.json();
+    if (data.success) {
+      showNotification('Surcharge supprimée', 'success');
+      loadTieringSettings();
+    } else showNotification('Erreur: ' + data.error, 'error');
+  } catch (error) {
+    showNotification('Erreur: ' + error.message, 'error');
+  }
+}
+
+function addTieringTeamOverride() {
+  const select = document.getElementById('tieringTeamSelect');
+  const teamId = select.value;
+  if (!teamId) return showNotification('Sélectionnez une équipe', 'warning');
+  saveTieringTeamNew(parseInt(teamId));
+}
+
+async function saveTieringTeamNew(teamId) {
+  try {
+    const res = await fetch(`${API_URL}/admin/tiering/team/${teamId}`, {
+      method: 'PUT',
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hotToCoolDays: 30, coolToArchiveDays: 90, enabled: true })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showNotification('Surcharge ajoutée', 'success');
+      loadTieringSettings();
+    } else showNotification('Erreur: ' + data.error, 'error');
+  } catch (error) {
+    showNotification('Erreur: ' + error.message, 'error');
+  }
+}
+
+async function previewTiering() {
+  const card = document.getElementById('tieringPreviewCard');
+  const content = document.getElementById('tieringPreviewContent');
+  card.style.display = 'block';
+  content.innerHTML = '<p>Chargement...</p>';
+  try {
+    const res = await fetch(`${API_URL}/admin/tiering/preview`, { headers: getAuthHeaders() });
+    const data = await res.json();
+    if (!data.success) { content.innerHTML = '<p style="color:red;">Erreur: ' + data.error + '</p>'; return; }
+    if (data.results.length === 0) {
+      content.innerHTML = '<p style="color:#4CAF50;">✅ Aucun fichier à déplacer</p>';
+      return;
+    }
+    content.innerHTML = `<table class="data-table" style="width:100%;"><thead><tr>
+      <th>Fichier</th><th>Tier actuel</th><th>Nouveau tier</th><th>Âge (jours)</th><th>Équipe</th>
+    </tr></thead><tbody>${data.results.map(r => `<tr>
+      <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;">${r.fileName}</td>
+      <td><span class="badge">${r.currentTier}</span></td>
+      <td><span class="badge" style="background:#4CAF50;color:#fff;">${r.newTier}</span></td>
+      <td>${r.ageDays}</td>
+      <td>${r.teamName || 'Global'}</td>
+    </tr>`).join('')}</tbody></table>`;
+  } catch (error) {
+    content.innerHTML = '<p style="color:red;">Erreur: ' + error.message + '</p>';
+  }
+}
+
+async function runTiering() {
+  if (!confirm('Exécuter le tiering maintenant ? Les fichiers seront déplacés entre les niveaux de stockage.')) return;
+  try {
+    showNotification('Tiering en cours...', 'info');
+    const res = await fetch(`${API_URL}/admin/tiering/run`, {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+    const data = await res.json();
+    if (data.success) {
+      showNotification(data.message, 'success');
+      previewTiering();
+    } else showNotification('Erreur: ' + data.error, 'error');
+  } catch (error) {
+    showNotification('Erreur: ' + error.message, 'error');
+  }
 }

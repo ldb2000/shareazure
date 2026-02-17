@@ -1,5 +1,5 @@
 // Configuration
-const API_URL = 'http://localhost:3000/api';
+const API_URL = window.location.origin + '/api';
 
 // État de l'application
 let selectedFiles = [];
@@ -27,16 +27,15 @@ const previewTitle = document.getElementById('previewTitle');
 const previewBody = document.getElementById('previewBody');
 const closePreviewBtn = document.getElementById('closePreviewBtn');
 const shareModal = document.getElementById('shareModal');
-const shareFileInfo = document.getElementById('shareFileInfo');
 const closeShareBtn = document.getElementById('closeShareBtn');
-const expirationSelect = document.getElementById('expirationSelect');
-const generateLinkBtn = document.getElementById('generateLinkBtn');
-const shareResult = document.getElementById('shareResult');
-const shareLink = document.getElementById('shareLink');
-const copyLinkBtn = document.getElementById('copyLinkBtn');
+const expirationSelect = document.getElementById('shareExpirationSelect');
+const generateLinkBtn = document.getElementById('applyShareBtn');
+const shareResult = document.getElementById('shareStepResult');
+const shareLink = document.getElementById('shareLinkInput');
+const copyLinkBtn = document.getElementById('copyShareLinkBtn');
 const shareExpires = document.getElementById('shareExpires');
-const passwordInput = document.getElementById('passwordInput');
-const recipientEmailInput = document.getElementById('recipientEmailInput');
+const passwordInput = document.getElementById('sharePasswordInput');
+const recipientEmailInput = document.getElementById('shareRecipientEmailInput');
 const qrCodeImage = document.getElementById('qrCodeImage');
 const shareLinkId = document.getElementById('shareLinkId');
 const sharePassword = document.getElementById('sharePassword');
@@ -73,8 +72,34 @@ function initializeEventListeners() {
     cancelDeleteBtn.addEventListener('click', () => deleteModal.style.display = 'none');
     closePreviewBtn.addEventListener('click', closePreview);
     closeShareBtn.addEventListener('click', closeShare);
-    generateLinkBtn.addEventListener('click', generateShareLink);
-    copyLinkBtn.addEventListener('click', copyShareLink);
+    if (generateLinkBtn) generateLinkBtn.addEventListener('click', generateShareLink);
+    if (copyLinkBtn) copyLinkBtn.addEventListener('click', copyShareLink);
+    
+    // New share modal buttons
+    const applyShareBtn = document.getElementById('applyShareBtn');
+    if (applyShareBtn) applyShareBtn.addEventListener('click', generateShareLink);
+    const cancelShareBtn = document.getElementById('cancelShareBtn');
+    if (cancelShareBtn) cancelShareBtn.addEventListener('click', closeShare);
+    const closeShareResultBtn = document.getElementById('closeShareResultBtn');
+    if (closeShareResultBtn) closeShareResultBtn.addEventListener('click', closeShare);
+    const copyShareLinkBtn = document.getElementById('copyShareLinkBtn');
+    if (copyShareLinkBtn) copyShareLinkBtn.addEventListener('click', copyShareLink);
+    const sendShareEmailBtn = document.getElementById('sendShareEmailBtn');
+    if (sendShareEmailBtn) sendShareEmailBtn.addEventListener('click', sendShareByEmail);
+    const togglePasswordVisibility = document.getElementById('togglePasswordVisibility');
+    if (togglePasswordVisibility) {
+        togglePasswordVisibility.addEventListener('click', () => {
+            const pwdInput = document.getElementById('sharePasswordInput');
+            if (pwdInput.type === 'password') {
+                pwdInput.type = 'text';
+                togglePasswordVisibility.innerHTML = '<i class="fas fa-eye-slash"></i>';
+            } else {
+                pwdInput.type = 'password';
+                togglePasswordVisibility.innerHTML = '<i class="fas fa-eye"></i>';
+            }
+        });
+    }
+    
     historyBtn.addEventListener('click', showHistory);
     closeHistoryBtn.addEventListener('click', closeHistory);
     
@@ -773,21 +798,28 @@ function closePreview() {
 function shareFile(blobName, originalName, size) {
     fileToShare = { blobName, originalName, size };
     
-    shareFileInfo.innerHTML = `
-        <div class="file-info-card">
-            <div class="file-icon">${getFileIcon('')}</div>
-            <div class="file-details">
-                <div class="file-name">${originalName}</div>
-                <div class="file-size">${formatFileSize(size)}</div>
+    const shareFileInfo = document.getElementById('shareFileInfo');
+    if (shareFileInfo) {
+        shareFileInfo.innerHTML = `
+            <div style="display:flex;align-items:center;gap:12px;">
+                <div style="font-size:1.5rem;">${getFileIcon('')}</div>
+                <div>
+                    <div style="font-weight:600;font-size:0.95rem;">${originalName}</div>
+                    <div style="color:#888;font-size:0.85rem;">${formatFileSize(size)}</div>
+                </div>
             </div>
-        </div>
-    `;
+        `;
+    }
     
-    shareResult.style.display = 'none';
-    shareLink.value = '';
+    // Reset to step 1
+    const stepConfig = document.getElementById('shareStepConfig');
+    const stepResult = document.getElementById('shareStepResult');
+    if (stepConfig) stepConfig.style.display = 'block';
+    if (stepResult) stepResult.style.display = 'none';
+    
+    if (shareLink) shareLink.value = '';
     passwordInput.value = '';
     recipientEmailInput.value = '';
-    shareExpires.textContent = '';
     shareModal.style.display = 'flex';
     recipientEmailInput.focus();
 }
@@ -796,7 +828,7 @@ function shareFile(blobName, originalName, size) {
 async function generateShareLink() {
     if (!fileToShare) return;
     
-    // Valider que l'email est rempli
+    // Valider email
     const recipientEmails = recipientEmailInput.value.trim();
     if (!recipientEmails) {
         showMessage('Veuillez entrer au moins un email de destinataire', 'error');
@@ -804,24 +836,32 @@ async function generateShareLink() {
         return;
     }
     
-    generateLinkBtn.disabled = true;
-    generateLinkBtn.textContent = '⏳ Génération...';
+    // Valider mot de passe obligatoire
+    const password = passwordInput.value.trim();
+    if (!password) {
+        showMessage('Le mot de passe est obligatoire', 'error');
+        passwordInput.focus();
+        return;
+    }
+    
+    const applyBtn = document.getElementById('applyShareBtn');
+    if (applyBtn) {
+        applyBtn.disabled = true;
+        applyBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Création...';
+    }
     
     try {
         const expiresInMinutes = parseInt(expirationSelect.value);
-        const password = passwordInput.value.trim();
         
         const response = await fetch(`${API_URL}/share/generate`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 blobName: fileToShare.blobName,
                 expiresInMinutes,
                 recipientEmail: recipientEmails,
-                password: password || undefined,
-                permissions: 'r' // read-only
+                password,
+                permissions: 'r'
             })
         });
         
@@ -831,37 +871,80 @@ async function generateShareLink() {
             shareLink.value = data.shareLink;
             
             const expiresDate = new Date(data.expiresAt);
-            const expiresText = expiresDate.toLocaleString('fr-FR', {
-                dateStyle: 'full',
-                timeStyle: 'short'
-            });
-            
-            shareExpires.innerHTML = `🕒 <strong>Expire le :</strong> ${expiresText}`;
-            shareLinkId.textContent = data.linkId;
-            
-            // Afficher le QR Code
-            qrCodeImage.src = data.qrCode;
-            
-            // Afficher/masquer l'info mot de passe
-            if (data.hasPassword) {
-                sharePassword.style.display = 'block';
-                shareWarning.style.display = 'none';
-            } else {
-                sharePassword.style.display = 'none';
-                shareWarning.style.display = 'block';
+            const shareExpires = document.getElementById('shareExpires');
+            if (shareExpires) {
+                shareExpires.innerHTML = `🕒 Expire le <strong>${expiresDate.toLocaleString('fr-FR', { dateStyle: 'full', timeStyle: 'short' })}</strong>`;
             }
             
-            shareResult.style.display = 'block';
+            const shareLinkId = document.getElementById('shareLinkId');
+            if (shareLinkId) shareLinkId.textContent = data.linkId;
             
-            showMessage('Lien de partage généré avec succès !', 'success');
+            const qrCodeImage = document.getElementById('qrCodeImage');
+            if (qrCodeImage && data.qrCode) qrCodeImage.src = data.qrCode;
+            
+            // Switch to result step
+            const stepConfig = document.getElementById('shareStepConfig');
+            const stepResult = document.getElementById('shareStepResult');
+            if (stepConfig) stepConfig.style.display = 'none';
+            if (stepResult) stepResult.style.display = 'block';
+            
+            showMessage('Lien de partage créé !', 'success');
         } else {
             showMessage(`Erreur: ${data.error}`, 'error');
         }
     } catch (error) {
         showMessage(`Erreur: ${error.message}`, 'error');
     } finally {
-        generateLinkBtn.disabled = false;
-        generateLinkBtn.textContent = '🔗 Générer le lien de partage';
+        if (applyBtn) {
+            applyBtn.disabled = false;
+            applyBtn.innerHTML = '<i class="fas fa-link"></i> Créer le lien';
+        }
+    }
+}
+
+// Envoyer par email
+async function sendShareByEmail() {
+    const shareLinkId = document.getElementById('shareLinkId');
+    const linkId = shareLinkId ? shareLinkId.textContent : '';
+    if (!linkId || !fileToShare) return;
+    
+    const sendBtn = document.getElementById('sendShareEmailBtn');
+    if (sendBtn) {
+        sendBtn.disabled = true;
+        sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Envoi...';
+    }
+    
+    try {
+        const response = await fetch(`${API_URL}/share/send-email`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                linkId,
+                recipientEmails: recipientEmailInput.value.trim(),
+                fileName: fileToShare.originalName,
+                shareLink: shareLink.value
+            })
+        });
+        const data = await response.json();
+        if (data.success) {
+            showMessage('Email envoyé avec succès !', 'success');
+            if (sendBtn) {
+                sendBtn.innerHTML = '<i class="fas fa-check"></i> Envoyé !';
+                sendBtn.style.background = '#4caf50';
+            }
+        } else {
+            showMessage(`Erreur envoi: ${data.error}`, 'error');
+            if (sendBtn) {
+                sendBtn.disabled = false;
+                sendBtn.innerHTML = '<i class="fas fa-envelope"></i> Envoyer par email';
+            }
+        }
+    } catch (error) {
+        showMessage(`Erreur: ${error.message}`, 'error');
+        if (sendBtn) {
+            sendBtn.disabled = false;
+            sendBtn.innerHTML = '<i class="fas fa-envelope"></i> Envoyer par email';
+        }
     }
 }
 
@@ -869,22 +952,16 @@ async function generateShareLink() {
 async function copyShareLink() {
     try {
         await navigator.clipboard.writeText(shareLink.value);
-        
-        const originalText = copyLinkBtn.textContent;
-        copyLinkBtn.textContent = '✅ Copié !';
-        copyLinkBtn.classList.add('btn-copied');
-        
-        setTimeout(() => {
-            copyLinkBtn.textContent = originalText;
-            copyLinkBtn.classList.remove('btn-copied');
-        }, 2000);
-        
-        showMessage('Lien copié dans le presse-papiers', 'success');
+        const copyBtn = document.getElementById('copyShareLinkBtn');
+        if (copyBtn) {
+            copyBtn.innerHTML = '<i class="fas fa-check" style="color:#4caf50;"></i>';
+            setTimeout(() => { copyBtn.innerHTML = '<i class="fas fa-copy"></i>'; }, 2000);
+        }
+        showMessage('Lien copié !', 'success');
     } catch (error) {
-        // Fallback pour les anciens navigateurs
         shareLink.select();
         document.execCommand('copy');
-        showMessage('Lien copié dans le presse-papiers', 'success');
+        showMessage('Lien copié !', 'success');
     }
 }
 
@@ -892,8 +969,6 @@ async function copyShareLink() {
 function closeShare() {
     shareModal.style.display = 'none';
     fileToShare = null;
-    shareResult.style.display = 'none';
-    passwordInput.value = '';
 }
 
 // Afficher l'historique des partages
