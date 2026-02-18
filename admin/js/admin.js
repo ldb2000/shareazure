@@ -738,12 +738,32 @@ window.toggleFileMenu = (event, idx) => {
         if (m.id !== `fileMenu-${idx}`) m.style.display = 'none';
     });
     const menu = document.getElementById(`fileMenu-${idx}`);
-    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+    if (menu.style.display === 'none' || !menu.style.display) {
+        const btn = event.currentTarget;
+        const rect = btn.getBoundingClientRect();
+        menu.style.position = 'fixed';
+        menu.style.top = (rect.bottom + 4) + 'px';
+        menu.style.left = 'auto';
+        menu.style.right = (window.innerWidth - rect.right) + 'px';
+        menu.style.display = 'block';
+        // Si le menu dépasse en bas, l'afficher au-dessus
+        requestAnimationFrame(() => {
+            const menuRect = menu.getBoundingClientRect();
+            if (menuRect.bottom > window.innerHeight) {
+                menu.style.top = (rect.top - menuRect.height - 4) + 'px';
+            }
+        });
+    } else {
+        menu.style.display = 'none';
+    }
 };
 
 document.addEventListener('click', () => {
-    document.querySelectorAll('.file-context-menu').forEach(m => m.style.display = 'none');
+    document.querySelectorAll('.file-context-menu, .team-context-menu').forEach(m => m.style.display = 'none');
 });
+document.addEventListener('scroll', () => {
+    document.querySelectorAll('.file-context-menu, .team-context-menu').forEach(m => m.style.display = 'none');
+}, true);
 
 // Change file tier (Hot/Cool/Archive)
 window.changeFileTier = async (blobName, targetTier) => {
@@ -911,12 +931,27 @@ async function loadTeams() {
 // Toggle team context menu
 window.toggleTeamMenu = (event, teamId) => {
     event.stopPropagation();
-    // Close all other menus
     document.querySelectorAll('.team-context-menu').forEach(m => {
         if (m.id !== `teamMenu-${teamId}`) m.style.display = 'none';
     });
     const menu = document.getElementById(`teamMenu-${teamId}`);
-    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+    if (menu.style.display === 'none' || !menu.style.display) {
+        const btn = event.currentTarget;
+        const rect = btn.getBoundingClientRect();
+        menu.style.position = 'fixed';
+        menu.style.top = (rect.bottom + 4) + 'px';
+        menu.style.left = 'auto';
+        menu.style.right = (window.innerWidth - rect.right) + 'px';
+        menu.style.display = 'block';
+        requestAnimationFrame(() => {
+            const menuRect = menu.getBoundingClientRect();
+            if (menuRect.bottom > window.innerHeight) {
+                menu.style.top = (rect.top - menuRect.height - 4) + 'px';
+            }
+        });
+    } else {
+        menu.style.display = 'none';
+    }
 };
 
 // Close menus on click outside
