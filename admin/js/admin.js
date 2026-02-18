@@ -3586,7 +3586,16 @@ window.previewFile = (blobName, contentType) => {
             <iframe src="${previewUrl}#toolbar=1" style="flex:1;border:none;border-radius:4px;"></iframe>
         </div>`;
     } else if (contentType.startsWith('video/')) {
-        body.innerHTML = `<video controls autoplay style="max-width:100%;max-height:100%;border-radius:4px;"><source src="${previewUrl}" type="${contentType}"></video>`;
+        body.innerHTML = `<div style="width:100%;height:100%;display:flex;flex-direction:column;background:#000;border-radius:4px;overflow:hidden;">
+            <video id="adminVideoPlayer" controls autoplay style="flex:1;width:100%;object-fit:contain;"><source src="${previewUrl}" type="${contentType}"></video>
+            <div style="display:flex;gap:8px;padding:6px 12px;background:rgba(0,0,0,0.8);align-items:center;">
+                <select onchange="document.getElementById('adminVideoPlayer').playbackRate=parseFloat(this.value)" style="background:#333;color:#ccc;border:1px solid #555;border-radius:4px;padding:2px;font-size:0.8rem;">
+                    <option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option>
+                </select>
+                <button onclick="(()=>{const v=document.getElementById('adminVideoPlayer'),c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);const a=document.createElement('a');a.download='capture.png';a.href=c.toDataURL('image/png');a.click()})()" style="background:none;border:none;color:#ccc;cursor:pointer;font-size:0.85rem;" title="Capture d'écran"><i class="fas fa-camera"></i></button>
+                <button onclick="document.getElementById('adminVideoPlayer').requestFullscreen()" style="background:none;border:none;color:#ccc;cursor:pointer;font-size:0.85rem;" title="Plein écran"><i class="fas fa-expand"></i></button>
+            </div>
+        </div>`;
     } else if (contentType.startsWith('audio/')) {
         body.innerHTML = `<audio controls autoplay style="width:80%;max-width:400px;"><source src="${previewUrl}" type="${contentType}"></audio>`;
     } else if (contentType.startsWith('text/') || contentType === 'application/json') {

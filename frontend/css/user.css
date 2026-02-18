@@ -1754,3 +1754,33 @@ body {
 @media (max-width: 768px) {
   .comments-panel { width: 100%; position: absolute; inset: 0; z-index: 10; }
 }
+
+/* Video Player */
+.video-player-container { width: 100%; max-width: 100%; height: 100%; display: flex; flex-direction: column; background: #000; border-radius: 8px; overflow: hidden; position: relative; }
+.video-player-container video { flex: 1; width: 100%; object-fit: contain; background: #000; min-height: 0; }
+.video-overlay { position: absolute; inset: 0; bottom: 80px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.video-overlay.playing { opacity: 0; transition: opacity 0.3s; }
+.video-overlay.playing:hover { opacity: 1; }
+.video-play-icon { width: 64px; height: 64px; border-radius: 50%; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 1.5rem; backdrop-filter: blur(4px); }
+.video-controls { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: rgba(0,0,0,0.85); backdrop-filter: blur(8px); }
+.vc-btn { background: none; border: none; color: #ccc; cursor: pointer; font-size: 1rem; padding: 6px 8px; border-radius: 4px; }
+.vc-btn:hover { color: #fff; background: rgba(255,255,255,0.1); }
+.vc-time { color: #aaa; font-size: 0.8rem; font-variant-numeric: tabular-nums; min-width: 36px; }
+.vc-progress { flex: 1; height: 6px; background: #444; border-radius: 3px; cursor: pointer; position: relative; }
+.vc-progress:hover { height: 10px; }
+.vc-progress-bar { height: 100%; background: #1565c0; border-radius: 3px; transition: width 0.1s; position: relative; }
+.vc-progress-bar::after { content: ''; position: absolute; right: -5px; top: 50%; transform: translateY(-50%); width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 0 4px rgba(0,0,0,0.4); opacity: 0; transition: opacity 0.2s; }
+.vc-progress:hover .vc-progress-bar::after { opacity: 1; }
+.vc-progress-markers { position: absolute; inset: 0; pointer-events: none; }
+.vc-marker { position: absolute; top: -2px; width: 4px; height: calc(100% + 4px); background: #ffa000; border-radius: 2px; }
+.vc-speed { background: #333; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 2px 4px; font-size: 0.8rem; cursor: pointer; }
+.video-comment-bar { display: flex; gap: 8px; padding: 8px 12px; background: rgba(0,0,0,0.9); border-top: 1px solid #333; }
+.video-comment-bar input { flex: 1; background: #333; border: 1px solid #444; border-radius: 6px; color: #e0e0e0; padding: 6px 10px; font-size: 0.85rem; }
+.video-comment-bar input:focus { border-color: #1565c0; outline: none; }
+.video-markers { position: absolute; bottom: 80px; left: 0; right: 0; pointer-events: none; z-index: 5; }
+.video-timecode-comment { position: absolute; bottom: 0; background: rgba(255,160,0,0.9); color: #000; padding: 4px 8px; border-radius: 4px 4px 0 0; font-size: 0.75rem; font-weight: 600; white-space: nowrap; transform: translateX(-50%); pointer-events: auto; cursor: pointer; }
+
+@media (max-width: 768px) {
+    .video-controls { gap: 4px; padding: 6px 8px; }
+    .vc-speed { display: none; }
+}

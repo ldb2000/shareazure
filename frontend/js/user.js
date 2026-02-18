@@ -2702,7 +2702,39 @@ function showPreview(blobName) {
         annotBtn.onclick = () => { window.open(`pdf-annotate.html?file=${encodeURIComponent(blobName)}`, '_blank'); };
         document.querySelector('.preview-actions').insertBefore(annotBtn, document.getElementById('previewDownloadBtn'));
     } else if (contentType.startsWith('video/')) {
-        body.innerHTML = `<video controls autoplay><source src="${previewUrl}" type="${contentType}">Votre navigateur ne supporte pas la vidéo.</video>`;
+        body.innerHTML = `
+        <div class="video-player-container" id="videoPlayerContainer">
+            <video id="videoPlayer" preload="metadata"><source src="${previewUrl}" type="${contentType}"></video>
+            <div class="video-overlay" id="videoOverlay" onclick="toggleVideoPlay()">
+                <div class="video-play-icon"><i class="fas fa-play"></i></div>
+            </div>
+            <div class="video-markers" id="videoMarkers"></div>
+            <div class="video-controls">
+                <button class="vc-btn" onclick="toggleVideoPlay()" id="vcPlayBtn"><i class="fas fa-play"></i></button>
+                <span class="vc-time" id="vcCurrentTime">0:00</span>
+                <div class="vc-progress" id="vcProgress" onclick="seekVideo(event)">
+                    <div class="vc-progress-bar" id="vcProgressBar"></div>
+                    <div class="vc-progress-markers" id="vcProgressMarkers"></div>
+                </div>
+                <span class="vc-time" id="vcDuration">0:00</span>
+                <select class="vc-speed" id="vcSpeed" onchange="document.getElementById('videoPlayer').playbackRate=parseFloat(this.value)">
+                    <option value="0.5">0.5×</option>
+                    <option value="0.75">0.75×</option>
+                    <option value="1" selected>1×</option>
+                    <option value="1.25">1.25×</option>
+                    <option value="1.5">1.5×</option>
+                    <option value="2">2×</option>
+                </select>
+                <button class="vc-btn" onclick="captureVideoFrame()" title="Capture d'écran"><i class="fas fa-camera"></i></button>
+                <button class="vc-btn" onclick="toggleVideoComment()" title="Commenter ce moment"><i class="fas fa-comment-dots"></i></button>
+                <button class="vc-btn" onclick="document.getElementById('videoPlayer').requestFullscreen()" title="Plein écran"><i class="fas fa-expand"></i></button>
+            </div>
+            <div class="video-comment-bar" id="videoCommentBar" style="display:none;">
+                <input type="text" id="videoCommentInput" placeholder="Commentaire à ce timecode..." onkeydown="if(event.key==='Enter')addVideoComment()">
+                <button class="btn btn-primary btn-sm" onclick="addVideoComment()"><i class="fas fa-paper-plane"></i></button>
+            </div>
+        </div>`;
+        initVideoPlayer();
     } else if (contentType.startsWith('audio/')) {
         body.innerHTML = `<audio controls autoplay><source src="${previewUrl}" type="${contentType}">Votre navigateur ne supporte pas l'audio.</audio>`;
     } else if (contentType.startsWith('text/') || contentType === 'application/json' || contentType === 'application/xml') {
@@ -2732,6 +2764,9 @@ function closePreview() {
     const body = document.getElementById('previewBody');
     body.querySelectorAll('video, audio').forEach(el => { el.pause(); el.src = ''; });
     body.innerHTML = '';
+    // Cleanup video keyboard handler
+    document.removeEventListener('keydown', handleVideoKeys);
+    videoTimecodeComments = [];
 }
 
 // Double-click sur un fichier = preview
@@ -2851,3 +2886,191 @@ document.addEventListener('keydown', (e) => {
         addComment();
     }
 });
+
+// ============================================================================
+// VIDEO PLAYER
+// ============================================================================
+
+let videoTimecodeComments = [];
+
+function initVideoPlayer() {
+    const video = document.getElementById('videoPlayer');
+    const overlay = document.getElementById('videoOverlay');
+    if (!video) return;
+
+    video.addEventListener('loadedmetadata', () => {
+        document.getElementById('vcDuration').textContent = formatTime(video.duration);
+        loadVideoComments();
+    });
+
+    video.addEventListener('timeupdate', () => {
+        const pct = (video.currentTime / video.duration) * 100;
+        document.getElementById('vcProgressBar').style.width = pct + '%';
+        document.getElementById('vcCurrentTime').textContent = formatTime(video.currentTime);
+        showTimecodeMarkers(video.currentTime);
+    });
+
+    video.addEventListener('play', () => {
+        document.getElementById('vcPlayBtn').innerHTML = '<i class="fas fa-pause"></i>';
+        overlay.classList.add('playing');
+        overlay.querySelector('.video-play-icon i').className = 'fas fa-pause';
+    });
+
+    video.addEventListener('pause', () => {
+        document.getElementById('vcPlayBtn').innerHTML = '<i class="fas fa-play"></i>';
+        overlay.classList.remove('playing');
+        overlay.querySelector('.video-play-icon i').className = 'fas fa-play';
+    });
+
+    video.addEventListener('ended', () => {
+        overlay.classList.remove('playing');
+    });
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', handleVideoKeys);
+
+    // Auto-play
+    video.play().catch(() => {});
+}
+
+function handleVideoKeys(e) {
+    const video = document.getElementById('videoPlayer');
+    if (!video || document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
+    if (e.key === ' ' || e.key === 'k') { e.preventDefault(); toggleVideoPlay(); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); video.currentTime = Math.max(0, video.currentTime - 5); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); video.currentTime = Math.min(video.duration, video.currentTime + 5); }
+    else if (e.key === 'j') { video.currentTime = Math.max(0, video.currentTime - 10); }
+    else if (e.key === 'l') { video.currentTime = Math.min(video.duration, video.currentTime + 10); }
+    else if (e.key === 'f') { video.requestFullscreen?.(); }
+    else if (e.key === 'm') { video.muted = !video.muted; }
+}
+
+function toggleVideoPlay() {
+    const video = document.getElementById('videoPlayer');
+    if (!video) return;
+    video.paused ? video.play() : video.pause();
+}
+
+function seekVideo(e) {
+    const video = document.getElementById('videoPlayer');
+    const bar = document.getElementById('vcProgress');
+    if (!video || !bar) return;
+    const rect = bar.getBoundingClientRect();
+    const pct = (e.clientX - rect.left) / rect.width;
+    video.currentTime = pct * video.duration;
+}
+
+function formatTime(s) {
+    if (!s || isNaN(s)) return '0:00';
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, '0')}`;
+}
+
+function captureVideoFrame() {
+    const video = document.getElementById('videoPlayer');
+    if (!video) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    const link = document.createElement('a');
+    link.download = `capture_${formatTime(video.currentTime).replace(':', 'm')}s.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+    showSuccess('Capture enregistrée');
+}
+
+function toggleVideoComment() {
+    const bar = document.getElementById('videoCommentBar');
+    if (!bar) return;
+    bar.style.display = bar.style.display === 'none' ? 'flex' : 'none';
+    if (bar.style.display === 'flex') {
+        const video = document.getElementById('videoPlayer');
+        if (video) video.pause();
+        document.getElementById('videoCommentInput').focus();
+        document.getElementById('videoCommentInput').placeholder = `Commentaire à ${formatTime(video?.currentTime || 0)}...`;
+    }
+}
+
+async function addVideoComment() {
+    const video = document.getElementById('videoPlayer');
+    const input = document.getElementById('videoCommentInput');
+    if (!video || !input || !input.value.trim() || !currentPreviewBlobName) return;
+
+    const timecode = video.currentTime;
+    const text = `[${formatTime(timecode)}] ${input.value.trim()}`;
+
+    try {
+        const res = await fetch(`${API_URL}/files/${encodeURIComponent(currentPreviewBlobName)}/comments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+            body: JSON.stringify({ comment: text })
+        });
+        const data = await res.json();
+        if (data.success) {
+            input.value = '';
+            document.getElementById('videoCommentBar').style.display = 'none';
+            showSuccess(`Commentaire ajouté à ${formatTime(timecode)}`);
+            loadVideoComments();
+        } else {
+            showError(data.error);
+        }
+    } catch (e) { showError(e.message); }
+}
+
+async function loadVideoComments() {
+    if (!currentPreviewBlobName) return;
+    try {
+        const res = await fetch(`${API_URL}/files/${encodeURIComponent(currentPreviewBlobName)}/comments`, {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        const data = await res.json();
+        if (!data.success) return;
+
+        // Parse timecoded comments
+        const video = document.getElementById('videoPlayer');
+        if (!video || !video.duration) return;
+
+        videoTimecodeComments = [];
+        const markersContainer = document.getElementById('vcProgressMarkers');
+        if (markersContainer) markersContainer.innerHTML = '';
+
+        const tcRegex = /^\[(\d+):(\d{2})\]\s*/;
+        for (const c of data.comments) {
+            const match = c.comment.match(tcRegex);
+            if (match) {
+                const seconds = parseInt(match[1]) * 60 + parseInt(match[2]);
+                const pct = (seconds / video.duration) * 100;
+                videoTimecodeComments.push({ seconds, text: c.comment.replace(tcRegex, ''), username: c.username, pct });
+                if (markersContainer) {
+                    const marker = document.createElement('div');
+                    marker.className = 'vc-marker';
+                    marker.style.left = pct + '%';
+                    marker.title = `${formatTime(seconds)} — ${c.username}: ${c.comment.replace(tcRegex, '')}`;
+                    markersContainer.appendChild(marker);
+                }
+            }
+        }
+
+        // Update comment count badge
+        const countEl = document.getElementById('commentCount');
+        if (countEl) countEl.textContent = data.comments.length || '';
+    } catch (e) { console.error('Video comments error:', e); }
+}
+
+function showTimecodeMarkers(currentTime) {
+    const container = document.getElementById('videoMarkers');
+    if (!container) return;
+    container.innerHTML = '';
+    for (const tc of videoTimecodeComments) {
+        if (Math.abs(tc.seconds - currentTime) < 3) {
+            const div = document.createElement('div');
+            div.className = 'video-timecode-comment';
+            div.style.left = tc.pct + '%';
+            div.textContent = `💬 ${tc.username}: ${tc.text}`;
+            div.onclick = () => { document.getElementById('videoPlayer').currentTime = tc.seconds; };
+            container.appendChild(div);
+        }
+    }
+}
