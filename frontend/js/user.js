@@ -2661,10 +2661,21 @@ function showPreview(blobName) {
     const file = filteredFiles.find(f => f.name === blobName);
     if (!file || file.isFolder) return;
 
+    currentPreviewBlobName = blobName;
     const displayName = file.displayName || file.originalName || blobName.split('/').pop();
     const contentType = file.contentType || '';
     const token = getAuthToken();
     const previewUrl = `${API_URL}/preview/${encodeURIComponent(blobName)}?token=${encodeURIComponent(token)}`;
+    
+    // Reset comments panel
+    document.getElementById('commentsPanel').style.display = 'none';
+    document.getElementById('commentCount').textContent = '';
+    // Pre-load comment count
+    fetch(`${API_URL}/files/${encodeURIComponent(blobName)}/comments`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+    }).then(r => r.json()).then(d => {
+        if (d.success && d.comments.length > 0) document.getElementById('commentCount').textContent = d.comments.length;
+    }).catch(() => {});
 
     document.getElementById('previewTitle').textContent = displayName;
     
@@ -2748,3 +2759,87 @@ document.addEventListener('keydown', (e) => {
         }
     } catch (e) { /* ignore */ }
 })();
+
+// ============================================================================
+// COMMENTAIRES FICHIERS
+// ============================================================================
+
+let currentPreviewBlobName = null;
+
+function toggleCommentsPanel() {
+    const panel = document.getElementById('commentsPanel');
+    panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+    if (panel.style.display === 'flex') loadComments();
+}
+
+async function loadComments() {
+    if (!currentPreviewBlobName) return;
+    const list = document.getElementById('commentsList');
+    list.innerHTML = '<div class="comments-empty">Chargement...</div>';
+    try {
+        const res = await fetch(`${API_URL}/files/${encodeURIComponent(currentPreviewBlobName)}/comments`, {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error);
+        
+        document.getElementById('commentCount').textContent = data.comments.length || '';
+        
+        if (data.comments.length === 0) {
+            list.innerHTML = '<div class="comments-empty">Aucun commentaire</div>';
+            return;
+        }
+        list.innerHTML = data.comments.map(c => `
+            <div class="comment-item">
+                <div class="comment-meta">
+                    <span class="comment-author">${escapeHtml(c.username)}</span>
+                    <span class="comment-date">${new Date(c.created_at).toLocaleString('fr-FR', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</span>
+                </div>
+                <div class="comment-text">${escapeHtml(c.comment)}</div>
+                <button class="comment-delete" onclick="deleteComment(${c.id})" title="Supprimer">🗑️</button>
+            </div>
+        `).join('');
+    } catch (e) {
+        list.innerHTML = '<div class="comments-empty">Erreur</div>';
+    }
+}
+
+async function addComment() {
+    const input = document.getElementById('commentInput');
+    const text = input.value.trim();
+    if (!text || !currentPreviewBlobName) return;
+    try {
+        const res = await fetch(`${API_URL}/files/${encodeURIComponent(currentPreviewBlobName)}/comments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+            body: JSON.stringify({ comment: text })
+        });
+        const data = await res.json();
+        if (data.success) {
+            input.value = '';
+            loadComments();
+        } else {
+            showError(data.error);
+        }
+    } catch (e) { showError(e.message); }
+}
+
+async function deleteComment(id) {
+    if (!confirm('Supprimer ce commentaire ?')) return;
+    try {
+        const res = await fetch(`${API_URL}/files/comments/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        const data = await res.json();
+        if (data.success) loadComments();
+        else showError(data.error);
+    } catch (e) { showError(e.message); }
+}
+
+// Ctrl+Enter pour envoyer
+document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key === 'Enter' && document.activeElement?.id === 'commentInput') {
+        addComment();
+    }
+});

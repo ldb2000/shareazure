@@ -2327,9 +2327,9 @@ app.post('/api/admin/company-logo', authenticateUser, requireAdmin, express.raw(
     fs.writeFileSync(frontendPath, svgContent);
     fs.writeFileSync(adminPath, svgContent);
     
-    activityLogsDb.create('info', 'settings', 'logo_updated', 
-      `Logo entreprise mis à jour par ${req.user.username}`,
-      req.user.username, null, req.ip);
+    activityLogsDb.log({ level: 'info', category: 'settings', operation: 'logo_updated',
+      message: `Logo entreprise mis à jour par ${req.user.username}`,
+      username: req.user.username, ip_address: req.ip });
     
     res.json({ success: true, message: 'Logo mis à jour' });
   } catch (error) {
@@ -2343,6 +2343,62 @@ app.get('/api/company-info', (req, res) => {
   const companyName = settingsDb.get('companyName') || 'ShareAzure';
   const logoExists = fs.existsSync(path.join(__dirname, '..', 'frontend', 'img', 'company-logo.svg'));
   res.json({ success: true, companyName, hasLogo: logoExists });
+});
+
+// ============================================
+// COMMENTAIRES FICHIERS
+// ============================================
+
+// GET /api/files/:blobName(*)/comments
+app.get('/api/files/:blobName(*)/comments', authenticateUser, (req, res) => {
+  try {
+    const blobName = req.params.blobName || req.params[0];
+    const comments = db.prepare(
+      'SELECT * FROM file_comments WHERE blob_name = ? ORDER BY created_at DESC'
+    ).all(blobName);
+    res.json({ success: true, comments });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// POST /api/files/:blobName(*)/comments
+app.post('/api/files/:blobName(*)/comments', authenticateUser, (req, res) => {
+  try {
+    const blobName = req.params.blobName || req.params[0];
+    const { comment } = req.body;
+    if (!comment || !comment.trim()) {
+      return res.status(400).json({ success: false, error: 'Commentaire vide' });
+    }
+    const result = db.prepare(
+      'INSERT INTO file_comments (blob_name, user_id, username, comment) VALUES (?, ?, ?, ?)'
+    ).run(blobName, req.user.id, req.user.username, comment.trim());
+    
+    activityLogsDb.log({ level: 'info', category: 'file', operation: 'file_commented',
+      message: `${req.user.username} a commenté "${blobName.split('/').pop()}"`,
+      username: req.user.username, details: { blobName }, ip_address: req.ip });
+    
+    res.json({ success: true, id: result.lastInsertRowid });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// DELETE /api/files/comments/:id
+app.delete('/api/files/comments/:id', authenticateUser, (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const comment = db.prepare('SELECT * FROM file_comments WHERE id = ?').get(id);
+    if (!comment) return res.status(404).json({ success: false, error: 'Non trouvé' });
+    // Seul l'auteur ou un admin peut supprimer
+    if (comment.user_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, error: 'Non autorisé' });
+    }
+    db.prepare('DELETE FROM file_comments WHERE id = ?').run(id);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
 });
 
 // ============================================
@@ -5229,9 +5285,9 @@ app.post('/api/finops/optimize', authenticateUser, async (req, res) => {
     }
 
     // Log
-    activityLogsDb.create('info', 'storage', 'tier_change', 
-      `${req.user.username} a changé ${blobName.split('/').pop()} vers ${targetTier}`,
-      req.user.username, JSON.stringify({ blobName, targetTier }), req.ip);
+    activityLogsDb.log({ level: 'info', category: 'storage', operation: 'tier_change',
+      message: `${req.user.username} a changé ${blobName.split('/').pop()} vers ${targetTier}`,
+      username: req.user.username, details: { blobName, targetTier }, ip_address: req.ip });
 
     res.json({ success: true, message: `Fichier déplacé vers ${targetTier}` });
   } catch (error) {
