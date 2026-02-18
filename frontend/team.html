@@ -11,8 +11,9 @@
     <!-- Sidebar -->
     <aside class="sidebar">
         <div class="sidebar-header">
-            <img class="company-logo-img" src="img/company-logo.svg" alt="" style="max-width:140px;max-height:50px;margin-bottom:6px;" onerror="this.style.display='none'">
-            <p class="sidebar-subtitle">Gestion d'équipe</p>
+            <img id="teamLogoImg" class="team-logo-img" src="" alt="" style="width:48px;height:48px;border-radius:10px;object-fit:contain;background:#f0f0f0;margin-bottom:6px;display:none;cursor:pointer;" title="Cliquez pour changer le logo" onclick="changeTeamLogoFromSidebar()">
+            <img class="company-logo-img" src="img/company-logo.svg" alt="" style="max-width:120px;max-height:40px;margin-bottom:4px;" onerror="this.style.display='none'">
+            <p class="sidebar-subtitle" id="teamSubtitle">Gestion d'équipe</p>
         </div>
 
         <!-- Team Selector (shown if user has multiple teams) -->
@@ -394,6 +395,6 @@
         </div>
     </div>
 
-    <script src="js/team.js?v=20260217h"></script>
+    <script src="js/team.js?v=20260218a"></script>
 </body>
 </html>

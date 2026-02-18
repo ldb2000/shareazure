@@ -896,8 +896,9 @@ async function loadTeams() {
             return;
         }
         container.innerHTML = `<table class="data-table">
-            <thead><tr><th>Nom</th><th>Nom affiché</th><th>Membres</th><th>Fichiers</th><th>Taille</th><th>Créée le</th><th style="width:50px;"></th></tr></thead>
+            <thead><tr><th style="width:40px;"></th><th>Nom</th><th>Nom affiché</th><th>Membres</th><th>Fichiers</th><th>Taille</th><th>Créée le</th><th style="width:50px;"></th></tr></thead>
             <tbody>${res.teams.map(t => `<tr>
+                <td><img src="${API_URL}/teams/${t.id}/logo" alt="" style="width:32px;height:32px;border-radius:6px;object-fit:contain;background:#f5f5f5;" onerror="this.style.display='none'"></td>
                 <td><strong>${escapeHtml(t.name)}</strong></td>
                 <td>${escapeHtml(t.display_name)}</td>
                 <td><span class="badge-info">${t.stats?.memberCount || 0}</span></td>
@@ -918,6 +919,9 @@ async function loadTeams() {
                         </div>
                         <div onclick="manageTeamFiles(${t.id}, '${escapeHtml(t.display_name || t.name)}')" class="ctx-item" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:0.9rem;transition:background 0.15s;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='#fff'">
                             <i class="fas fa-folder-open" style="color:#6a1b9a;width:16px;"></i> Voir les fichiers
+                        </div>
+                        <div onclick="changeTeamLogo(${t.id}, '${escapeHtml(t.display_name || t.name)}')" class="ctx-item" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:0.9rem;transition:background 0.15s;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='#fff'">
+                            <i class="fas fa-image" style="color:#00897b;width:16px;"></i> Changer le logo
                         </div>
                         <div style="border-top:1px solid #eee;"></div>
                         <div onclick="deleteTeam(${t.id})" class="ctx-item" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:0.9rem;color:#c62828;transition:background 0.15s;" onmouseover="this.style.background='#fce4ec'" onmouseout="this.style.background='#fff'">
@@ -3675,3 +3679,41 @@ async function applyCompanyBranding() {
     } catch (e) { /* ignore */ }
 }
 applyCompanyBranding();
+
+// ============================================================================
+// LOGO ÉQUIPE
+// ============================================================================
+
+window.changeTeamLogo = (teamId, teamName) => {
+    document.querySelectorAll('.team-context-menu').forEach(m => m.style.display = 'none');
+    
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.svg,image/svg+xml';
+    input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (!file.type.includes('svg') && !file.name.endsWith('.svg')) {
+            showNotification('Format SVG uniquement', 'error');
+            return;
+        }
+        try {
+            const svgText = await file.text();
+            const res = await fetch(`${API_URL}/teams/${teamId}/logo`, {
+                method: 'PUT',
+                headers: { ...getAuthHeaders(), 'Content-Type': 'image/svg+xml' },
+                body: svgText
+            });
+            const data = await res.json();
+            if (data.success) {
+                showNotification(`Logo de "${teamName}" mis à jour`, 'success');
+                loadTeams();
+            } else {
+                showNotification(data.error || 'Erreur', 'error');
+            }
+        } catch (err) {
+            showNotification('Erreur: ' + err.message, 'error');
+        }
+    };
+    input.click();
+};

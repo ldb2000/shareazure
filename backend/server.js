@@ -2346,6 +2346,56 @@ app.get('/api/company-info', (req, res) => {
 });
 
 // ============================================
+// LOGO ÉQUIPE
+// ============================================
+
+// GET /api/teams/:teamId/logo
+app.get('/api/teams/:teamId/logo', (req, res) => {
+  try {
+    const team = db.prepare('SELECT logo_svg FROM teams WHERE id = ?').get(parseInt(req.params.teamId));
+    if (!team || !team.logo_svg) return res.status(404).json({ error: 'Pas de logo' });
+    res.setHeader('Content-Type', 'image/svg+xml');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(team.logo_svg);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/teams/:teamId/logo — Upload logo (owner ou admin uniquement)
+app.put('/api/teams/:teamId/logo', authenticateUser, express.text({ type: 'image/svg+xml', limit: '500kb' }), (req, res) => {
+  try {
+    const teamId = parseInt(req.params.teamId);
+    // Vérifier owner ou admin
+    if (req.user.role !== 'admin') {
+      const membership = db.prepare('SELECT role FROM team_members WHERE team_id = ? AND user_id = ? AND is_active = 1').get(teamId, req.user.id);
+      if (!membership || membership.role !== 'owner') {
+        return res.status(403).json({ success: false, error: 'Seul le propriétaire de l\'équipe peut modifier le logo' });
+      }
+    }
+    const svg = typeof req.body === 'string' ? req.body : req.body.toString('utf-8');
+    if (!svg.includes('<svg') || !svg.includes('</svg>')) {
+      return res.status(400).json({ success: false, error: 'SVG invalide' });
+    }
+    db.prepare('UPDATE teams SET logo_svg = ? WHERE id = ?').run(svg, teamId);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// DELETE /api/teams/:teamId/logo
+app.delete('/api/teams/:teamId/logo', authenticateUser, (req, res) => {
+  try {
+    const teamId = parseInt(req.params.teamId);
+    if (req.user.role !== 'admin') {
+      const membership = db.prepare('SELECT role FROM team_members WHERE team_id = ? AND user_id = ? AND is_active = 1').get(teamId, req.user.id);
+      if (!membership || membership.role !== 'owner') {
+        return res.status(403).json({ success: false, error: 'Non autorisé' });
+      }
+    }
+    db.prepare('UPDATE teams SET logo_svg = NULL WHERE id = ?').run(teamId);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ============================================
 // ANNOTATIONS PDF
 // ============================================
 

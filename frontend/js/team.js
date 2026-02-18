@@ -112,6 +112,7 @@ function setupTeamSelector() {
         select.addEventListener('change', () => {
             currentTeam = userTeams.find(t => t.teamId === parseInt(select.value));
             loadSectionData(currentSection);
+            if (typeof loadTeamLogo === 'function') loadTeamLogo();
         });
     }
 
@@ -122,6 +123,8 @@ function setupTeamSelector() {
     if (userTeams.length > 1) {
         document.getElementById('teamSelect').value = currentTeam.teamId;
     }
+    // Load team logo
+    setTimeout(() => { if (typeof loadTeamLogo === 'function') loadTeamLogo(); }, 100);
 }
 
 // ============================================
@@ -780,3 +783,65 @@ function showNotification(message, type = 'info') {
 const style = document.createElement('style');
 style.textContent = `@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }`;
 document.head.appendChild(style);
+
+// ============================================================================
+// LOGO ÉQUIPE
+// ============================================================================
+
+function loadTeamLogo() {
+    if (!currentTeam) return;
+    const img = document.getElementById('teamLogoImg');
+    if (!img) return;
+    const testImg = new Image();
+    testImg.onload = () => { img.src = testImg.src; img.style.display = 'block'; };
+    testImg.onerror = () => { img.style.display = 'none'; };
+    testImg.src = `${API_URL}/teams/${currentTeam.teamId}/logo?t=${Date.now()}`;
+    
+    // Update subtitle with team name
+    const subtitle = document.getElementById('teamSubtitle');
+    if (subtitle) subtitle.textContent = currentTeam.displayName || currentTeam.name || 'Gestion d\'équipe';
+    
+    // Only allow click to change if owner
+    img.style.cursor = (currentTeam.role === 'owner' || currentTeam.role === 'admin') ? 'pointer' : 'default';
+    img.title = (currentTeam.role === 'owner' || currentTeam.role === 'admin') ? 'Cliquez pour changer le logo' : currentTeam.displayName || '';
+}
+
+window.changeTeamLogoFromSidebar = () => {
+    if (!currentTeam) return;
+    if (currentTeam.role !== 'owner' && currentTeam.role !== 'admin') {
+        showToast('Seul le propriétaire peut modifier le logo', 'error');
+        return;
+    }
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.svg,image/svg+xml';
+    input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (!file.type.includes('svg') && !file.name.endsWith('.svg')) {
+            showToast('Format SVG uniquement', 'error');
+            return;
+        }
+        try {
+            const svgText = await file.text();
+            const res = await fetch(`${API_URL}/teams/${currentTeam.teamId}/logo`, {
+                method: 'PUT',
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}`, 'Content-Type': 'image/svg+xml' },
+                body: svgText
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast('Logo mis à jour !', 'success');
+                loadTeamLogo();
+            } else {
+                showToast(data.error || 'Erreur', 'error');
+            }
+        } catch (err) {
+            showToast('Erreur: ' + err.message, 'error');
+        }
+    };
+    input.click();
+};
+
+// Hook into team loading
+const _origLoadTeamDashboard = typeof loadTeamDashboard === 'function' ? loadTeamDashboard : null;
