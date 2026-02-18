@@ -674,8 +674,11 @@ function renderFilesTable(files) {
             <td style="position:relative;">
                 <button onclick="toggleFileMenu(event, ${idx})" style="border:none;background:none;font-size:1.2rem;cursor:pointer;padding:4px 8px;" title="Actions">⋯</button>
                 <div id="fileMenu-${idx}" class="file-context-menu" style="display:none;position:absolute;right:0;top:100%;background:#fff;border:1px solid #e0e0e0;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);z-index:100;min-width:220px;overflow:hidden;">
+                    <div onclick="previewFile('${safeName}', '${(file.contentType||'').replace(/'/g,'')}')" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:0.9rem;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='#fff'">
+                        <i class="fas fa-search" style="color:#7b1fa2;width:16px;"></i> Aperçu
+                    </div>
                     <div onclick="viewFileDetails('${safeName}')" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:0.9rem;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='#fff'">
-                        <i class="fas fa-eye" style="color:#1565C0;width:16px;"></i> Voir les détails
+                        <i class="fas fa-info-circle" style="color:#1565C0;width:16px;"></i> Détails
                     </div>
                     <div style="border-top:1px solid #eee;padding:6px 16px;font-size:0.75rem;color:#888;font-weight:600;">CHANGER LE TIER</div>
                     ${tier !== 'Hot' ? `<div onclick="changeFileTier('${safeName}', 'Hot')" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:0.9rem;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='#fff'">
@@ -3553,3 +3556,51 @@ async function runTiering() {
     showNotification('Erreur: ' + error.message, 'error');
   }
 }
+
+// ============================================================================
+// PRÉVISUALISATION ADMIN
+// ============================================================================
+
+window.previewFile = (blobName, contentType) => {
+    document.querySelectorAll('.file-context-menu').forEach(m => m.style.display = 'none');
+    
+    const displayName = blobName.split('/').pop();
+    const previewUrl = `${API_URL}/preview/${encodeURIComponent(blobName)}`;
+    
+    document.getElementById('adminPreviewTitle').textContent = displayName;
+    const body = document.getElementById('adminPreviewBody');
+
+    if (contentType.startsWith('image/')) {
+        body.innerHTML = `<img src="${previewUrl}" alt="${displayName}" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:4px;" />`;
+    } else if (contentType === 'application/pdf') {
+        body.innerHTML = `<iframe src="${previewUrl}#toolbar=1" style="width:100%;height:100%;border:none;border-radius:4px;"></iframe>`;
+    } else if (contentType.startsWith('video/')) {
+        body.innerHTML = `<video controls autoplay style="max-width:100%;max-height:100%;border-radius:4px;"><source src="${previewUrl}" type="${contentType}"></video>`;
+    } else if (contentType.startsWith('audio/')) {
+        body.innerHTML = `<audio controls autoplay style="width:80%;max-width:400px;"><source src="${previewUrl}" type="${contentType}"></audio>`;
+    } else if (contentType.startsWith('text/') || contentType === 'application/json') {
+        body.innerHTML = '<div style="color:#999;">Chargement...</div>';
+        fetch(previewUrl, { headers: getAuthHeaders() }).then(r => r.text()).then(text => {
+            body.innerHTML = `<pre style="color:#e0e0e0;background:#111;padding:20px;border-radius:8px;overflow:auto;width:100%;max-height:100%;font-size:0.85rem;white-space:pre-wrap;">${text.replace(/</g,'&lt;')}</pre>`;
+        });
+    } else {
+        body.innerHTML = `<div style="color:#999;text-align:center;"><i class="fas fa-file" style="font-size:3rem;display:block;margin-bottom:12px;"></i><p>Aperçu non disponible pour ce type</p></div>`;
+    }
+
+    const overlay = document.getElementById('adminPreviewOverlay');
+    overlay.style.display = 'flex';
+};
+
+window.closeAdminPreview = () => {
+    const overlay = document.getElementById('adminPreviewOverlay');
+    overlay.style.display = 'none';
+    const body = document.getElementById('adminPreviewBody');
+    body.querySelectorAll('video, audio').forEach(el => { el.pause(); el.src = ''; });
+    body.innerHTML = '';
+};
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.getElementById('adminPreviewOverlay').style.display === 'flex') {
+        closeAdminPreview();
+    }
+});

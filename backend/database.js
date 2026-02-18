@@ -626,8 +626,8 @@ const shareLinksDb = {
     const stmt = db.prepare(`
       INSERT INTO share_links (
         link_id, blob_name, original_name, content_type, file_size,
-        share_url, password_hash, recipient_email, expires_at, expires_in_minutes, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        share_url, password_hash, recipient_email, expires_at, expires_in_minutes, created_by, watermark_text
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     return stmt.run(
@@ -641,7 +641,8 @@ const shareLinksDb = {
       linkData.recipientEmail || null,
       linkData.expiresAt,
       linkData.expiresInMinutes,
-      linkData.createdBy || null
+      linkData.createdBy || null,
+      linkData.watermarkText || null
     );
   },
 

@@ -14,6 +14,7 @@ const { db, shareLinksDb, downloadLogsDb, settingsDb, allowedEmailDomainsDb, use
 const crypto = require('crypto');
 const { migrateHardcodedUsers } = require('./migrateUsers');
 const emailService = require('./emailService');
+const { watermarkPDF, watermarkImage, canWatermark } = require('./watermarkService');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1073,9 +1074,9 @@ app.get('/api/download/:blobName', async (req, res) => {
 });
 
 // Route pour prévisualiser un fichier (inline, pas en téléchargement)
-app.get('/api/preview/:blobName', async (req, res) => {
+app.get('/api/preview/:blobName(*)', async (req, res) => {
   try {
-    const { blobName } = req.params;
+    const blobName = req.params.blobName || req.params[0];
     // Vérification optionnelle du token (pour les utilisateurs connectés)
     let token = req.query.token || (req.headers['authorization'] && req.headers['authorization'].split(' ')[1]);
     
@@ -1236,7 +1237,7 @@ function extractUserFromToken(req) {
 // Route pour générer un lien de partage temporaire (SAS) - Version avancée
 app.post('/api/share/generate', async (req, res) => {
   try {
-    const { blobName, expiresInMinutes = 60, permissions = 'r', password, recipientEmail } = req.body;
+    const { blobName, expiresInMinutes = 60, permissions = 'r', password, recipientEmail, watermarkText } = req.body;
 
     if (!blobName) {
       return res.status(400).json({ error: 'blobName est requis' });
@@ -1370,7 +1371,8 @@ app.post('/api/share/generate', async (req, res) => {
       recipientEmail: emailList.join(','), // Stocker tous les emails séparés par des virgules
       expiresAt: expiresOn.toISOString(),
       expiresInMinutes,
-      createdBy: username || null
+      createdBy: username || null,
+      watermarkText: watermarkText || null
     });
 
     // Générer le QR Code (toujours URL protégée)
@@ -1555,7 +1557,31 @@ app.post('/api/share/download/:linkId', async (req, res) => {
       email: email || 'non fourni'
     });
 
-    // Envoyer le fichier
+    // Appliquer le watermark si configuré
+    if (link.watermark_text && canWatermark(link.content_type)) {
+      const chunks = [];
+      for await (const chunk of downloadResponse.readableStreamBody) {
+        chunks.push(chunk);
+      }
+      const fileBuffer = Buffer.concat(chunks);
+      
+      let watermarkedBuffer;
+      const wType = canWatermark(link.content_type);
+      if (wType === 'pdf') {
+        watermarkedBuffer = await watermarkPDF(fileBuffer, link.watermark_text);
+      } else if (wType === 'image') {
+        watermarkedBuffer = await watermarkImage(fileBuffer, link.watermark_text);
+      }
+
+      if (watermarkedBuffer) {
+        res.setHeader('Content-Type', link.content_type);
+        res.setHeader('Content-Disposition', `attachment; filename="${link.original_name}"`);
+        res.setHeader('Content-Length', watermarkedBuffer.length);
+        return res.end(watermarkedBuffer);
+      }
+    }
+
+    // Envoyer le fichier (sans watermark)
     res.setHeader('Content-Type', link.content_type);
     res.setHeader('Content-Disposition', `attachment; filename="${link.original_name}"`);
     downloadResponse.readableStreamBody.pipe(res);

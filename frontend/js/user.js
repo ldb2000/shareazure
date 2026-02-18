@@ -978,6 +978,10 @@ function showContextMenu(event, fileName, isFolder) {
     
     // Event listeners (une seule fois)
     if (!menu.dataset.initialized) {
+        document.getElementById('contextPreview').onclick = () => {
+            menu.style.display = 'none';
+            showPreview(contextMenuFile);
+        };
         document.getElementById('contextRename').onclick = () => {
             menu.style.display = 'none';
             showRenameModal();
@@ -1165,8 +1169,23 @@ async function showShareModal() {
         </div>`;
     }
     
+    // Reset watermark
+    const wmSelect = document.getElementById('shareWatermarkSelect');
+    if (wmSelect) wmSelect.value = '';
+    const wmCustom = document.getElementById('shareWatermarkCustom');
+    if (wmCustom) { wmCustom.value = ''; wmCustom.style.display = 'none'; }
+    
     document.getElementById('shareModal').style.display = 'flex';
     document.getElementById('shareRecipientEmailInput').focus();
+}
+
+function getWatermarkText() {
+    const select = document.getElementById('shareWatermarkSelect');
+    if (!select || !select.value) return '';
+    if (select.value === 'custom') {
+        return (document.getElementById('shareWatermarkCustom')?.value || '').trim();
+    }
+    return select.value;
 }
 
 async function handleGenerateShareLink() {
@@ -1212,7 +1231,8 @@ async function handleGenerateShareLink() {
                 expiresInMinutes,
                 recipientEmail: recipientEmails,
                 password,
-                permissions: 'r'
+                permissions: 'r',
+                watermarkText: getWatermarkText()
             })
         });
         
@@ -2632,3 +2652,85 @@ async function applyOptimization(blobName, targetTier, btn) {
         btn.disabled = false;
     }
 }
+
+// ============================================================================
+// PRÉVISUALISATION
+// ============================================================================
+
+function showPreview(blobName) {
+    const file = filteredFiles.find(f => f.name === blobName);
+    if (!file || file.isFolder) return;
+
+    const displayName = file.displayName || file.originalName || blobName.split('/').pop();
+    const contentType = file.contentType || '';
+    const token = getAuthToken();
+    const previewUrl = `${API_URL}/preview/${encodeURIComponent(blobName)}?token=${encodeURIComponent(token)}`;
+
+    document.getElementById('previewTitle').textContent = displayName;
+    
+    // Download button
+    document.getElementById('previewDownloadBtn').onclick = () => {
+        const a = document.createElement('a');
+        a.href = `${API_URL}/download/${encodeURIComponent(blobName)}?token=${encodeURIComponent(token)}`;
+        a.download = displayName;
+        a.click();
+    };
+
+    const body = document.getElementById('previewBody');
+
+    if (contentType.startsWith('image/')) {
+        body.innerHTML = `<img src="${previewUrl}" alt="${escapeHtml(displayName)}" />`;
+    } else if (contentType === 'application/pdf') {
+        body.innerHTML = `<iframe src="${previewUrl}#toolbar=1&navpanes=0" title="${escapeHtml(displayName)}"></iframe>`;
+    } else if (contentType.startsWith('video/')) {
+        body.innerHTML = `<video controls autoplay><source src="${previewUrl}" type="${contentType}">Votre navigateur ne supporte pas la vidéo.</video>`;
+    } else if (contentType.startsWith('audio/')) {
+        body.innerHTML = `<audio controls autoplay><source src="${previewUrl}" type="${contentType}">Votre navigateur ne supporte pas l'audio.</audio>`;
+    } else if (contentType.startsWith('text/') || contentType === 'application/json' || contentType === 'application/xml') {
+        body.innerHTML = '<div class="spinner"></div>';
+        fetch(previewUrl).then(r => r.text()).then(text => {
+            body.innerHTML = `<pre style="color:#e0e0e0;background:#111;padding:20px;border-radius:8px;overflow:auto;width:100%;max-height:100%;font-size:0.85rem;white-space:pre-wrap;">${escapeHtml(text)}</pre>`;
+        }).catch(() => {
+            body.innerHTML = '<div class="preview-unsupported"><i class="fas fa-exclamation-triangle"></i>Erreur de chargement</div>';
+        });
+    } else {
+        body.innerHTML = `<div class="preview-unsupported">
+            <i class="fas fa-file"></i>
+            <p><strong>${escapeHtml(displayName)}</strong></p>
+            <p>Aperçu non disponible pour ce type de fichier</p>
+            <button class="btn btn-primary" onclick="document.getElementById('previewDownloadBtn').click()" style="margin-top:12px;">
+                <i class="fas fa-download"></i> Télécharger
+            </button>
+        </div>`;
+    }
+
+    document.getElementById('previewModal').style.display = 'flex';
+}
+
+function closePreview() {
+    document.getElementById('previewModal').style.display = 'none';
+    // Stop video/audio
+    const body = document.getElementById('previewBody');
+    body.querySelectorAll('video, audio').forEach(el => { el.pause(); el.src = ''; });
+    body.innerHTML = '';
+}
+
+// Double-click sur un fichier = preview
+document.addEventListener('dblclick', (e) => {
+    const fileCard = e.target.closest('.file-card[data-file-name], .file-row[data-file-name]');
+    if (fileCard) {
+        const fileName = fileCard.dataset.fileName;
+        const file = filteredFiles.find(f => f.name === fileName);
+        if (file && !file.isFolder) {
+            e.preventDefault();
+            showPreview(fileName);
+        }
+    }
+});
+
+// Escape ferme le preview
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.getElementById('previewModal').style.display === 'flex') {
+        closePreview();
+    }
+});

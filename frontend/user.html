@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ShareAzure - Mon espace de stockage</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="css/user.css?v=20260218b">
+    <link rel="stylesheet" href="css/user.css?v=20260218c">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -394,6 +394,10 @@
 
     <!-- Context Menu -->
     <div class="context-menu" id="contextMenu" style="display: none;">
+        <button class="context-menu-item" id="contextPreview">
+            <i class="fas fa-eye"></i>
+            <span>Aperçu</span>
+        </button>
         <button class="context-menu-item" id="contextRename">
             <i class="fas fa-edit"></i>
             <span>Renommer</span>
@@ -503,6 +507,20 @@
                             <option value="43200">30 jours</option>
                             <option value="129600">90 jours</option>
                         </select>
+                    </div>
+                    <div class="form-group">
+                        <label><i class="fas fa-stamp" style="color:#888;"></i> Filigrane (watermark)</label>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <select id="shareWatermarkSelect" class="form-select" style="flex:1;" onchange="document.getElementById('shareWatermarkCustom').style.display=this.value==='custom'?'block':'none'">
+                                <option value="">Aucun</option>
+                                <option value="CONFIDENTIEL">CONFIDENTIEL</option>
+                                <option value="NE PAS DIFFUSER">NE PAS DIFFUSER</option>
+                                <option value="USAGE INTERNE">USAGE INTERNE</option>
+                                <option value="custom">Personnalisé...</option>
+                            </select>
+                        </div>
+                        <input type="text" id="shareWatermarkCustom" class="form-input" placeholder="Texte du filigrane" style="display:none;margin-top:6px;" maxlength="50">
+                        <small style="color:#999;">Appliqué sur les PDF et images lors du téléchargement</small>
                     </div>
                     <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end;padding-top:16px;border-top:1px solid #eee;">
                         <button class="btn btn-secondary" id="cancelShareBtn">Annuler</button>
@@ -632,7 +650,7 @@
         </div>
     </div>
 
-    <script src="js/user.js?v=20260218b"></script>
+    <script src="js/user.js?v=20260218c"></script>
     <!-- Modal Corbeille -->
     <div class="modal-overlay" id="trashModal" style="display: none;">
         <div class="modal-content" style="max-width: 750px;">
@@ -653,6 +671,22 @@
                     </div>
                 </div>
                 <div id="trashFilesList" style="max-height:450px;overflow-y:auto;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Preview Modal -->
+    <div class="modal-overlay" id="previewModal" style="display:none;" onclick="if(event.target===this)closePreview()">
+        <div class="preview-container">
+            <div class="preview-header">
+                <div class="preview-title" id="previewTitle">Aperçu</div>
+                <div class="preview-actions">
+                    <button class="btn-icon" id="previewDownloadBtn" title="Télécharger"><i class="fas fa-download"></i></button>
+                    <button class="btn-icon" onclick="closePreview()" title="Fermer"><i class="fas fa-times"></i></button>
+                </div>
+            </div>
+            <div class="preview-body" id="previewBody">
+                <div class="spinner"></div>
             </div>
         </div>
     </div>

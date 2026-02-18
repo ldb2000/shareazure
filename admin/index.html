@@ -1910,6 +1910,17 @@
         </div>
     </div>
 
-    <script src="js/admin.js?v=20260218b"></script>
+    <!-- Preview Modal -->
+    <div id="adminPreviewOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;display:none;align-items:center;justify-content:center;" onclick="if(event.target===this)closeAdminPreview()">
+        <div style="background:#1a1a1a;width:95vw;max-width:1200px;height:90vh;border-radius:12px;display:flex;flex-direction:column;overflow:hidden;">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 20px;background:#222;border-bottom:1px solid #333;">
+                <span id="adminPreviewTitle" style="color:#fff;font-weight:600;font-size:0.95rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;"></span>
+                <button onclick="closeAdminPreview()" style="color:#ccc;background:transparent;border:none;font-size:1.2rem;cursor:pointer;padding:6px 10px;border-radius:6px;">✕</button>
+            </div>
+            <div id="adminPreviewBody" style="flex:1;display:flex;align-items:center;justify-content:center;overflow:auto;padding:20px;"></div>
+        </div>
+    </div>
+
+    <script src="js/admin.js?v=20260218c"></script>
 </body>
 </html>
