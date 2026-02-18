@@ -1763,6 +1763,9 @@ async function loadSettings() {
         const res = await apiRequest('/settings');
         if (!res.success) return;
         const s = res.settings;
+        // Company
+        if (s.companyName) document.getElementById('companyName').value = s.companyName.value;
+        loadCompanyLogo();
         if (s.maxFileSizeMB) document.getElementById('maxFileSizeMB').value = s.maxFileSizeMB.value;
         if (s.containerName) document.getElementById('containerName').value = s.containerName.value;
         if (s.storageQuota) document.getElementById('storageQuota').value = s.storageQuota.value;
@@ -1784,6 +1787,7 @@ async function loadSettings() {
 async function saveSettings() {
     try {
         await apiRequest('/settings', 'PUT', {
+            companyName: document.getElementById('companyName').value,
             maxFileSizeMB: document.getElementById('maxFileSizeMB').value,
             containerName: document.getElementById('containerName').value,
             storageQuota: document.getElementById('storageQuota').value,
@@ -3604,3 +3608,67 @@ document.addEventListener('keydown', (e) => {
         closeAdminPreview();
     }
 });
+
+// ============================================================================
+// LOGO ENTREPRISE
+// ============================================================================
+
+function loadCompanyLogo() {
+    const preview = document.getElementById('companyLogoPreview');
+    if (!preview) return;
+    const img = new Image();
+    img.onload = () => { preview.innerHTML = ''; preview.appendChild(img); };
+    img.onerror = () => { preview.innerHTML = '<span style="color:#ccc;font-size:0.8rem;">Aucun logo</span>'; };
+    img.src = `${API_URL}/company-logo?t=${Date.now()}`;
+    img.style.maxWidth = '100%';
+    img.style.maxHeight = '100%';
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('companyLogoInput')?.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (!file.type.includes('svg')) {
+            showNotification('Format SVG uniquement', 'error');
+            return;
+        }
+        try {
+            const text = await file.text();
+            const res = await fetch(`${API_URL}/admin/company-logo`, {
+                method: 'POST',
+                headers: { ...getAuthHeaders(), 'Content-Type': 'image/svg+xml' },
+                body: text
+            });
+            const data = await res.json();
+            if (data.success) {
+                showNotification('Logo mis à jour', 'success');
+                loadCompanyLogo();
+                applyCompanyBranding(); // Refresh header
+            } else {
+                showNotification(data.error || 'Erreur', 'error');
+            }
+        } catch (err) {
+            showNotification('Erreur upload: ' + err.message, 'error');
+        }
+    });
+});
+
+// Branding: apply company name + logo on page load
+async function applyCompanyBranding() {
+    try {
+        const res = await fetch(`${API_URL}/company-info`);
+        const data = await res.json();
+        if (data.success) {
+            document.title = `${data.companyName} — Administration`;
+            // Update header title if exists
+            const headerTitle = document.querySelector('.header-title, .app-title');
+            if (headerTitle) headerTitle.textContent = data.companyName;
+            // Update logo in sidebar/header
+            const logoEls = document.querySelectorAll('.company-logo-img');
+            logoEls.forEach(el => {
+                if (data.hasLogo) el.src = `${API_URL}/company-logo?t=${Date.now()}`;
+            });
+        }
+    } catch (e) { /* ignore */ }
+}
+applyCompanyBranding();

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 60">
+  <defs>
+    <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#E31E26"/>
+      <stop offset="100%" style="stop-color:#C41017"/>
+    </linearGradient>
+  </defs>
+  <rect width="200" height="60" rx="8" fill="#fff"/>
+  <circle cx="30" cy="30" r="18" fill="url(#g1)"/>
+  <text x="30" y="36" text-anchor="middle" fill="#fff" font-family="Arial,sans-serif" font-weight="bold" font-size="16">A</text>
+  <text x="58" y="38" fill="#E31E26" font-family="Arial,sans-serif" font-weight="bold" font-size="24">APRIL</text>
+  <text x="58" y="50" fill="#666" font-family="Arial,sans-serif" font-size="9">Assurances</text>
+</svg>

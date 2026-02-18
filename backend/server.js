@@ -2299,6 +2299,53 @@ app.post('/api/settings/reset', async (req, res) => {
 });
 
 // ============================================
+// LOGO ENTREPRISE
+// ============================================
+
+// GET /api/company-logo — Servir le logo SVG
+app.get('/api/company-logo', (req, res) => {
+  const logoPath = path.join(__dirname, '..', 'frontend', 'img', 'company-logo.svg');
+  if (fs.existsSync(logoPath)) {
+    res.setHeader('Content-Type', 'image/svg+xml');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    return res.sendFile(logoPath);
+  }
+  res.status(404).json({ error: 'Logo non trouvé' });
+});
+
+// POST /api/admin/company-logo — Upload nouveau logo SVG
+app.post('/api/admin/company-logo', authenticateUser, requireAdmin, express.raw({ type: 'image/svg+xml', limit: '500kb' }), (req, res) => {
+  try {
+    const svgContent = req.body.toString('utf-8');
+    // Validation basique SVG
+    if (!svgContent.includes('<svg') || !svgContent.includes('</svg>')) {
+      return res.status(400).json({ success: false, error: 'Fichier SVG invalide' });
+    }
+    // Sauvegarder dans frontend et admin
+    const frontendPath = path.join(__dirname, '..', 'frontend', 'img', 'company-logo.svg');
+    const adminPath = path.join(__dirname, '..', 'admin', 'img', 'company-logo.svg');
+    fs.writeFileSync(frontendPath, svgContent);
+    fs.writeFileSync(adminPath, svgContent);
+    
+    activityLogsDb.create('info', 'settings', 'logo_updated', 
+      `Logo entreprise mis à jour par ${req.user.username}`,
+      req.user.username, null, req.ip);
+    
+    res.json({ success: true, message: 'Logo mis à jour' });
+  } catch (error) {
+    console.error('Erreur upload logo:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/company-info — Nom + logo pour affichage public
+app.get('/api/company-info', (req, res) => {
+  const companyName = settingsDb.get('companyName') || 'ShareAzure';
+  const logoExists = fs.existsSync(path.join(__dirname, '..', 'frontend', 'img', 'company-logo.svg'));
+  res.json({ success: true, companyName, hasLogo: logoExists });
+});
+
+// ============================================
 // API Logs d'activité
 // ============================================
 

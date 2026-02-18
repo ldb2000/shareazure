@@ -2734,3 +2734,17 @@ document.addEventListener('keydown', (e) => {
         closePreview();
     }
 });
+
+// Branding: apply company name + logo
+(async () => {
+    try {
+        const res = await fetch(`${API_URL}/company-info`);
+        const data = await res.json();
+        if (data.success) {
+            document.title = `${data.companyName} — Mon espace`;
+            document.querySelectorAll('.company-logo-img').forEach(el => {
+                if (data.hasLogo) el.src = `${API_URL}/company-logo?t=${Date.now()}`;
+            });
+        }
+    } catch (e) { /* ignore */ }
+})();
