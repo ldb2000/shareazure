@@ -1391,9 +1391,17 @@ app.post('/api/share/generate', async (req, res) => {
           senderName: username || 'Un utilisateur',
           fileName: properties.metadata?.originalName || blobName,
           shareUrl: protectedUrl,
-          password: password,
           expiresAt: expiresOn.toISOString()
         }).catch(err => console.error('Share email error:', err));
+
+        // 2ème email avec le mot de passe (délai 3s pour séparer)
+        setTimeout(() => {
+          emailService.sendSharePassword(recipientAddr, {
+            senderName: username || 'Un utilisateur',
+            fileName: properties.metadata?.originalName || blobName,
+            password: password
+          }).catch(err => console.error('Share password email error:', err));
+        }, 3000);
       }
     }
 

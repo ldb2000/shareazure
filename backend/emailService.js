@@ -230,7 +230,7 @@ async function sendShareNotification(to, { senderName, fileName, shareUrl, passw
     ${message ? `<p style="background:#e3f2fd;padding:12px;border-radius:6px;"><em>"${message}"</em></p>` : ''}
     <div class="password-box">
       <strong>🔒 Mot de passe requis</strong><br>
-      ${password ? `Mot de passe : <strong style="font-size:1.1em;letter-spacing:1px;">${password}</strong>` : `Le mot de passe vous sera communiqué séparément par l'expéditeur.`}
+      Le mot de passe vous sera communiqué dans un email séparé.
     </div>
     <p style="text-align:center;margin:25px 0;"><a href="${shareUrl}" class="btn">Accéder au fichier</a></p>
     <div class="footer">
@@ -239,9 +239,45 @@ async function sendShareNotification(to, { senderName, fileName, shareUrl, passw
     </div>
   </div></body></html>`;
   
-  const text = `${senderName || 'Un utilisateur'} vous a partagé "${fileName}"\nLien: ${shareUrl}\n${password ? `Mot de passe: ${password}` : 'Mot de passe requis (communiqué séparément)'}\nExpire le: ${expiresDate}`;
+  const text = `${senderName || 'Un utilisateur'} vous a partagé "${fileName}"\nLien: ${shareUrl}\nMot de passe requis (envoyé séparément)\nExpire le: ${expiresDate}`;
   
   return sendMail(to, `📎 ${senderName || 'Quelqu\'un'} vous a partagé "${fileName}" — ${appName}`, html, text);
+}
+
+async function sendSharePassword(to, { senderName, fileName, password }) {
+  const config = getConfig();
+  const appName = config.fromName;
+
+  const html = `
+  <!DOCTYPE html>
+  <html><head><meta charset="utf-8">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+    .container { background: #f9f9f9; border-radius: 8px; padding: 30px; border: 1px solid #e0e0e0; }
+    .header { background: #003C61; color: white; padding: 20px; border-radius: 8px; text-align: center; margin-bottom: 20px; }
+    .password-box { background: #e8f5e9; border: 2px solid #4caf50; padding: 20px; margin: 20px 0; border-radius: 8px; text-align: center; }
+    .password-value { font-size: 1.4em; font-weight: 700; letter-spacing: 2px; color: #2e7d32; margin-top: 8px; }
+    .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #e0e0e0; font-size: 12px; color: #666; text-align: center; }
+  </style></head>
+  <body><div class="container">
+    <div class="header">
+      <h1 style="margin:0;">🔑 ${appName}</h1>
+      <p style="margin:5px 0 0;opacity:0.8;">Mot de passe de partage</p>
+    </div>
+    <p>Voici le mot de passe pour accéder au fichier <strong>"${fileName}"</strong> partagé par <strong>${senderName || 'un utilisateur'}</strong> :</p>
+    <div class="password-box">
+      <div>🔒 Mot de passe</div>
+      <div class="password-value">${password}</div>
+    </div>
+    <p style="color:#888;font-size:0.85rem;">⚠️ Ne partagez pas ce mot de passe avec des tiers. Ce message a été envoyé séparément pour des raisons de sécurité.</p>
+    <div class="footer">
+      <p>${appName} — Partage sécurisé</p>
+    </div>
+  </div></body></html>`;
+
+  const text = `Mot de passe pour "${fileName}" partagé par ${senderName || 'un utilisateur'} : ${password}`;
+
+  return sendMail(to, `🔑 Mot de passe pour "${fileName}" — ${appName}`, html, text);
 }
 
 async function sendUploadRequestNotification(to, { requesterName, title, description, uploadUrl, expiresAt }) {
@@ -384,6 +420,7 @@ async function sendAccountExpiringSoon(email, daysRemaining) {
 module.exports = {
   sendMail,
   sendShareNotification,
+  sendSharePassword,
   sendUploadRequestNotification,
   sendUploadConfirmation,
   sendGuestCode,
