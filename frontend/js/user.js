@@ -3189,3 +3189,196 @@ async function pollNotifCount() {
 // Start polling
 pollNotifCount();
 notifPollInterval = setInterval(pollNotifCount, 30000);
+
+// ============================================================================
+// BULK ACTIONS
+// ============================================================================
+
+let selectedFiles = new Set();
+
+function toggleFileSelect(blobName, el) {
+    if (selectedFiles.has(blobName)) {
+        selectedFiles.delete(blobName);
+        el?.closest('.file-card, .file-row')?.classList.remove('selected');
+    } else {
+        selectedFiles.add(blobName);
+        el?.closest('.file-card, .file-row')?.classList.add('selected');
+    }
+    updateBulkBar();
+}
+
+function toggleSelectAll(checked) {
+    if (checked) {
+        filteredFiles.filter(f => !f.isFolder).forEach(f => selectedFiles.add(f.name));
+    } else {
+        selectedFiles.clear();
+    }
+    document.querySelectorAll('.file-card, .file-row').forEach(el => {
+        const name = el.dataset.fileName;
+        if (name) {
+            el.classList.toggle('selected', selectedFiles.has(name));
+            const cb = el.querySelector('.file-select-checkbox');
+            if (cb) cb.checked = selectedFiles.has(name);
+        }
+    });
+    updateBulkBar();
+}
+
+function clearSelection() {
+    selectedFiles.clear();
+    document.querySelectorAll('.file-card.selected, .file-row.selected').forEach(el => el.classList.remove('selected'));
+    document.querySelectorAll('.file-select-checkbox').forEach(cb => cb.checked = false);
+    updateBulkBar();
+}
+
+function updateBulkBar() {
+    const bar = document.getElementById('bulkBar');
+    if (selectedFiles.size > 0) {
+        bar.style.display = 'flex';
+        document.getElementById('bulkCount').textContent = `${selectedFiles.size} sélectionné(s)`;
+    } else {
+        bar.style.display = 'none';
+    }
+}
+
+async function bulkDownloadZip() {
+    if (selectedFiles.size === 0) return;
+    showSuccess(`Préparation du ZIP (${selectedFiles.size} fichiers)...`);
+    try {
+        const res = await fetch(`${API_URL}/files/bulk-download`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+            body: JSON.stringify({ blobNames: [...selectedFiles] })
+        });
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `shareazure-${selectedFiles.size}fichiers.zip`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showSuccess('Téléchargement ZIP terminé');
+    } catch (e) { showError('Erreur ZIP: ' + e.message); }
+}
+
+async function bulkDelete() {
+    if (!confirm(`Mettre ${selectedFiles.size} fichier(s) en corbeille ?`)) return;
+    try {
+        const res = await fetch(`${API_URL}/files/bulk-delete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+            body: JSON.stringify({ blobNames: [...selectedFiles] })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showSuccess(`${data.trashed} fichier(s) mis en corbeille`);
+            clearSelection();
+            loadFiles();
+        }
+    } catch (e) { showError(e.message); }
+}
+
+function bulkShare() {
+    // If all selected files are in the same folder, share as folder
+    const folders = new Set([...selectedFiles].map(f => f.substring(0, f.lastIndexOf('/') + 1)));
+    if (folders.size === 1 && [...folders][0]) {
+        const folderPath = [...folders][0];
+        const folderName = folderPath.replace(/\/$/, '').split('/').pop();
+        if (confirm(`Partager tout le dossier "${folderName}" (${selectedFiles.size} fichiers) ?`)) {
+            showFolderShareModal(folderPath, folderName, selectedFiles.size);
+            return;
+        }
+    }
+    showError('Sélectionnez des fichiers d\'un même dossier pour partager');
+}
+
+function showFolderShareModal(folderPath, folderName, fileCount) {
+    // Reuse share modal
+    document.getElementById('shareModalTitle').textContent = `Partager "📁 ${folderName}" (${fileCount} fichiers)`;
+    document.getElementById('shareRecipientEmailInput').value = '';
+    document.getElementById('sharePasswordInput').value = '';
+    document.getElementById('shareExpirationSelect').value = '1440';
+    const wmSelect = document.getElementById('shareWatermarkSelect');
+    if (wmSelect) wmSelect.value = '';
+
+    const stepConfig = document.getElementById('shareStepConfig');
+    const stepResult = document.getElementById('shareStepResult');
+    if (stepConfig) stepConfig.style.display = 'block';
+    if (stepResult) stepResult.style.display = 'none';
+
+    const shareFileInfo = document.getElementById('shareFileInfo');
+    if (shareFileInfo) {
+        shareFileInfo.innerHTML = `<div style="display:flex;align-items:center;gap:12px;">
+            <div style="font-size:1.5rem;">📁</div>
+            <div><div style="font-weight:600;">${folderName}</div>
+            <div style="color:#888;font-size:0.85rem;">${fileCount} fichiers</div></div>
+        </div>`;
+    }
+
+    // Override the share handler temporarily
+    window._folderSharePath = folderPath;
+    document.getElementById('shareModal').style.display = 'flex';
+}
+
+// Patch handleGenerateShareLink to support folder sharing
+const _origHandleGenerate = handleGenerateShareLink;
+window.handleGenerateShareLink = async function() {
+    if (window._folderSharePath) {
+        const folderPath = window._folderSharePath;
+        delete window._folderSharePath;
+        
+        const recipientEmails = document.getElementById('shareRecipientEmailInput').value.trim();
+        const password = document.getElementById('sharePasswordInput').value.trim();
+        if (!recipientEmails || !password) { showError('Email et mot de passe requis'); return; }
+        
+        const applyBtn = document.getElementById('applyShareBtn');
+        if (applyBtn) { applyBtn.disabled = true; applyBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
+        
+        try {
+            const res = await fetch(`${API_URL}/files/bulk-share`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+                body: JSON.stringify({
+                    folderPath,
+                    recipientEmail: recipientEmails,
+                    password,
+                    expiresInMinutes: parseInt(document.getElementById('shareExpirationSelect').value),
+                    watermarkText: getWatermarkText()
+                })
+            });
+            const data = await res.json();
+            if (data.success) {
+                document.getElementById('shareLinkInput').value = data.shareLink;
+                const qrImg = document.getElementById('qrCodeImage');
+                if (qrImg && data.qrCode) qrImg.src = data.qrCode;
+                document.getElementById('shareStepConfig').style.display = 'none';
+                document.getElementById('shareStepResult').style.display = 'block';
+                showSuccess(`Dossier partagé (${data.fileCount} fichiers)`);
+            } else { showError(data.error); }
+        } catch (e) { showError(e.message); }
+        finally { if (applyBtn) { applyBtn.disabled = false; applyBtn.innerHTML = '<i class="fas fa-link"></i> Créer le lien'; } }
+        return;
+    }
+    return _origHandleGenerate.call(this);
+};
+
+// Add checkboxes to file cards via MutationObserver
+const filesObserver = new MutationObserver(() => {
+    document.querySelectorAll('.file-card:not([data-bulk-init]), .file-row:not([data-bulk-init])').forEach(el => {
+        el.setAttribute('data-bulk-init', '1');
+        const fileName = el.dataset.fileName;
+        if (!fileName) return;
+        // Check if it's a folder
+        const file = (typeof filteredFiles !== 'undefined') ? filteredFiles.find(f => f.name === fileName) : null;
+        if (file && file.isFolder) return;
+        
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'file-select-checkbox';
+        cb.checked = selectedFiles.has(fileName);
+        cb.onclick = (e) => { e.stopPropagation(); toggleFileSelect(fileName, cb); };
+        el.style.position = 'relative';
+        el.prepend(cb);
+    });
+});
+filesObserver.observe(document.getElementById('filesGrid') || document.body, { childList: true, subtree: true });

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ShareAzure - Mon espace de stockage</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="css/user.css?v=20260218h">
+    <link rel="stylesheet" href="css/user.css?v=20260218i">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -308,6 +308,20 @@
             </div>
 
             <!-- Files Section -->
+            <!-- Bulk Actions Bar -->
+            <div class="bulk-bar" id="bulkBar" style="display:none;">
+                <div class="bulk-info">
+                    <input type="checkbox" id="bulkSelectAll" onchange="toggleSelectAll(this.checked)">
+                    <span id="bulkCount">0 sélectionné(s)</span>
+                </div>
+                <div class="bulk-actions">
+                    <button class="btn btn-sm btn-primary" onclick="bulkDownloadZip()" title="Télécharger en ZIP"><i class="fas fa-file-archive"></i> ZIP</button>
+                    <button class="btn btn-sm btn-secondary" onclick="bulkShare()" title="Partager la sélection"><i class="fas fa-share-alt"></i> Partager</button>
+                    <button class="btn btn-sm btn-danger" onclick="bulkDelete()" title="Supprimer"><i class="fas fa-trash"></i> Supprimer</button>
+                    <button class="btn btn-sm" onclick="clearSelection()" title="Annuler"><i class="fas fa-times"></i></button>
+                </div>
+            </div>
+
             <div class="files-section" id="filesSection">
             <!-- Grid View -->
             <div class="files-grid" id="filesGrid">
@@ -663,7 +677,7 @@
         </div>
     </div>
 
-    <script src="js/user.js?v=20260218h"></script>
+    <script src="js/user.js?v=20260218i"></script>
     <!-- Modal Corbeille -->
     <div class="modal-overlay" id="trashModal" style="display: none;">
         <div class="modal-content" style="max-width: 750px;">

@@ -141,6 +141,24 @@ async function handleLogin() {
 
         const data = await response.json();
 
+        if (data.success && data.requires2FA) {
+            // Show OTP form
+            window._pendingToken = data.pendingToken;
+            window._rememberMe = rememberMe;
+            document.getElementById('loginForm').style.display = 'none';
+            document.getElementById('otpForm').style.display = 'block';
+            document.getElementById('otpCode').focus();
+            // Init OTP form handler
+            if (!window._otpInit) {
+                window._otpInit = true;
+                document.getElementById('otpForm').addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    await handleOTP();
+                });
+            }
+            return;
+        }
+
         if (data.success && data.token) {
             const storage = rememberMe ? localStorage : sessionStorage;
 
@@ -205,4 +223,46 @@ async function verifyToken(token) {
         console.error('Erreur vérification token:', error);
         return null;
     }
+}
+
+async function handleOTP() {
+    const code = document.getElementById('otpCode').value.trim();
+    const errDiv = document.getElementById('otpError');
+    const errMsg = document.getElementById('otpErrorMessage');
+    errDiv.style.display = 'none';
+    
+    try {
+        const res = await fetch(`${API_URL}/auth/verify-otp`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pendingToken: window._pendingToken, code })
+        });
+        const data = await res.json();
+        
+        if (data.success && data.token) {
+            const storage = window._rememberMe ? localStorage : sessionStorage;
+            storage.setItem('authToken', data.token);
+            storage.setItem('userData', JSON.stringify(data.user));
+            if (data.user.role === 'admin') {
+                storage.setItem('adminToken', data.token);
+                storage.setItem('adminUsername', data.user.username);
+            }
+            storage.setItem('userToken', data.token);
+            window.location.href = data.redirect === '/admin/' ? '/admin/' : data.redirect;
+        } else {
+            errMsg.textContent = data.error || 'Code invalide';
+            errDiv.style.display = 'flex';
+            document.getElementById('otpCode').value = '';
+            document.getElementById('otpCode').focus();
+        }
+    } catch (e) {
+        errMsg.textContent = 'Erreur de connexion';
+        errDiv.style.display = 'flex';
+    }
+}
+
+function backToLogin() {
+    document.getElementById('otpForm').style.display = 'none';
+    document.getElementById('loginForm').style.display = 'block';
+    document.getElementById('otpCode').value = '';
 }

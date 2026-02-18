@@ -15,6 +15,7 @@ const crypto = require('crypto');
 const { migrateHardcodedUsers } = require('./migrateUsers');
 const emailService = require('./emailService');
 const { watermarkPDF, watermarkImage, canWatermark } = require('./watermarkService');
+const archiver = require('archiver');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1560,6 +1561,24 @@ app.post('/api/share/download/:linkId', async (req, res) => {
 
     // Télécharger le fichier depuis Azure
     const containerClient = blobServiceClient.getContainerClient(containerName);
+
+    // Si c'est un dossier (content_type = application/zip et blob_name finit par /)
+    if (link.content_type === 'application/zip' && link.blob_name.endsWith('/')) {
+      shareLinksDb.incrementDownloadCount(linkId);
+      res.setHeader('Content-Type', 'application/zip');
+      const folderName = link.blob_name.replace(/\/$/, '').split('/').pop() || 'dossier';
+      res.setHeader('Content-Disposition', `attachment; filename="${folderName}.zip"`);
+      const archive = archiver('zip', { zlib: { level: 5 } });
+      archive.pipe(res);
+      for await (const blob of containerClient.listBlobsFlat({ prefix: link.blob_name })) {
+        const bbc = containerClient.getBlockBlobClient(blob.name);
+        const dl = await bbc.download();
+        archive.append(dl.readableStreamBody, { name: blob.name.replace(link.blob_name, '') });
+      }
+      await archive.finalize();
+      return;
+    }
+
     const blockBlobClient = containerClient.getBlockBlobClient(link.blob_name);
 
     const downloadResponse = await blockBlobClient.download();
@@ -2371,6 +2390,150 @@ app.get('/api/company-info', (req, res) => {
 });
 
 // ============================================
+// BULK ACTIONS
+// ============================================
+
+// POST /api/files/bulk-download — Télécharger plusieurs fichiers en ZIP
+app.post('/api/files/bulk-download', authenticateUser, async (req, res) => {
+  try {
+    const { blobNames } = req.body;
+    if (!Array.isArray(blobNames) || blobNames.length === 0) {
+      return res.status(400).json({ success: false, error: 'Aucun fichier sélectionné' });
+    }
+    if (blobNames.length > 100) {
+      return res.status(400).json({ success: false, error: 'Maximum 100 fichiers' });
+    }
+
+    const containerClient = blobServiceClient.getContainerClient(containerName);
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="shareazure-${Date.now()}.zip"`);
+
+    const archive = archiver('zip', { zlib: { level: 5 } });
+    archive.pipe(res);
+
+    for (const blobName of blobNames) {
+      try {
+        const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+        const downloadResponse = await blockBlobClient.download();
+        const fileName = blobName.split('/').pop();
+        archive.append(downloadResponse.readableStreamBody, { name: fileName });
+      } catch (e) {
+        console.error(`Bulk download skip ${blobName}:`, e.message);
+      }
+    }
+
+    await archive.finalize();
+  } catch (e) {
+    console.error('Bulk download error:', e);
+    if (!res.headersSent) res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// POST /api/files/bulk-delete — Supprimer plusieurs fichiers (corbeille)
+app.post('/api/files/bulk-delete', authenticateUser, async (req, res) => {
+  try {
+    const { blobNames } = req.body;
+    if (!Array.isArray(blobNames) || blobNames.length === 0) {
+      return res.status(400).json({ success: false, error: 'Aucun fichier' });
+    }
+
+    let trashed = 0;
+    for (const blobName of blobNames) {
+      try {
+        const file = fileOwnershipDb.getByBlobName(blobName);
+        if (!file) continue;
+        const isOwner = file.uploaded_by_user_id === req.user.id;
+        const isAdmin = req.user.role === 'admin';
+        if (!isOwner && !isAdmin) continue;
+        db.prepare("UPDATE file_ownership SET is_trashed = 1, trashed_at = datetime('now'), trashed_by = ? WHERE blob_name = ?").run(req.user.id, blobName);
+        trashed++;
+      } catch (e) { /* skip */ }
+    }
+
+    res.json({ success: true, trashed });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// POST /api/files/bulk-share — Partager un dossier (tous les fichiers d'un préfixe)
+app.post('/api/files/bulk-share', authenticateUser, async (req, res) => {
+  try {
+    const { folderPath, recipientEmail, password, expiresInMinutes = 1440, watermarkText } = req.body;
+    if (!folderPath || !recipientEmail || !password) {
+      return res.status(400).json({ success: false, error: 'Dossier, email et mot de passe requis' });
+    }
+
+    // List all files in folder
+    const containerClient = blobServiceClient.getContainerClient(containerName);
+    const blobs = [];
+    for await (const blob of containerClient.listBlobsFlat({ prefix: folderPath })) {
+      blobs.push(blob.name);
+    }
+
+    if (blobs.length === 0) {
+      return res.status(404).json({ success: false, error: 'Dossier vide' });
+    }
+
+    // Create a share link for the folder (ZIP download)
+    const linkId = uuidv4();
+    const passwordHash = await bcrypt.hash(password.trim(), 10);
+    const expiresOn = new Date();
+    expiresOn.setMinutes(expiresOn.getMinutes() + expiresInMinutes);
+    const backendUrl = process.env.BACKEND_URL || (req.protocol + '://' + req.get('host'));
+    const protectedUrl = `${backendUrl}/api/share/folder/${linkId}`;
+
+    const folderName = folderPath.replace(/\/$/, '').split('/').pop() || 'dossier';
+    const username = req.user.username;
+
+    shareLinksDb.create({
+      linkId, blobName: folderPath, originalName: `📁 ${folderName} (${blobs.length} fichiers)`,
+      contentType: 'application/zip', fileSize: 0,
+      shareUrl: protectedUrl, passwordHash,
+      recipientEmail, expiresAt: expiresOn.toISOString(), expiresInMinutes,
+      createdBy: username, watermarkText: watermarkText || null
+    });
+
+    const qrCode = await QRCode.toDataURL(protectedUrl);
+
+    // Email notifications
+    if (emailService.isEnabled()) {
+      const emailList = recipientEmail.split(/[,;\s]+/).map(e => e.trim()).filter(Boolean);
+      for (const addr of emailList) {
+        emailService.sendShareNotification(addr, {
+          senderName: username, fileName: `📁 ${folderName} (${blobs.length} fichiers)`,
+          shareUrl: protectedUrl, expiresAt: expiresOn.toISOString()
+        }).catch(() => {});
+        setTimeout(() => {
+          emailService.sendSharePassword(addr, {
+            senderName: username, fileName: `📁 ${folderName}`, password
+          }).catch(() => {});
+        }, 3000);
+      }
+    }
+
+    res.json({
+      success: true, linkId, shareLink: protectedUrl, qrCode,
+      expiresAt: expiresOn.toISOString(), fileCount: blobs.length
+    });
+  } catch (e) {
+    console.error('Bulk share error:', e);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// GET /api/share/folder/:linkId — Page de téléchargement dossier partagé
+app.get('/api/share/folder/:linkId', async (req, res) => {
+  try {
+    const link = shareLinksDb.getByLinkId(req.params.linkId);
+    if (!link) return res.status(404).send('Lien non trouvé');
+    if (new Date() > new Date(link.expires_at)) return res.status(410).send('Lien expiré');
+
+    // Same password page as file share
+    res.redirect(`/api/share/download/${req.params.linkId}`);
+  } catch (e) { res.status(500).send('Erreur'); }
+});
+
+// ============================================
 // NOTIFICATIONS IN-APP
 // ============================================
 
@@ -3117,6 +3280,39 @@ app.post('/api/auth/login', async (req, res) => {
       });
     }
 
+    // 2FA check
+    if (user.totp_enabled) {
+      // Generate OTP and send by email
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 min
+      db.prepare('INSERT INTO otp_codes (user_id, code, expires_at) VALUES (?, ?, ?)').run(user.id, otpCode, expiresAt);
+      // Cleanup old codes
+      db.prepare("DELETE FROM otp_codes WHERE user_id = ? AND (used = 1 OR expires_at < datetime('now'))").run(user.id);
+      // Send email
+      if (user.email && emailService.isEnabled()) {
+        emailService.sendMail(user.email,
+          `🔐 Code de vérification ShareAzure`,
+          `<div style="font-family:sans-serif;max-width:400px;margin:0 auto;padding:20px;">
+            <h2 style="color:#003C61;">Code de vérification</h2>
+            <p>Votre code de connexion :</p>
+            <div style="background:#e3f2fd;padding:20px;text-align:center;border-radius:8px;margin:20px 0;">
+              <span style="font-size:2rem;font-weight:700;letter-spacing:8px;color:#1565c0;">${otpCode}</span>
+            </div>
+            <p style="color:#888;font-size:0.85rem;">Ce code expire dans 5 minutes. Si vous n'êtes pas à l'origine de cette demande, ignorez ce message.</p>
+          </div>`,
+          `Code de vérification ShareAzure: ${otpCode}`
+        ).catch(err => console.error('OTP email error:', err));
+      }
+      // Return partial auth (requires OTP)
+      const pendingToken = Buffer.from(`pending:${user.id}:${Date.now()}`).toString('base64');
+      return res.json({
+        success: true,
+        requires2FA: true,
+        pendingToken,
+        message: 'Code de vérification envoyé par email'
+      });
+    }
+
     usersDb.updateLastLogin(user.id);
 
     const token = Buffer.from(`user:${user.id}:${user.username}:${Date.now()}`).toString('base64');
@@ -3165,6 +3361,71 @@ app.post('/api/auth/login', async (req, res) => {
       error: 'Erreur serveur'
     });
   }
+});
+
+// POST /api/auth/verify-otp — Vérifier le code 2FA
+app.post('/api/auth/verify-otp', async (req, res) => {
+  try {
+    const { pendingToken, code } = req.body;
+    if (!pendingToken || !code) return res.status(400).json({ success: false, error: 'Token et code requis' });
+
+    const decoded = Buffer.from(pendingToken, 'base64').toString('utf-8');
+    const parts = decoded.split(':');
+    if (parts[0] !== 'pending') return res.status(401).json({ success: false, error: 'Token invalide' });
+    const userId = parseInt(parts[1]);
+    const ts = parseInt(parts[2]);
+    // Token valid 10 min
+    if (Date.now() - ts > 10 * 60 * 1000) return res.status(401).json({ success: false, error: 'Session expirée, reconnectez-vous' });
+
+    const otp = db.prepare("SELECT * FROM otp_codes WHERE user_id = ? AND code = ? AND used = 0 AND expires_at > datetime('now') ORDER BY created_at DESC LIMIT 1").get(userId, code.trim());
+    if (!otp) return res.status(401).json({ success: false, error: 'Code invalide ou expiré' });
+
+    // Mark as used
+    db.prepare('UPDATE otp_codes SET used = 1 WHERE id = ?').run(otp.id);
+
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+    if (!user) return res.status(401).json({ success: false, error: 'Utilisateur non trouvé' });
+
+    usersDb.updateLastLogin(user.id);
+    const token = Buffer.from(`user:${user.id}:${user.username}:${Date.now()}`).toString('base64');
+
+    const memberships = teamMembersDb.getByUser(user.id);
+    const teams = memberships.map(m => ({ teamId: m.team_id, name: m.name, displayName: m.display_name, role: m.role }));
+    const isTeamLeader = user.role === 'com' || teams.some(t => t.role === 'owner');
+
+    let redirect;
+    if (user.role === 'admin') redirect = '/admin/';
+    else if (isTeamLeader) redirect = 'team.html';
+    else redirect = 'user.html';
+
+    res.json({
+      success: true,
+      token,
+      user: { id: user.id, username: user.username, name: user.full_name || user.username, role: user.role, email: user.email, teams, isTeamLeader },
+      redirect
+    });
+  } catch (e) {
+    console.error('OTP verify error:', e);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// PUT /api/user/2fa — Activer/désactiver 2FA
+app.put('/api/user/2fa', authenticateUser, (req, res) => {
+  try {
+    const { enabled } = req.body;
+    if (!req.user.email) return res.status(400).json({ success: false, error: 'Email requis pour activer la 2FA' });
+    db.prepare('UPDATE users SET totp_enabled = ? WHERE id = ?').run(enabled ? 1 : 0, req.user.id);
+    res.json({ success: true, enabled: !!enabled });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// GET /api/user/2fa — Statut 2FA
+app.get('/api/user/2fa', authenticateUser, (req, res) => {
+  try {
+    const user = db.prepare('SELECT totp_enabled FROM users WHERE id = ?').get(req.user.id);
+    res.json({ success: true, enabled: !!user?.totp_enabled });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
 // ============================================
