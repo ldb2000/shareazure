@@ -2346,6 +2346,155 @@ app.get('/api/company-info', (req, res) => {
 });
 
 // ============================================
+// ANNOTATIONS PDF
+// ============================================
+
+// GET /api/files/:blobName(*)/annotations
+app.get('/api/files/:blobName(*)/annotations', authenticateUser, (req, res) => {
+  try {
+    const blobName = req.params.blobName || req.params[0];
+    const annotations = db.prepare(
+      'SELECT * FROM pdf_annotations WHERE blob_name = ? ORDER BY page_number, created_at'
+    ).all(blobName);
+    res.json({ success: true, annotations });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// POST /api/files/:blobName(*)/annotations — Sauvegarder annotations (bulk par page)
+app.post('/api/files/:blobName(*)/annotations', authenticateUser, (req, res) => {
+  try {
+    const blobName = req.params.blobName || req.params[0];
+    const { annotations } = req.body; // [{page_number, annotation_type, data}]
+    if (!Array.isArray(annotations)) {
+      return res.status(400).json({ success: false, error: 'Format invalide' });
+    }
+    
+    const insert = db.prepare(
+      'INSERT INTO pdf_annotations (blob_name, page_number, user_id, username, annotation_type, data) VALUES (?, ?, ?, ?, ?, ?)'
+    );
+    const insertMany = db.transaction((items) => {
+      for (const a of items) {
+        insert.run(blobName, a.page_number, req.user.id, req.user.username, a.annotation_type, JSON.stringify(a.data));
+      }
+    });
+    insertMany(annotations);
+    
+    activityLogsDb.log({ level: 'info', category: 'file', operation: 'pdf_annotated',
+      message: `${req.user.username} a annoté "${blobName.split('/').pop()}" (${annotations.length} annotations)`,
+      username: req.user.username, details: { blobName, count: annotations.length }, ip_address: req.ip });
+    
+    res.json({ success: true, count: annotations.length });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// DELETE /api/files/:blobName(*)/annotations — Supprimer toutes les annotations d'un user
+app.delete('/api/files/:blobName(*)/annotations', authenticateUser, (req, res) => {
+  try {
+    const blobName = req.params.blobName || req.params[0];
+    const { page } = req.query;
+    let result;
+    if (page) {
+      result = db.prepare('DELETE FROM pdf_annotations WHERE blob_name = ? AND user_id = ? AND page_number = ?')
+        .run(blobName, req.user.id, parseInt(page));
+    } else {
+      result = db.prepare('DELETE FROM pdf_annotations WHERE blob_name = ? AND user_id = ?')
+        .run(blobName, req.user.id);
+    }
+    res.json({ success: true, deleted: result.changes });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// POST /api/files/:blobName(*)/annotations/export — Export PDF avec annotations gravées
+app.post('/api/files/:blobName(*)/annotations/export', authenticateUser, async (req, res) => {
+  try {
+    const blobName = req.params.blobName || req.params[0];
+    
+    // Récupérer le PDF original
+    const containerClient = blobServiceClient.getContainerClient(containerName);
+    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+    const downloadResponse = await blockBlobClient.download();
+    const chunks = [];
+    for await (const chunk of downloadResponse.readableStreamBody) chunks.push(chunk);
+    const pdfBuffer = Buffer.concat(chunks);
+    
+    // Récupérer les annotations
+    const annotations = db.prepare(
+      'SELECT * FROM pdf_annotations WHERE blob_name = ? ORDER BY page_number'
+    ).all(blobName);
+    
+    if (annotations.length === 0) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="annotated_${blobName.split('/').pop()}"`);
+      return res.end(pdfBuffer);
+    }
+    
+    // Appliquer les annotations avec pdf-lib
+    const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
+    const pdfDoc = await PDFDocument.load(pdfBuffer);
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const pages = pdfDoc.getPages();
+    
+    for (const annot of annotations) {
+      const pageIdx = annot.page_number - 1;
+      if (pageIdx < 0 || pageIdx >= pages.length) continue;
+      const page = pages[pageIdx];
+      const { width, height } = page.getSize();
+      const data = JSON.parse(annot.data);
+      
+      if (annot.annotation_type === 'text') {
+        // Note texte avec fond jaune
+        const x = data.x * width;
+        const y = height - (data.y * height);
+        const noteText = data.text || '';
+        const fontSize = 10;
+        // Fond jaune
+        page.drawRectangle({ x: x - 2, y: y - 4, width: Math.min(noteText.length * 5.5 + 10, 250), height: fontSize + 8, color: rgb(1, 0.96, 0.76), opacity: 0.9 });
+        page.drawText(noteText.substring(0, 50), { x, y, size: fontSize, font, color: rgb(0.2, 0.2, 0.2) });
+        // Auteur
+        page.drawText(`— ${annot.username}`, { x, y: y - 12, size: 7, font, color: rgb(0.5, 0.5, 0.5) });
+      } else if (annot.annotation_type === 'highlight') {
+        const x = data.x * width;
+        const y = height - (data.y * height);
+        const w = (data.w || 0.1) * width;
+        const h = (data.h || 0.02) * height;
+        page.drawRectangle({ x, y: y - h, width: w, height: h, color: rgb(1, 1, 0), opacity: 0.35 });
+      } else if (annot.annotation_type === 'drawing') {
+        // Dessins = séries de lignes
+        if (data.paths) {
+          for (const path of data.paths) {
+            for (let i = 1; i < path.length; i++) {
+              page.drawLine({
+                start: { x: path[i-1].x * width, y: height - path[i-1].y * height },
+                end: { x: path[i].x * width, y: height - path[i].y * height },
+                thickness: data.lineWidth || 2,
+                color: rgb(...(data.color || [1, 0, 0])),
+                opacity: 0.8
+              });
+            }
+          }
+        }
+      }
+    }
+    
+    const resultBytes = await pdfDoc.save();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="annotated_${blobName.split('/').pop()}"`);
+    res.end(Buffer.from(resultBytes));
+    
+  } catch (e) {
+    console.error('Export annotations error:', e);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ============================================
 // COMMENTAIRES FICHIERS
 // ============================================
 

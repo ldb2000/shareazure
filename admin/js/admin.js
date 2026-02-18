@@ -3577,7 +3577,10 @@ window.previewFile = (blobName, contentType) => {
     if (contentType.startsWith('image/')) {
         body.innerHTML = `<img src="${previewUrl}" alt="${displayName}" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:4px;" />`;
     } else if (contentType === 'application/pdf') {
-        body.innerHTML = `<iframe src="${previewUrl}#toolbar=1" style="width:100%;height:100%;border:none;border-radius:4px;"></iframe>`;
+        body.innerHTML = `<div style="display:flex;flex-direction:column;width:100%;height:100%;">
+            <div style="padding:6px;text-align:right;"><a href="/pdf-annotate.html?file=${encodeURIComponent(blobName)}" target="_blank" style="color:#ffa000;text-decoration:none;font-size:0.85rem;"><i class="fas fa-pencil-alt"></i> Annoter ce PDF</a></div>
+            <iframe src="${previewUrl}#toolbar=1" style="flex:1;border:none;border-radius:4px;"></iframe>
+        </div>`;
     } else if (contentType.startsWith('video/')) {
         body.innerHTML = `<video controls autoplay style="max-width:100%;max-height:100%;border-radius:4px;"><source src="${previewUrl}" type="${contentType}"></video>`;
     } else if (contentType.startsWith('audio/')) {

@@ -2692,7 +2692,15 @@ function showPreview(blobName) {
     if (contentType.startsWith('image/')) {
         body.innerHTML = `<img src="${previewUrl}" alt="${escapeHtml(displayName)}" />`;
     } else if (contentType === 'application/pdf') {
-        body.innerHTML = `<iframe src="${previewUrl}#toolbar=1&navpanes=0" title="${escapeHtml(displayName)}"></iframe>`;
+        body.innerHTML = `<iframe src="${previewUrl}#toolbar=1&navpanes=0" title="${escapeHtml(displayName)}" style="flex:1;"></iframe>`;
+        // Add annotate button in header
+        const annotBtn = document.createElement('button');
+        annotBtn.className = 'btn-icon';
+        annotBtn.title = 'Annoter ce PDF';
+        annotBtn.innerHTML = '<i class="fas fa-pencil-alt"></i>';
+        annotBtn.style.color = '#ffa000';
+        annotBtn.onclick = () => { window.open(`pdf-annotate.html?file=${encodeURIComponent(blobName)}`, '_blank'); };
+        document.querySelector('.preview-actions').insertBefore(annotBtn, document.getElementById('previewDownloadBtn'));
     } else if (contentType.startsWith('video/')) {
         body.innerHTML = `<video controls autoplay><source src="${previewUrl}" type="${contentType}">Votre navigateur ne supporte pas la vidéo.</video>`;
     } else if (contentType.startsWith('audio/')) {
