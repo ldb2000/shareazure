@@ -133,6 +133,15 @@ function checkQuota(userId, fileSize) {
     return { allowed: false, error: `Nombre maximum de fichiers atteint (${quotas.max_files})` };
   }
 
+  // Alerte quota > 80%
+  if (quotas.max_storage_gb) {
+    const pct = (usage.total_bytes + (fileSize || 0)) / (quotas.max_storage_gb * 1024 * 1024 * 1024);
+    if (pct > 0.8) {
+      createNotification(userId, 'quota_warning', '⚠️ Quota presque atteint',
+        `Vous utilisez ${Math.round(pct * 100)}% de votre espace de stockage`);
+    }
+  }
+
   return { allowed: true, quotas, usage };
 }
 
@@ -765,6 +774,12 @@ app.post('/api/upload', authenticateUserOrGuest, upload.single('file'), validate
       username: req.user ? req.user.username : (req.guest ? req.guest.email : null)
     });
 
+    // Notification: upload dans une équipe → notifier les owners
+    if (teamId && req.user) {
+      notifyTeamOwners(teamId, 'file_uploaded', '📁 Nouveau fichier',
+        `${req.user.username} a uploadé "${req.file.originalname}" dans l'équipe`);
+    }
+
     res.json({
       success: true,
       message: 'Fichier uploadé avec succès',
@@ -1385,6 +1400,16 @@ app.post('/api/share/generate', async (req, res) => {
       expiresAt: expiresOn.toISOString(),
       hasPassword: !!passwordHash
     });
+
+    // Notifications in-app pour les destinataires qui ont un compte
+    const fileName = properties.metadata?.originalName || blobName.split('/').pop();
+    for (const recipientAddr of emailList) {
+      const recipientUser = db.prepare("SELECT id FROM users WHERE email = ? COLLATE NOCASE").get(recipientAddr);
+      if (recipientUser) {
+        createNotification(recipientUser.id, 'share_received', '📎 Fichier partagé',
+          `${username || 'Un utilisateur'} vous a partagé "${fileName}"`, `/api/share/download/${linkId}`);
+      }
+    }
 
     // Envoyer les notifications email aux destinataires
     if (emailService.isEnabled()) {
@@ -2346,6 +2371,70 @@ app.get('/api/company-info', (req, res) => {
 });
 
 // ============================================
+// NOTIFICATIONS IN-APP
+// ============================================
+
+function createNotification(userId, type, title, message, link = null) {
+  try {
+    db.prepare('INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)')
+      .run(userId, type, title, message, link);
+  } catch (e) { console.error('Notification error:', e.message); }
+}
+
+function notifyAllAdmins(type, title, message, link = null) {
+  try {
+    const admins = db.prepare("SELECT id FROM users WHERE role = 'admin'").all();
+    for (const a of admins) createNotification(a.id, type, title, message, link);
+  } catch (e) { console.error('Notify admins error:', e.message); }
+}
+
+function notifyTeamOwners(teamId, type, title, message, link = null) {
+  try {
+    const owners = db.prepare("SELECT user_id FROM team_members WHERE team_id = ? AND role = 'owner' AND is_active = 1").all(teamId);
+    for (const o of owners) createNotification(o.user_id, type, title, message, link);
+  } catch (e) { console.error('Notify team owners error:', e.message); }
+}
+
+// GET /api/notifications — Mes notifications
+app.get('/api/notifications', authenticateUser, (req, res) => {
+  try {
+    const { unreadOnly, limit = 50 } = req.query;
+    let sql = 'SELECT * FROM notifications WHERE user_id = ?';
+    const params = [req.user.id];
+    if (unreadOnly === 'true') { sql += ' AND is_read = 0'; }
+    sql += ' ORDER BY created_at DESC LIMIT ?';
+    params.push(parseInt(limit));
+    const notifs = db.prepare(sql).all(...params);
+    const unreadCount = db.prepare('SELECT COUNT(*) as c FROM notifications WHERE user_id = ? AND is_read = 0').get(req.user.id).c;
+    res.json({ success: true, notifications: notifs, unreadCount });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// PUT /api/notifications/:id/read
+app.put('/api/notifications/:id/read', authenticateUser, (req, res) => {
+  try {
+    db.prepare('UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?').run(parseInt(req.params.id), req.user.id);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// PUT /api/notifications/read-all
+app.put('/api/notifications/read-all', authenticateUser, (req, res) => {
+  try {
+    db.prepare('UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0').run(req.user.id);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// DELETE /api/notifications/:id
+app.delete('/api/notifications/:id', authenticateUser, (req, res) => {
+  try {
+    db.prepare('DELETE FROM notifications WHERE id = ? AND user_id = ?').run(parseInt(req.params.id), req.user.id);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ============================================
 // LOGO ÉQUIPE
 // ============================================
 
@@ -2576,6 +2665,13 @@ app.post('/api/files/:blobName(*)/comments', authenticateUser, (req, res) => {
     activityLogsDb.log({ level: 'info', category: 'file', operation: 'file_commented',
       message: `${req.user.username} a commenté "${blobName.split('/').pop()}"`,
       username: req.user.username, details: { blobName }, ip_address: req.ip });
+    
+    // Notifier le propriétaire du fichier
+    const fileOwner = db.prepare('SELECT uploaded_by_user_id FROM file_ownership WHERE blob_name = ?').get(blobName);
+    if (fileOwner && fileOwner.uploaded_by_user_id && fileOwner.uploaded_by_user_id !== req.user.id) {
+      createNotification(fileOwner.uploaded_by_user_id, 'file_commented', '💬 Nouveau commentaire',
+        `${req.user.username} a commenté "${blobName.split('/').pop()}"`);
+    }
     
     res.json({ success: true, id: result.lastInsertRowid });
   } catch (e) {
@@ -3610,6 +3706,12 @@ app.post('/api/admin/guest-accounts', authenticateUser, async (req, res) => {
       isUnlimited
     });
 
+    // Notification: invité en attente d'approbation → admins
+    if (needsApproval) {
+      notifyAllAdmins('guest_pending', '⏳ Invité en attente',
+        `${req.user.username} a créé un invité illimité (${email}) — approbation requise`);
+    }
+
     res.json({
       success: true,
       needsApproval,
@@ -3789,6 +3891,13 @@ app.put('/api/admin/guest-accounts/:guestId/approve', authenticateUser, requireA
 
     db.prepare('UPDATE guest_accounts SET is_active = 1, pending_approval = 0 WHERE guest_id = ?').run(guestId);
     logOperation('guest_approved', { guestId, email: guest.email, approvedBy: req.user.username });
+    
+    // Notifier le créateur
+    if (guest.created_by_user_id) {
+      createNotification(guest.created_by_user_id, 'guest_approved', '✅ Invité approuvé',
+        `Votre invité ${guest.email} a été approuvé par ${req.user.username}`);
+    }
+    
     res.json({ success: true, message: 'Invité approuvé' });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
@@ -4340,6 +4449,13 @@ app.put('/api/files/trash', authenticateUser, async (req, res) => {
     }
 
     logOperation('file_trashed', { blobName, username: req.user.username, trashedBy: req.user.username, teamId: file.team_id });
+    
+    // Notifier le propriétaire si quelqu'un d'autre supprime son fichier
+    if (file.uploaded_by_user_id && file.uploaded_by_user_id !== req.user.id) {
+      createNotification(file.uploaded_by_user_id, 'file_trashed', '🗑️ Fichier en corbeille',
+        `${req.user.username} a mis "${blobName.split('/').pop()}" en corbeille`);
+    }
+    
     res.json({ success: true, message: 'Fichier mis en corbeille' });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });

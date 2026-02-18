@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ShareAzure - Mon espace de stockage</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="css/user.css?v=20260218g">
+    <link rel="stylesheet" href="css/user.css?v=20260218h">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -45,6 +45,19 @@
                         <button onclick="showMyGuestsModal();document.getElementById('guestsDropdown').style.display='none';" style="display:block;width:100%;padding:12px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:0.9rem;color:#333;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='none'">
                             <i class="fas fa-list" style="color:#4caf50;width:20px;"></i> Mes invités
                         </button>
+                    </div>
+                </div>
+                <div class="notif-wrapper" style="position:relative;display:inline-block;">
+                    <button class="btn-icon" id="notifBtn" title="Notifications" onclick="toggleNotifPanel()">
+                        <i class="fas fa-bell"></i>
+                        <span class="notif-badge" id="notifBadge" style="display:none;"></span>
+                    </button>
+                    <div class="notif-panel" id="notifPanel" style="display:none;">
+                        <div class="notif-header">
+                            <span>🔔 Notifications</span>
+                            <button class="btn-link" onclick="markAllRead()">Tout lire</button>
+                        </div>
+                        <div class="notif-list" id="notifList"></div>
                     </div>
                 </div>
                 <button class="btn-icon" id="finopsBtn" title="Mes coûts" onclick="showFinopsSection()">
@@ -650,7 +663,7 @@
         </div>
     </div>
 
-    <script src="js/user.js?v=20260218g"></script>
+    <script src="js/user.js?v=20260218h"></script>
     <!-- Modal Corbeille -->
     <div class="modal-overlay" id="trashModal" style="display: none;">
         <div class="modal-content" style="max-width: 750px;">

@@ -3074,3 +3074,118 @@ function showTimecodeMarkers(currentTime) {
         }
     }
 }
+
+// ============================================================================
+// NOTIFICATIONS IN-APP
+// ============================================================================
+
+let notifPollInterval = null;
+
+function toggleNotifPanel() {
+    const panel = document.getElementById('notifPanel');
+    panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+    if (panel.style.display === 'flex') loadNotifications();
+}
+
+// Close on outside click
+document.addEventListener('click', (e) => {
+    const panel = document.getElementById('notifPanel');
+    if (panel && panel.style.display === 'flex' && !e.target.closest('.notif-wrapper')) {
+        panel.style.display = 'none';
+    }
+});
+
+async function loadNotifications() {
+    try {
+        const res = await fetch(`${API_URL}/notifications?limit=30`, {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        const data = await res.json();
+        if (!data.success) return;
+
+        updateNotifBadge(data.unreadCount);
+        const list = document.getElementById('notifList');
+        if (data.notifications.length === 0) {
+            list.innerHTML = '<div class="notif-empty">Aucune notification</div>';
+            return;
+        }
+
+        list.innerHTML = data.notifications.map(n => {
+            const iconMap = {
+                share_received: { cls: 'share', icon: '📎' },
+                file_commented: { cls: 'comment', icon: '💬' },
+                guest_pending: { cls: 'guest', icon: '⏳' },
+                guest_approved: { cls: 'guest', icon: '✅' },
+                file_uploaded: { cls: 'upload', icon: '📁' },
+                file_trashed: { cls: 'trash', icon: '🗑️' },
+                quota_warning: { cls: 'warning', icon: '⚠️' }
+            };
+            const ic = iconMap[n.type] || { cls: 'default', icon: '🔔' };
+            const timeAgo = getTimeAgo(n.created_at);
+            return `<div class="notif-item ${n.is_read ? '' : 'unread'}" onclick="readNotif(${n.id}, '${n.link || ''}')">
+                <div class="notif-icon ${ic.cls}">${ic.icon}</div>
+                <div class="notif-content">
+                    <div class="notif-title">${escapeHtml(n.title)}</div>
+                    <div class="notif-msg">${escapeHtml(n.message)}</div>
+                    <div class="notif-time">${timeAgo}</div>
+                </div>
+            </div>`;
+        }).join('');
+    } catch (e) { console.error('Notif error:', e); }
+}
+
+function updateNotifBadge(count) {
+    const badge = document.getElementById('notifBadge');
+    if (!badge) return;
+    if (count > 0) {
+        badge.textContent = count > 99 ? '99+' : count;
+        badge.style.display = 'flex';
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
+async function readNotif(id, link) {
+    try {
+        await fetch(`${API_URL}/notifications/${id}/read`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        loadNotifications();
+        if (link) window.open(link, '_blank');
+    } catch (e) { /* ignore */ }
+}
+
+async function markAllRead() {
+    try {
+        await fetch(`${API_URL}/notifications/read-all`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        loadNotifications();
+    } catch (e) { /* ignore */ }
+}
+
+function getTimeAgo(dateStr) {
+    const diff = (Date.now() - new Date(dateStr + 'Z').getTime()) / 1000;
+    if (diff < 60) return 'À l\'instant';
+    if (diff < 3600) return `Il y a ${Math.floor(diff/60)} min`;
+    if (diff < 86400) return `Il y a ${Math.floor(diff/3600)}h`;
+    if (diff < 604800) return `Il y a ${Math.floor(diff/86400)}j`;
+    return new Date(dateStr).toLocaleDateString('fr-FR');
+}
+
+// Poll for new notifications every 30s
+async function pollNotifCount() {
+    try {
+        const res = await fetch(`${API_URL}/notifications?unreadOnly=true&limit=1`, {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        const data = await res.json();
+        if (data.success) updateNotifBadge(data.unreadCount);
+    } catch (e) { /* ignore */ }
+}
+
+// Start polling
+pollNotifCount();
+notifPollInterval = setInterval(pollNotifCount, 30000);
