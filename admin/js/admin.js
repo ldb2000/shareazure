@@ -156,7 +156,7 @@ function loadSectionData(section) {
         case 'files': loadFiles(); break;
         case 'shares': loadShares(); break;
         case 'teams': loadTeams(); break;
-        case 'costs': loadCosts(); break;
+        case 'costs': loadFinOps(); break;
         case 'users': loadUsers(); break;
         case 'guests': loadGuests(); break;
         case 'logs': loadLogs(); break;
@@ -242,7 +242,7 @@ function initializeEventListeners() {
     document.getElementById('cancelCreateTeamBtn')?.addEventListener('click', () => closeModal('createTeamModal'));
 
     // Costs
-    document.getElementById('refreshCostsBtn')?.addEventListener('click', loadCosts);
+    // FinOps buttons are inline onclick
     document.getElementById('costsPeriod')?.addEventListener('change', loadCosts);
 
     // Users
@@ -1101,46 +1101,108 @@ async function createTeam() {
 // COSTS
 // ============================================
 
-async function loadCosts() {
+async function loadFinOps() {
     try {
-        const period = document.getElementById('costsPeriod').value;
-        let param = '';
-        if (period === 'last') {
-            const d = new Date(); d.setMonth(d.getMonth() - 1);
-            param = `?period=${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        } else if (period === 'year') {
-            param = `?period=${new Date().getFullYear()}`;
-        }
-        const res = await apiRequest(`/admin/costs${param}`);
+        const res = await apiRequest('/admin/finops');
         if (!res.success) throw new Error(res.error);
 
-        document.getElementById('costsUsers').textContent = `$${(res.totals.users || 0).toFixed(2)}`;
-        document.getElementById('costsTeams').textContent = `$${(res.totals.teams || 0).toFixed(2)}`;
-        document.getElementById('costsGuests').textContent = `$${(res.totals.guests || 0).toFixed(2)}`;
-        document.getElementById('costsTotal').textContent = `$${(res.totals.overall || 0).toFixed(2)}`;
+        const fmtEur = (n) => { if (!n || n === 0) return '0.00 €'; if (n < 0.01) return (n * 100).toFixed(4) + ' c€'; return n.toFixed(4) + ' €'; };
+        const fmtSize = (gb) => { if (!gb || gb === 0) return '0'; if (gb < 0.001) return (gb * 1024 * 1024).toFixed(1) + ' Ko'; if (gb < 1) return (gb * 1024).toFixed(2) + ' Mo'; return gb.toFixed(3) + ' Go'; };
 
-        const allCosts = [
-            ...(res.summary?.users || []).map(c => ({ ...c, type: 'user' })),
-            ...(res.summary?.teams || []).map(c => ({ ...c, type: 'team' })),
-            ...(res.summary?.guests || []).map(c => ({ ...c, type: 'guest' }))
-        ].sort((a, b) => (b.total_cost || 0) - (a.total_cost || 0));
+        // Hero
+        document.getElementById('finopsTotalCost').textContent = fmtEur(res.costs.total);
+        document.getElementById('finopsForecast').textContent = fmtEur(res.forecast.projectedTotal);
 
-        const container = document.getElementById('costsDetails');
-        if (allCosts.length === 0) { container.innerHTML = '<p class="loading">Aucune donnee</p>'; return; }
-        container.innerHTML = `<table class="data-table">
-            <thead><tr><th>Type</th><th>ID</th><th>Stockage</th><th>Operations</th><th>Bande passante</th><th>Total</th></tr></thead>
-            <tbody>${allCosts.map(c => `<tr>
-                <td><span class="badge-info">${c.type}</span></td>
-                <td>${c.entity_id}</td>
-                <td>$${(c.storage_cost || 0).toFixed(2)}</td>
-                <td>$${(c.operations_cost || 0).toFixed(2)}</td>
-                <td>$${(c.bandwidth_cost || 0).toFixed(2)}</td>
-                <td><strong>$${(c.total_cost || 0).toFixed(2)}</strong></td>
-            </tr>`).join('')}</tbody></table>`;
+        // Breakdown bar
+        const s = res.costs.breakdown;
+        document.getElementById('finopsBar').innerHTML = `
+            <div style="width:${Math.max(s.storagePct,2)}%;background:#3b82f6;display:flex;align-items:center;justify-content:center;color:#fff;font-size:0.7rem;font-weight:600;">${s.storagePct > 15 ? 'Stockage' : ''}</div>
+            <div style="width:${Math.max(s.operationsPct,2)}%;background:#f59e0b;display:flex;align-items:center;justify-content:center;color:#fff;font-size:0.7rem;font-weight:600;">${s.operationsPct > 15 ? 'Opérations' : ''}</div>
+            <div style="width:${Math.max(s.bandwidthPct,2)}%;background:#8b5cf6;display:flex;align-items:center;justify-content:center;color:#fff;font-size:0.7rem;font-weight:600;">${s.bandwidthPct > 15 ? 'BP' : ''}</div>`;
+        document.getElementById('finopsBarLegend').innerHTML = `
+            <span>🔵 Stockage: ${fmtEur(res.costs.storage)}</span>
+            <span>🟡 Opérations: ${fmtEur(res.costs.operations.total)}</span>
+            <span>🟣 Bande passante: ${fmtEur(res.costs.bandwidth.cost)}</span>`;
+
+        // Tier cards
+        const st = res.storage;
+        document.getElementById('finopsTierCards').innerHTML = `
+            <div class="stat-card" style="border-left:4px solid #ef4444;">
+                <h3 class="stat-value">${fmtSize(st.hot.sizeGb)}</h3><p class="stat-label">🔴 Hot (${st.hot.count} fichiers)</p>
+                <div style="color:#ef4444;font-weight:600;font-size:0.85rem;">${fmtEur(st.hot.costPerMonth)}/mois</div></div>
+            <div class="stat-card" style="border-left:4px solid #3b82f6;">
+                <h3 class="stat-value">${fmtSize(st.cool.sizeGb)}</h3><p class="stat-label">🔵 Cool (${st.cool.count} fichiers)</p>
+                <div style="color:#3b82f6;font-weight:600;font-size:0.85rem;">${fmtEur(st.cool.costPerMonth)}/mois</div></div>
+            <div class="stat-card" style="border-left:4px solid #6b7280;">
+                <h3 class="stat-value">${fmtSize(st.archive.sizeGb)}</h3><p class="stat-label">⚫ Archive (${st.archive.count} fichiers)</p>
+                <div style="color:#6b7280;font-weight:600;font-size:0.85rem;">${fmtEur(st.archive.costPerMonth)}/mois</div></div>
+            <div class="stat-card" style="border-left:4px solid #f59e0b;">
+                <h3 class="stat-value">${fmtSize(st.trashed.sizeGb)}</h3><p class="stat-label">🗑️ Corbeille (${st.trashed.count} fichiers)</p>
+                <div style="color:#f59e0b;font-weight:600;font-size:0.85rem;">${fmtEur(st.trashed.costPerMonth)}/mois</div></div>`;
+
+        // Operations cards
+        const ops = res.operations;
+        document.getElementById('finopsOpsCards').innerHTML = `
+            <div class="stat-card" style="border-left:4px solid #10b981;">
+                <h3 class="stat-value">${ops.write}</h3><p class="stat-label">📤 Écritures</p>
+                <div style="font-size:0.8rem;color:#666;">${fmtEur(res.costs.operations.write)}</div></div>
+            <div class="stat-card" style="border-left:4px solid #10b981;">
+                <h3 class="stat-value">${ops.read}</h3><p class="stat-label">📥 Lectures</p>
+                <div style="font-size:0.8rem;color:#666;">${fmtEur(res.costs.operations.read)}</div></div>
+            <div class="stat-card" style="border-left:4px solid #10b981;">
+                <h3 class="stat-value">${ops.list}</h3><p class="stat-label">📋 Listings</p>
+                <div style="font-size:0.8rem;color:#666;">${fmtEur(res.costs.operations.list)}</div></div>
+            <div class="stat-card" style="border-left:4px solid #8b5cf6;">
+                <h3 class="stat-value">${fmtSize(ops.bytesDownloaded / (1024*1024*1024))}</h3><p class="stat-label">📥 Bande passante sortante</p>
+                <div style="font-size:0.8rem;color:#666;">${fmtEur(res.costs.bandwidth.cost)}</div></div>`;
+
+        // Users table
+        document.getElementById('finopsUsersTable').innerHTML = res.costsByUser.length > 0 ? res.costsByUser.map(u => `<tr>
+            <td><strong>${escapeHtml(u.username || u.full_name || 'User #' + u.entity_id)}</strong></td>
+            <td>${fmtEur(u.storage_cost)}</td><td>${fmtSize(u.storage_hot_gb)}</td><td>${fmtSize(u.storage_cool_gb)}</td><td>${fmtSize(u.storage_archive_gb)}</td>
+            <td>${fmtEur(u.operations_cost)} <span style="color:#94a3b8;font-size:0.75rem;">(W:${u.operations_write||0} R:${u.operations_read||0} L:${u.operations_list||0})</span></td>
+            <td><strong>${fmtEur(u.total_cost)}</strong></td></tr>`).join('') : '<tr><td colspan="7" class="loading">Aucune donnée</td></tr>';
+
+        // Teams table
+        document.getElementById('finopsTeamsTable').innerHTML = res.costsByTeam.length > 0 ? res.costsByTeam.map(t => `<tr>
+            <td><strong>${escapeHtml(t.team_name || 'Team #' + t.entity_id)}</strong></td>
+            <td>${fmtEur(t.storage_cost)}</td><td>${fmtSize(t.storage_hot_gb)}</td><td>${fmtSize(t.storage_cool_gb)}</td>
+            <td>${fmtEur(t.operations_cost)}</td><td><strong>${fmtEur(t.total_cost)}</strong></td></tr>`).join('') : '<tr><td colspan="6" class="loading">Aucune donnée</td></tr>';
+
+        // Top files
+        document.getElementById('finopsFilesTable').innerHTML = res.topFiles.length > 0 ? res.topFiles.map(f => {
+            const tierColor = {hot:'#ef4444',cool:'#3b82f6',archive:'#6b7280'}[(f.tier||'Hot').toLowerCase()] || '#666';
+            return `<tr>
+                <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(f.original_name || f.blob_name)}</td>
+                <td>${escapeHtml(f.owner || '—')}${f.team_name ? ` <span style="color:#3b82f6;">(${escapeHtml(f.team_name)})</span>` : ''}</td>
+                <td>${fmtSize(f.sizeGb)}</td>
+                <td><span style="background:${tierColor};color:#fff;padding:2px 8px;border-radius:4px;font-size:0.75rem;">${f.tier||'Hot'}</span></td>
+                <td>${fmtEur(f.monthlyCost)}</td></tr>`;
+        }).join('') : '<tr><td colspan="5" class="loading">Aucun fichier</td></tr>';
+
     } catch (e) {
-        console.error('Costs error:', e);
-        showNotification('Erreur chargement couts', 'error');
+        console.error('FinOps error:', e);
+        showNotification('Erreur chargement FinOps', 'error');
     }
+}
+
+async function recalculateFinOps() {
+    showNotification('Recalcul en cours...', 'info');
+    try {
+        await apiRequest('/admin/finops/recalculate', 'POST');
+        showNotification('Coûts recalculés', 'success');
+        loadFinOps();
+    } catch (e) { showNotification('Erreur: ' + e.message, 'error'); }
+}
+
+async function sendFinOpsReport() {
+    const email = prompt('Envoyer le rapport FinOps à :', 'laurent.deberti@gmail.com');
+    if (!email) return;
+    try {
+        const res = await apiRequest('/admin/finops/send', 'POST', { email });
+        if (res.success) showNotification('Rapport FinOps envoyé à ' + email, 'success');
+        else showNotification(res.error || 'Erreur envoi', 'error');
+    } catch (e) { showNotification('Erreur: ' + e.message, 'error'); }
 }
 
 // ============================================

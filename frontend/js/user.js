@@ -1316,7 +1316,7 @@ async function handleDelete() {
     
     try {
         const token = getAuthToken();
-        const blobName = file.blobName || contextMenuFile;
+        const blobName = file.blobName || file.name || contextMenuFile;
         const response = await fetch(`${API_URL}/files/trash`, {
             method: 'PUT',
             headers: {
@@ -1914,9 +1914,17 @@ async function loadTeamFiles() {
                         <td>${formatBytes(file.size || 0)}</td>
                         <td>${getFileType(file.contentType)}</td>
                         <td>${formatDate(file.lastModified)}</td>
-                        <td><button class="btn-icon" onclick="window.open('${API_URL}/download/${encodeURIComponent(file.name)}', '_blank')" title="Telecharger">
-                            <i class="fas fa-download"></i>
-                        </button></td>
+                        <td style="white-space:nowrap;">
+                            <button class="btn-icon" onclick="window.open('${API_URL}/download/${encodeURIComponent(file.name)}', '_blank')" title="Télécharger">
+                                <i class="fas fa-download"></i>
+                            </button>
+                            <button class="btn-icon" onclick="shareTeamFile('${escapeHtml(file.name)}', '${escapeHtml(displayName)}')" title="Partager">
+                                <i class="fas fa-share-alt"></i>
+                            </button>
+                            <button class="btn-icon" onclick="trashTeamFile('${escapeHtml(file.name)}', '${escapeHtml(displayName)}')" title="Corbeille" style="color:#ef5350;">
+                                <i class="fas fa-trash-alt"></i>
+                            </button>
+                        </td>
                     </tr>`;
                 });
 
@@ -2324,10 +2332,12 @@ async function showTrashModal() {
         if (!data.success || !data.files || data.files.length === 0) {
             list.innerHTML = '<div style="text-align:center;padding:40px;color:#999;"><i class="fas fa-recycle" style="font-size:3rem;margin-bottom:12px;display:block;"></i><p>La corbeille est vide</p></div>';
             document.getElementById('emptyTrashBtn').style.display = 'none';
+            document.getElementById('restoreAllTrashBtn').style.display = 'none';
             return;
         }
         
         document.getElementById('emptyTrashBtn').style.display = 'inline-flex';
+        document.getElementById('restoreAllTrashBtn').style.display = 'inline-flex';
         
         list.innerHTML = data.files.map(f => {
             const name = f.original_name || f.blob_name.split('/').pop();
@@ -2406,4 +2416,219 @@ function getFileIcon(name) {
         rar: 'fas fa-file-archive', txt: 'fas fa-file-alt', csv: 'fas fa-file-csv'
     };
     return icons[ext] || 'fas fa-file';
+}
+
+async function restoreAllTrash() {
+    if (!confirm('Restaurer tous les fichiers de la corbeille ?\n\nLa réhydratation depuis Archive peut prendre quelques heures.')) return;
+    try {
+        const token = getAuthToken();
+        const res = await fetch(`${API_URL}/files/trash/restore-all`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+        const data = await res.json();
+        if (data.success) {
+            showSuccess(data.message);
+            showTrashModal(); // Refresh
+            loadFiles(currentPath);
+        } else {
+            showError(data.error || 'Erreur');
+        }
+    } catch (e) { showError(e.message); }
+}
+
+// Share a team file directly
+async function shareTeamFile(blobName, displayName) {
+    contextMenuFile = blobName;
+    // Build a fake file entry for showShareModal
+    const fakeFile = { name: blobName, displayName: displayName, isFolder: false, size: null };
+    // Temporarily inject into filteredFiles
+    if (!filteredFiles.find(f => f.name === blobName)) {
+        filteredFiles.push(fakeFile);
+    }
+    showShareModal();
+}
+
+// Trash a team file
+async function trashTeamFile(blobName, displayName) {
+    if (!confirm(`Mettre "${displayName}" en corbeille ?\n\nLe fichier sera archivé et pourra être restauré.`)) return;
+    try {
+        const token = getAuthToken();
+        const res = await fetch(`${API_URL}/files/trash`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ blobName })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showSuccess('Fichier mis en corbeille');
+            loadTeamFiles(); // Refresh team files
+        } else {
+            showError(data.error || 'Erreur');
+        }
+    } catch (e) { showError(e.message); }
+}
+
+// ============================================================================
+// FINOPS
+// ============================================================================
+
+function showFinopsSection() {
+    document.getElementById('filesSection').style.display = 'none';
+    document.getElementById('shareLinksSection').style.display = 'none';
+    document.getElementById('teamFilesSection').style.display = 'none';
+    document.getElementById('discoverSection').style.display = 'none';
+    document.getElementById('finopsSection').style.display = 'block';
+    loadFinopsData();
+}
+
+function hideFinopsSection() {
+    document.getElementById('finopsSection').style.display = 'none';
+    document.getElementById('filesSection').style.display = 'block';
+}
+
+function formatCost(euros) {
+    if (euros < 0.01) return '< 0,01 €';
+    if (euros < 1) return euros.toFixed(3).replace('.', ',') + ' €';
+    return euros.toFixed(2).replace('.', ',') + ' €';
+}
+
+function formatSize(bytes) {
+    if (!bytes || bytes === 0) return '0 o';
+    const units = ['o', 'Ko', 'Mo', 'Go', 'To'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return (bytes / Math.pow(1024, i)).toFixed(i > 1 ? 1 : 0) + ' ' + units[i];
+}
+
+async function loadFinopsData() {
+    try {
+        const response = await fetch(`${API_URL}/finops/me`, {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error);
+
+        const s = data.summary;
+
+        // Summary cards
+        document.getElementById('finopsTotalStorage').textContent = formatCost(s.totalStorageCostMonth);
+        document.getElementById('finopsTotalSize').textContent = `${data.summary.totalFiles} fichiers — ${formatSize(s.totalSize)}`;
+        document.getElementById('finopsShareCost').textContent = formatCost(s.totalShareCost);
+        document.getElementById('finopsShareInfo').textContent = `${s.totalDownloads} téléchargements — ${s.activeShares} partages actifs`;
+        document.getElementById('finopsGuestCost').textContent = formatCost(data.guestUploads.estimatedCost);
+        document.getElementById('finopsGuestInfo').textContent = `${data.guestUploads.count} fichiers reçus — ${formatSize(data.guestUploads.totalSize)}`;
+        document.getElementById('finopsTotalCost').textContent = formatCost(s.totalCostMonth);
+
+        const savingEl = document.getElementById('finopsPotentialSaving');
+        if (s.potentialSavingMonth > 0.001) {
+            savingEl.style.display = 'inline-block';
+            savingEl.querySelector('span').textContent = formatCost(s.potentialSavingMonth);
+        } else {
+            savingEl.style.display = 'none';
+        }
+
+        // Tier bar
+        renderTierBar(data.costByTier, s.totalSize);
+
+        // Optimizations
+        renderOptimizations(data.optimizations);
+
+    } catch (e) {
+        console.error('FinOps error:', e);
+        document.getElementById('finopsOptimList').innerHTML = '<p class="finops-empty">Erreur de chargement</p>';
+    }
+}
+
+function renderTierBar(costByTier, totalSize) {
+    const tierBar = document.getElementById('finopsTierBar');
+    const tierLegend = document.getElementById('finopsTierLegend');
+    const colors = { Hot: '#ef5350', Cool: '#42a5f5', Archive: '#78909c' };
+    const labels = { Hot: 'Hot (fréquent)', Cool: 'Cool (occasionnel)', Archive: 'Archive (rare)' };
+
+    if (!totalSize || totalSize === 0) {
+        tierBar.innerHTML = '<div style="width:100%;background:#e0e0e0;color:#999;">Aucun fichier</div>';
+        tierLegend.innerHTML = '';
+        return;
+    }
+
+    tierBar.innerHTML = '';
+    tierLegend.innerHTML = '';
+
+    for (const tier of ['Hot', 'Cool', 'Archive']) {
+        const t = costByTier[tier] || { size: 0, count: 0, cost: 0 };
+        const pct = (t.size / totalSize) * 100;
+        if (pct > 0) {
+            const div = document.createElement('div');
+            div.style.width = Math.max(pct, 3) + '%';
+            div.style.background = colors[tier];
+            div.textContent = pct >= 10 ? Math.round(pct) + '%' : '';
+            div.title = `${tier}: ${formatSize(t.size)} (${t.count} fichiers) — ${formatCost(t.cost)}/mois`;
+            tierBar.appendChild(div);
+        }
+
+        tierLegend.innerHTML += `
+            <div>
+                <span class="dot" style="background:${colors[tier]}"></span>
+                <strong>${labels[tier]}</strong>: ${t.count} fichiers, ${formatSize(t.size)} — ${formatCost(t.cost)}/mois
+            </div>`;
+    }
+}
+
+function renderOptimizations(optimizations) {
+    const container = document.getElementById('finopsOptimList');
+    if (!optimizations || optimizations.length === 0) {
+        container.innerHTML = '<p class="finops-no-optim">✅ Tous vos fichiers sont dans le tier optimal !</p>';
+        return;
+    }
+
+    container.innerHTML = optimizations.map(o => {
+        const buttons = o.suggestions.map(s => `
+            <button class="btn-optimize btn-${s.tier.toLowerCase()}" onclick="applyOptimization('${o.blobName.replace(/'/g, "\\'")}', '${s.tier}', this)">
+                → ${s.tier} <span class="saving-badge">-${s.savingPercent}%</span>
+            </button>
+        `).join('');
+
+        return `
+            <div class="finops-optim-item">
+                <div class="file-info">
+                    <div class="file-name">${o.fileName}</div>
+                    <div class="file-meta">${formatSize(o.fileSize)} — ${o.ageDays} jours en ${o.currentTier}</div>
+                </div>
+                <div class="cost-compare">
+                    <span class="cost-current">${formatCost(o.currentCostMonth)}/mois</span>
+                    <span class="cost-new">${formatCost(o.suggestions[0].costMonth)}/mois</span>
+                </div>
+                <div>${buttons}</div>
+            </div>`;
+    }).join('');
+}
+
+async function applyOptimization(blobName, targetTier, btn) {
+    if (!confirm(`Passer ce fichier en ${targetTier} ?\n\n⚠️ ${targetTier === 'Archive' ? 'La réhydratation depuis Archive peut prendre plusieurs heures.' : 'Accès moins fréquent, coût réduit.'}`)) return;
+    
+    btn.disabled = true;
+    btn.textContent = '...';
+    
+    try {
+        const response = await fetch(`${API_URL}/finops/optimize`, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('token')}` 
+            },
+            body: JSON.stringify({ blobName, targetTier })
+        });
+        const data = await response.json();
+        if (data.success) {
+            showSuccess(`Fichier déplacé vers ${targetTier}`);
+            loadFinopsData(); // Recharger
+        } else {
+            showError(data.error || 'Erreur');
+            btn.disabled = false;
+        }
+    } catch (e) {
+        showError(e.message);
+        btn.disabled = false;
+    }
 }

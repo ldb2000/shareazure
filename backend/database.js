@@ -1063,7 +1063,7 @@ const usersDb = {
   // Obtenir un utilisateur par son username
   getByUsername: (username) => {
     const stmt = db.prepare(`
-      SELECT * FROM users WHERE username = ? AND is_active = 1
+      SELECT * FROM users WHERE username = ? COLLATE NOCASE AND is_active = 1
     `);
     return stmt.get(username);
   },

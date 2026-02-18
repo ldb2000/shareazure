@@ -230,7 +230,7 @@ async function sendShareNotification(to, { senderName, fileName, shareUrl, passw
     ${message ? `<p style="background:#e3f2fd;padding:12px;border-radius:6px;"><em>"${message}"</em></p>` : ''}
     <div class="password-box">
       <strong>🔒 Mot de passe requis</strong><br>
-      Le mot de passe vous sera communiqué séparément par l'expéditeur.
+      ${password ? `Mot de passe : <strong style="font-size:1.1em;letter-spacing:1px;">${password}</strong>` : `Le mot de passe vous sera communiqué séparément par l'expéditeur.`}
     </div>
     <p style="text-align:center;margin:25px 0;"><a href="${shareUrl}" class="btn">Accéder au fichier</a></p>
     <div class="footer">
@@ -239,7 +239,7 @@ async function sendShareNotification(to, { senderName, fileName, shareUrl, passw
     </div>
   </div></body></html>`;
   
-  const text = `${senderName || 'Un utilisateur'} vous a partagé "${fileName}"\nLien: ${shareUrl}\nMot de passe requis (communiqué séparément)\nExpire le: ${expiresDate}`;
+  const text = `${senderName || 'Un utilisateur'} vous a partagé "${fileName}"\nLien: ${shareUrl}\n${password ? `Mot de passe: ${password}` : 'Mot de passe requis (communiqué séparément)'}\nExpire le: ${expiresDate}`;
   
   return sendMail(to, `📎 ${senderName || 'Quelqu\'un'} vous a partagé "${fileName}" — ${appName}`, html, text);
 }

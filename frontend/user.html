@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ShareAzure - Mon espace de stockage</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="css/user.css">
+    <link rel="stylesheet" href="css/user.css?v=20260218b">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -47,6 +47,9 @@
                         </button>
                     </div>
                 </div>
+                <button class="btn-icon" id="finopsBtn" title="Mes coûts" onclick="showFinopsSection()">
+                    <i class="fas fa-chart-line"></i>
+                </button>
                 <button class="btn-icon" id="trashBtn" title="Corbeille" onclick="showTrashModal()">
                     <i class="fas fa-trash-alt"></i>
                 </button>
@@ -229,6 +232,65 @@
                 <div class="discover-tab-content" id="discoverTabMap" style="display: none;">
                     <div id="discover-map"></div>
                     <p class="discover-map-counter" id="discoverMapCounter"></p>
+                </div>
+            </div>
+
+            <!-- FinOps Section -->
+            <div class="finops-section" id="finopsSection" style="display: none;">
+                <div class="section-header">
+                    <h2>📊 Mes Coûts &amp; Optimisations</h2>
+                    <button class="btn btn-secondary" id="closeFinopsBtn" onclick="hideFinopsSection()">
+                        <i class="fas fa-arrow-left"></i> Retour
+                    </button>
+                </div>
+
+                <!-- Summary Cards -->
+                <div class="finops-cards" id="finopsSummaryCards">
+                    <div class="finops-card">
+                        <div class="finops-card-icon" style="background:#e3f2fd;color:#1565c0;"><i class="fas fa-database"></i></div>
+                        <div class="finops-card-label">Stockage mensuel</div>
+                        <div class="finops-card-value" id="finopsTotalStorage">-</div>
+                        <div class="finops-card-sub" id="finopsTotalSize">-</div>
+                    </div>
+                    <div class="finops-card">
+                        <div class="finops-card-icon" style="background:#e8f5e9;color:#2e7d32;"><i class="fas fa-share-alt"></i></div>
+                        <div class="finops-card-label">Partages (egress)</div>
+                        <div class="finops-card-value" id="finopsShareCost">-</div>
+                        <div class="finops-card-sub" id="finopsShareInfo">-</div>
+                    </div>
+                    <div class="finops-card">
+                        <div class="finops-card-icon" style="background:#fff3e0;color:#e65100;"><i class="fas fa-user-friends"></i></div>
+                        <div class="finops-card-label">Fichiers invités</div>
+                        <div class="finops-card-value" id="finopsGuestCost">-</div>
+                        <div class="finops-card-sub" id="finopsGuestInfo">-</div>
+                    </div>
+                    <div class="finops-card finops-card-total">
+                        <div class="finops-card-icon" style="background:#fce4ec;color:#c62828;"><i class="fas fa-euro-sign"></i></div>
+                        <div class="finops-card-label">Coût total / mois</div>
+                        <div class="finops-card-value" id="finopsTotalCost">-</div>
+                        <div class="finops-card-sub finops-saving" id="finopsPotentialSaving" style="display:none;">
+                            <i class="fas fa-leaf"></i> <span></span> d'économie possible
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tier Breakdown -->
+                <div class="finops-tier-section">
+                    <h3>Répartition par niveau de stockage</h3>
+                    <div class="finops-tier-bar" id="finopsTierBar"></div>
+                    <div class="finops-tier-legend" id="finopsTierLegend"></div>
+                    <div class="finops-tier-pricing">
+                        <small>Tarifs Azure France Central : <strong>Hot</strong> 0,0184 €/Go — <strong>Cool</strong> 0,01 €/Go — <strong>Archive</strong> 0,00099 €/Go/mois</small>
+                    </div>
+                </div>
+
+                <!-- Optimizations -->
+                <div class="finops-optim-section">
+                    <h3><i class="fas fa-lightbulb" style="color:#ffa000;"></i> Suggestions d'optimisation</h3>
+                    <p class="finops-optim-desc">Ces fichiers pourraient coûter moins cher dans un tier inférieur :</p>
+                    <div class="finops-optim-list" id="finopsOptimList">
+                        <p class="finops-empty">Chargement...</p>
+                    </div>
                 </div>
             </div>
 
@@ -570,7 +632,7 @@
         </div>
     </div>
 
-    <script src="js/user.js?v=20260217n"></script>
+    <script src="js/user.js?v=20260218b"></script>
     <!-- Modal Corbeille -->
     <div class="modal-overlay" id="trashModal" style="display: none;">
         <div class="modal-content" style="max-width: 750px;">
@@ -579,11 +641,16 @@
                 <button class="btn-close" onclick="document.getElementById('trashModal').style.display='none'"><i class="fas fa-times"></i></button>
             </div>
             <div class="modal-body">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">
-                    <small style="color:#888;">Les fichiers en corbeille sont archivés sur Azure (tier Archive)</small>
-                    <button class="btn btn-danger btn-small" id="emptyTrashBtn" onclick="emptyTrash()" style="display:none;">
-                        <i class="fas fa-trash"></i> Vider la corbeille
-                    </button>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;flex-wrap:wrap;gap:8px;">
+                    <small style="color:#888;">Les fichiers en corbeille sont archivés. Suppression auto après 30 jours.</small>
+                    <div style="display:flex;gap:8px;" id="trashActions" style="display:none;">
+                        <button class="btn btn-small" id="restoreAllTrashBtn" onclick="restoreAllTrash()" style="display:none;background:#4caf50;color:#fff;border:none;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:0.8rem;">
+                            <i class="fas fa-undo"></i> Tout restaurer
+                        </button>
+                        <button class="btn btn-danger btn-small" id="emptyTrashBtn" onclick="emptyTrash()" style="display:none;">
+                            <i class="fas fa-trash"></i> Vider la corbeille
+                        </button>
+                    </div>
                 </div>
                 <div id="trashFilesList" style="max-height:450px;overflow-y:auto;"></div>
             </div>

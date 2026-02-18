@@ -48,8 +48,8 @@
                 <span class="nav-text">Equipes</span>
             </a>
             <a href="#costs" class="nav-item" data-section="costs">
-                <i class="fas fa-dollar-sign nav-icon"></i>
-                <span class="nav-text">Couts</span>
+                <i class="fas fa-chart-line nav-icon"></i>
+                <span class="nav-text">FinOps</span>
             </a>
             <a href="#storage" class="nav-item" data-section="storage">
                 <span class="nav-icon">💾</span>
@@ -301,48 +301,89 @@
         <!-- Costs Section -->
         <section id="costs" class="content-section">
             <div class="section-toolbar">
-                <h3 style="margin: 0;">Suivi des Couts</h3>
+                <h3 style="margin: 0;"><i class="fas fa-chart-line"></i> FinOps — Suivi des coûts Azure</h3>
                 <div class="toolbar-actions">
-                    <select id="costsPeriod" class="filter-select">
-                        <option value="current">Mois actuel</option>
-                        <option value="last">Mois dernier</option>
-                        <option value="year">Annee en cours</option>
-                    </select>
-                    <button class="btn btn-secondary" id="refreshCostsBtn">
+                    <button class="btn btn-secondary" onclick="loadFinOps()">
                         <i class="fas fa-sync"></i> Actualiser
+                    </button>
+                    <button class="btn btn-secondary" onclick="recalculateFinOps()">
+                        <i class="fas fa-calculator"></i> Recalculer
+                    </button>
+                    <button class="btn btn-primary" onclick="sendFinOpsReport()">
+                        <i class="fas fa-envelope"></i> Envoyer par email
                     </button>
                 </div>
             </div>
 
-            <div class="stats-grid" style="margin-bottom: 2rem;">
-                <div class="stat-card">
-                    <div class="stat-content">
-                        <p class="stat-label">Utilisateurs</p>
-                        <h3 class="stat-value" id="costsUsers">$0.00</h3>
-                    </div>
+            <!-- Coût total hero -->
+            <div style="display:flex;justify-content:center;gap:32px;flex-wrap:wrap;margin:20px 0;padding:24px;background:linear-gradient(135deg,#0f172a,#1e3a5f);border-radius:12px;color:#fff;">
+                <div style="text-align:center;">
+                    <div id="finopsTotalCost" style="font-size:2.2rem;font-weight:800;color:#0d9488;">—</div>
+                    <div style="font-size:0.85rem;color:#94a3b8;">Coût total ce mois</div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-content">
-                        <p class="stat-label">Equipes</p>
-                        <h3 class="stat-value" id="costsTeams">$0.00</h3>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-content">
-                        <p class="stat-label">Invites</p>
-                        <h3 class="stat-value" id="costsGuests">$0.00</h3>
-                    </div>
-                </div>
-                <div class="stat-card" style="background: linear-gradient(135deg, var(--primary-color), var(--primary-dark)); color: white;">
-                    <div class="stat-content">
-                        <p class="stat-label" style="color: rgba(255,255,255,0.8);">Total</p>
-                        <h3 class="stat-value" id="costsTotal">$0.00</h3>
-                    </div>
+                <div style="text-align:center;">
+                    <div id="finopsForecast" style="font-size:2.2rem;font-weight:800;color:#f59e0b;">—</div>
+                    <div style="font-size:0.85rem;color:#94a3b8;">Projection fin de mois</div>
                 </div>
             </div>
 
-            <div class="table-container" id="costsDetails">
-                <p class="loading">Chargement...</p>
+            <!-- Breakdown -->
+            <div id="finopsBreakdownBar" style="margin-bottom:20px;">
+                <div style="background:#e5e7eb;border-radius:8px;height:28px;overflow:hidden;display:flex;" id="finopsBar"></div>
+                <div style="display:flex;gap:16px;margin-top:6px;font-size:0.8rem;color:#64748b;" id="finopsBarLegend"></div>
+            </div>
+
+            <!-- Stockage par tier -->
+            <h4 style="margin:20px 0 12px;color:#0a1628;"><i class="fas fa-database"></i> Stockage par tier</h4>
+            <div class="stats-grid" style="margin-bottom:20px;" id="finopsTierCards">
+                <div class="stat-card"><p class="loading">Chargement...</p></div>
+            </div>
+
+            <!-- Opérations -->
+            <h4 style="margin:20px 0 12px;color:#0a1628;"><i class="fas fa-bolt"></i> Opérations du mois</h4>
+            <div class="stats-grid" style="margin-bottom:20px;" id="finopsOpsCards">
+                <div class="stat-card"><p class="loading">Chargement...</p></div>
+            </div>
+
+            <!-- Coûts par utilisateur -->
+            <h4 style="margin:20px 0 12px;color:#0a1628;"><i class="fas fa-user"></i> Coûts par utilisateur</h4>
+            <div class="table-container">
+                <table><thead><tr><th>Utilisateur</th><th>Stockage</th><th>Hot</th><th>Cool</th><th>Archive</th><th>Opérations</th><th>Total</th></tr></thead>
+                <tbody id="finopsUsersTable"><tr><td colspan="7" class="loading">Chargement...</td></tr></tbody></table>
+            </div>
+
+            <!-- Coûts par équipe -->
+            <h4 style="margin:20px 0 12px;color:#0a1628;"><i class="fas fa-users"></i> Coûts par équipe</h4>
+            <div class="table-container">
+                <table><thead><tr><th>Équipe</th><th>Stockage</th><th>Hot</th><th>Cool</th><th>Opérations</th><th>Total</th></tr></thead>
+                <tbody id="finopsTeamsTable"><tr><td colspan="6" class="loading">Chargement...</td></tr></tbody></table>
+            </div>
+
+            <!-- Top fichiers -->
+            <h4 style="margin:20px 0 12px;color:#0a1628;"><i class="fas fa-file-invoice-dollar"></i> Top 10 fichiers les plus coûteux</h4>
+            <div class="table-container">
+                <table><thead><tr><th>Fichier</th><th>Propriétaire</th><th>Taille</th><th>Tier</th><th>Coût/mois</th></tr></thead>
+                <tbody id="finopsFilesTable"><tr><td colspan="5" class="loading">Chargement...</td></tr></tbody></table>
+            </div>
+
+            <!-- Grille tarifaire -->
+            <h4 style="margin:20px 0 12px;color:#0a1628;"><i class="fas fa-euro-sign"></i> Grille tarifaire Azure (France Central, LRS)</h4>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:20px;">
+                <div style="background:#fff5f5;border:1px solid #fecaca;border-top:3px solid #ef4444;border-radius:8px;padding:16px;text-align:center;">
+                    <h4 style="color:#ef4444;">🔴 Hot</h4>
+                    <div style="font-size:1.2rem;font-weight:700;">0.0184 €/Go/mois</div>
+                    <div style="font-size:0.8rem;color:#666;margin-top:4px;">Write: 0.05€/10k · Read: 0.004€/10k</div>
+                </div>
+                <div style="background:#eff6ff;border:1px solid #bfdbfe;border-top:3px solid #3b82f6;border-radius:8px;padding:16px;text-align:center;">
+                    <h4 style="color:#3b82f6;">🔵 Cool</h4>
+                    <div style="font-size:1.2rem;font-weight:700;">0.01 €/Go/mois</div>
+                    <div style="font-size:0.8rem;color:#666;margin-top:4px;">Write: 0.10€/10k · Read: 0.01€/10k · Accès: 0.01€/Go</div>
+                </div>
+                <div style="background:#f9fafb;border:1px solid #d1d5db;border-top:3px solid #6b7280;border-radius:8px;padding:16px;text-align:center;">
+                    <h4 style="color:#6b7280;">⚫ Archive</h4>
+                    <div style="font-size:1.2rem;font-weight:700;">0.00099 €/Go/mois</div>
+                    <div style="font-size:0.8rem;color:#666;margin-top:4px;">Write: 0.10€/10k · Read: 5.00€/10k · Réhydratation: 0.022€/Go</div>
+                </div>
             </div>
         </section>
 
@@ -1869,6 +1910,6 @@
         </div>
     </div>
 
-    <script src="js/admin.js?v=20260217h"></script>
+    <script src="js/admin.js?v=20260218a"></script>
 </body>
 </html>

@@ -1665,3 +1665,51 @@ body {
         height: 350px;
     }
 }
+
+/* FinOps Section */
+.finops-section { padding: 0 0 20px; }
+.finops-section .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.finops-section h2 { margin: 0; font-size: 1.3rem; }
+.finops-section h3 { margin: 20px 0 12px; font-size: 1.05rem; color: #333; }
+
+.finops-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.finops-card { background: #fff; border-radius: 12px; padding: 18px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); display: flex; flex-direction: column; gap: 6px; }
+.finops-card-total { border: 2px solid #e3f2fd; }
+.finops-card-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; }
+.finops-card-label { font-size: 0.8rem; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+.finops-card-value { font-size: 1.5rem; font-weight: 700; color: #222; }
+.finops-card-sub { font-size: 0.8rem; color: #999; }
+.finops-saving { color: #2e7d32 !important; font-weight: 600; background: #e8f5e9; padding: 4px 8px; border-radius: 6px; }
+
+.finops-tier-section { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 20px; }
+.finops-tier-bar { display: flex; height: 32px; border-radius: 8px; overflow: hidden; background: #f0f0f0; margin-bottom: 12px; }
+.finops-tier-bar > div { display: flex; align-items: center; justify-content: center; color: #fff; font-size: 0.75rem; font-weight: 600; transition: width 0.5s; min-width: 0; }
+.finops-tier-legend { display: flex; gap: 20px; flex-wrap: wrap; }
+.finops-tier-legend > div { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; }
+.finops-tier-legend .dot { width: 12px; height: 12px; border-radius: 3px; }
+.finops-tier-pricing { margin-top: 10px; color: #888; }
+
+.finops-optim-section { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.finops-optim-desc { color: #666; font-size: 0.9rem; margin-bottom: 14px; }
+.finops-optim-list { display: flex; flex-direction: column; gap: 10px; }
+.finops-optim-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; background: #fffde7; border-radius: 8px; border-left: 4px solid #ffa000; flex-wrap: wrap; }
+.finops-optim-item .file-info { flex: 1; min-width: 150px; }
+.finops-optim-item .file-name { font-weight: 600; font-size: 0.9rem; }
+.finops-optim-item .file-meta { font-size: 0.78rem; color: #888; }
+.finops-optim-item .cost-compare { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.finops-optim-item .cost-current { font-size: 0.85rem; color: #c62828; text-decoration: line-through; }
+.finops-optim-item .cost-new { font-size: 0.85rem; color: #2e7d32; font-weight: 600; }
+.finops-optim-item .saving-badge { background: #e8f5e9; color: #2e7d32; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; }
+.finops-optim-item .btn-optimize { padding: 6px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem; font-weight: 600; }
+.finops-optim-item .btn-cool { background: #e3f2fd; color: #1565c0; }
+.finops-optim-item .btn-archive { background: #ede7f6; color: #4527a0; }
+.finops-optim-item .btn-optimize:hover { filter: brightness(0.9); }
+.finops-empty { color: #999; text-align: center; padding: 20px; }
+.finops-no-optim { color: #2e7d32; text-align: center; padding: 20px; font-weight: 500; }
+
+@media (max-width: 768px) {
+  .finops-cards { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .finops-card { padding: 12px; }
+  .finops-card-value { font-size: 1.2rem; }
+  .finops-optim-item { flex-direction: column; align-items: flex-start; }
+}

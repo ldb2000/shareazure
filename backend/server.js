@@ -261,6 +261,11 @@ const LOG_LEVELS = {
 const LOG_MESSAGES = {
   // Fichiers
   file_uploaded: (d) => `Fichier "${d.originalName || d.blobName}" uploade`,
+  file_trashed: (d) => `🗑️ "${d.blobName}" mis en corbeille par ${d.trashedBy || '?'}`,
+  file_restored: (d) => `♻️ "${d.blobName}" restauré par ${d.restoredBy || '?'}`,
+  trash_emptied: (d) => `🧹 Corbeille vidée: ${d.count} fichier(s) par ${d.by || '?'}`,
+  trash_auto_purge: (d) => `🧹 Purge auto: ${d.count} fichier(s) >30j supprimés`,
+  guest_approved: (d) => `✅ Invité "${d.email}" approuvé par ${d.approvedBy || '?'}`,
   multiple_files_uploaded: (d) => `${d.count || 0} fichiers uploades`,
   file_downloaded: (d) => `Fichier "${d.blobName}" telecharge`,
   file_previewed: (d) => `Fichier "${d.blobName}" previsualise`,
@@ -1386,6 +1391,7 @@ app.post('/api/share/generate', async (req, res) => {
           senderName: username || 'Un utilisateur',
           fileName: properties.metadata?.originalName || blobName,
           shareUrl: protectedUrl,
+          password: password,
           expiresAt: expiresOn.toISOString()
         }).catch(err => console.error('Share email error:', err));
       }
@@ -3954,8 +3960,28 @@ app.put('/api/files/trash', authenticateUser, async (req, res) => {
     if (!blobName) return res.status(400).json({ success: false, error: 'blobName requis' });
 
     // Vérifier propriété
-    const file = db.prepare('SELECT * FROM file_ownership WHERE blob_name = ?').get(blobName);
-    if (!file) return res.status(404).json({ success: false, error: 'Fichier non trouvé' });
+    let file = db.prepare('SELECT * FROM file_ownership WHERE blob_name = ?').get(blobName);
+    
+    // Si pas trouvé dans file_ownership, créer une entrée (fichier listé depuis Azure directement)
+    if (!file) {
+      // Vérifier que le blob existe sur Azure
+      try {
+        const containerClient = blobServiceClient.getContainerClient(containerName);
+        const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+        const exists = await blockBlobClient.exists();
+        if (!exists) return res.status(404).json({ success: false, error: 'Fichier non trouvé' });
+        
+        // Créer l'entrée file_ownership
+        const properties = await blockBlobClient.getProperties();
+        db.prepare(`INSERT INTO file_ownership (blob_name, original_name, content_type, file_size, uploaded_by_user_id, uploaded_at)
+          VALUES (?, ?, ?, ?, ?, datetime('now'))`).run(
+          blobName, blobName.split('/').pop(), properties.contentType, properties.contentLength, req.user.id
+        );
+        file = db.prepare('SELECT * FROM file_ownership WHERE blob_name = ?').get(blobName);
+      } catch (e) {
+        return res.status(404).json({ success: false, error: 'Fichier non trouvé sur Azure' });
+      }
+    }
 
     // Vérifier que l'user a le droit (propriétaire, team member, ou admin)
     const isOwner = file.uploaded_by_user_id === req.user.id;
@@ -3977,7 +4003,7 @@ app.put('/api/files/trash', authenticateUser, async (req, res) => {
       console.error('Erreur changement tier Archive:', tierErr.message);
     }
 
-    logOperation('file_trashed', { blobName, trashedBy: req.user.username, teamId: file.team_id });
+    logOperation('file_trashed', { blobName, username: req.user.username, trashedBy: req.user.username, teamId: file.team_id });
     res.json({ success: true, message: 'Fichier mis en corbeille' });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
@@ -4023,8 +4049,32 @@ app.put('/api/files/restore', authenticateUser, async (req, res) => {
       // Archive → Hot peut prendre du temps (réhydratation)
     }
 
-    logOperation('file_restored', { blobName, restoredBy: req.user.username });
+    logOperation('file_restored', { blobName, username: req.user.username, restoredBy: req.user.username });
     res.json({ success: true, message: 'Fichier restauré (la réhydratation depuis Archive peut prendre quelques heures)' });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// PUT /api/files/trash/restore-all - Restaurer tous les fichiers de la corbeille
+app.put('/api/files/trash/restore-all', authenticateUser, async (req, res) => {
+  try {
+    const { teamId } = req.body;
+    const files = fileOwnershipDb.getTrashed(req.user.id, teamId ? parseInt(teamId) : null);
+
+    const containerClient = blobServiceClient.getContainerClient(containerName);
+    let restored = 0;
+    for (const file of files) {
+      try {
+        fileOwnershipDb.restore(file.blob_name);
+        const blockBlobClient = containerClient.getBlockBlobClient(file.blob_name);
+        await blockBlobClient.setAccessTier('Hot').catch(() => {});
+        restored++;
+      } catch (e) { console.error('Restore error:', file.blob_name, e.message); }
+    }
+
+    logOperation('trash_restore_all', { username: req.user.username, count: restored, teamId });
+    res.json({ success: true, message: `${restored} fichier(s) restauré(s). La réhydratation depuis Archive peut prendre quelques heures.` });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -4930,6 +4980,182 @@ app.delete('/api/teams/:teamId/members/:userId', authenticateUser, async (req, r
       success: false,
       error: error.message
     });
+  }
+});
+
+// ============================================================================
+// API FINOPS UTILISATEUR
+// ============================================================================
+
+// Tarifs Azure France Central (€/Go/mois)
+const TIER_COSTS = {
+  Hot: 0.0184,
+  Cool: 0.01,
+  Archive: 0.00099
+};
+const EGRESS_COST_PER_GB = 0.087;
+const READ_OP_COST = { Hot: 0.0044 / 10000, Cool: 0.01 / 10000, Archive: 0.05 / 1000 };
+const WRITE_OP_COST = { Hot: 0.055 / 10000, Cool: 0.10 / 10000, Archive: 0.10 / 10000 };
+const REHYDRATION_PER_GB = 0.022;
+
+// GET /api/finops/me — FinOps dashboard pour l'utilisateur connecté
+app.get('/api/finops/me', authenticateUser, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const username = req.user.username;
+
+    // 1. Fichiers de l'utilisateur avec tiers
+    const userFiles = db.prepare(`
+      SELECT fo.blob_name, fo.file_size, fo.uploaded_at,
+             COALESCE(ft.current_tier, 'Hot') as tier,
+             fo.original_name
+      FROM file_ownership fo
+      LEFT JOIN file_tiers ft ON fo.blob_name = ft.blob_name
+      WHERE fo.uploaded_by_user_id = ? AND (fo.is_trashed = 0 OR fo.is_trashed IS NULL)
+    `).all(userId);
+
+    // 2. Calculer coûts par tier
+    let totalSizeBytes = 0;
+    let costByTier = { Hot: { size: 0, count: 0, cost: 0 }, Cool: { size: 0, count: 0, cost: 0 }, Archive: { size: 0, count: 0, cost: 0 } };
+    let optimizations = [];
+
+    for (const f of userFiles) {
+      const sizeGB = (f.file_size || 0) / (1024 * 1024 * 1024);
+      const tier = f.tier || 'Hot';
+      totalSizeBytes += (f.file_size || 0);
+      if (!costByTier[tier]) costByTier[tier] = { size: 0, count: 0, cost: 0 };
+      costByTier[tier].size += (f.file_size || 0);
+      costByTier[tier].count++;
+      costByTier[tier].cost += sizeGB * TIER_COSTS[tier];
+
+      // Suggestion d'optimisation: fichier Hot > 30 jours → suggérer Cool
+      if (tier === 'Hot' && f.uploaded_at) {
+        const ageDays = (Date.now() - new Date(f.uploaded_at).getTime()) / (1000 * 60 * 60 * 24);
+        if (ageDays > 30 && (f.file_size || 0) > 1024 * 1024) { // >1MB et >30j
+          const currentCost = sizeGB * TIER_COSTS.Hot;
+          const coolCost = sizeGB * TIER_COSTS.Cool;
+          const archiveCost = sizeGB * TIER_COSTS.Archive;
+          optimizations.push({
+            blobName: f.blob_name,
+            fileName: f.original_name || f.blob_name.split('/').pop(),
+            fileSize: f.file_size,
+            ageDays: Math.floor(ageDays),
+            currentTier: 'Hot',
+            currentCostMonth: currentCost,
+            suggestions: [
+              { tier: 'Cool', costMonth: coolCost, savingMonth: currentCost - coolCost, savingPercent: Math.round((1 - coolCost / currentCost) * 100) },
+              { tier: 'Archive', costMonth: archiveCost, savingMonth: currentCost - archiveCost, savingPercent: Math.round((1 - archiveCost / currentCost) * 100) }
+            ]
+          });
+        }
+      }
+      // Fichier Cool > 90 jours → suggérer Archive
+      if (tier === 'Cool' && f.uploaded_at) {
+        const ageDays = (Date.now() - new Date(f.uploaded_at).getTime()) / (1000 * 60 * 60 * 24);
+        if (ageDays > 90 && (f.file_size || 0) > 1024 * 1024) {
+          const currentCost = sizeGB * TIER_COSTS.Cool;
+          const archiveCost = sizeGB * TIER_COSTS.Archive;
+          optimizations.push({
+            blobName: f.blob_name,
+            fileName: f.original_name || f.blob_name.split('/').pop(),
+            fileSize: f.file_size,
+            ageDays: Math.floor(ageDays),
+            currentTier: 'Cool',
+            currentCostMonth: currentCost,
+            suggestions: [
+              { tier: 'Archive', costMonth: archiveCost, savingMonth: currentCost - archiveCost, savingPercent: Math.round((1 - archiveCost / currentCost) * 100) }
+            ]
+          });
+        }
+      }
+    }
+
+    // 3. Partages actifs et coûts egress
+    const shareLinks = shareLinksDb.getAllByUser(username, 1000);
+    let shareCost = 0;
+    let totalDownloads = 0;
+    for (const link of shareLinks) {
+      const sizeGB = (link.file_size || 0) / (1024 * 1024 * 1024);
+      const downloads = link.download_count || 0;
+      totalDownloads += downloads;
+      shareCost += sizeGB * downloads * EGRESS_COST_PER_GB;
+    }
+
+    // 4. Fichiers reçus d'invités
+    const guestUploads = db.prepare(`
+      SELECT COUNT(*) as count, COALESCE(SUM(urf.file_size), 0) as totalSize
+      FROM upload_request_files urf
+      JOIN upload_requests ur ON urf.request_id = ur.request_id
+      WHERE ur.created_by_user_id = ?
+    `).get(userId) || { count: 0, totalSize: 0 };
+
+    // 5. Coût total mensuel
+    const totalStorageCost = Object.values(costByTier).reduce((s, t) => s + t.cost, 0);
+    const totalPotentialSaving = optimizations.reduce((s, o) => s + (o.suggestions[0]?.savingMonth || 0), 0);
+
+    res.json({
+      success: true,
+      summary: {
+        totalFiles: userFiles.length,
+        totalSize: totalSizeBytes,
+        totalStorageCostMonth: totalStorageCost,
+        totalShareCost: shareCost,
+        totalCostMonth: totalStorageCost + shareCost,
+        potentialSavingMonth: totalPotentialSaving,
+        totalDownloads,
+        activeShares: shareLinks.filter(l => l.is_active && new Date(l.expires_at) > new Date()).length
+      },
+      costByTier,
+      optimizations: optimizations.sort((a, b) => (b.suggestions[0]?.savingMonth || 0) - (a.suggestions[0]?.savingMonth || 0)).slice(0, 20),
+      guestUploads: {
+        count: guestUploads.count,
+        totalSize: guestUploads.totalSize,
+        estimatedCost: (guestUploads.totalSize / (1024 * 1024 * 1024)) * TIER_COSTS.Hot
+      },
+      tierPricing: TIER_COSTS
+    });
+  } catch (error) {
+    console.error('Erreur FinOps:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/finops/optimize — Changer le tier d'un fichier (utilisateur)
+app.post('/api/finops/optimize', authenticateUser, async (req, res) => {
+  try {
+    const { blobName, targetTier } = req.body;
+    if (!['Cool', 'Archive'].includes(targetTier)) {
+      return res.status(400).json({ success: false, error: 'Tier invalide' });
+    }
+
+    // Vérifier que le fichier appartient à l'utilisateur
+    const ownership = fileOwnershipDb.getByBlobName(blobName);
+    if ((!ownership || ownership.uploaded_by_user_id !== req.user.id) && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, error: 'Ce fichier ne vous appartient pas' });
+    }
+
+    // Changer le tier sur Azure
+    const containerClient = blobServiceClient.getContainerClient(CONTAINER_NAME);
+    const blobClient = containerClient.getBlobClient(blobName);
+    await blobClient.setAccessTier(targetTier);
+
+    // Mettre à jour en DB
+    const existing = fileTiersDb.getByBlobName(blobName);
+    if (existing) {
+      fileTiersDb.update(blobName, { currentTier: targetTier, previousTier: existing.current_tier, tierChangedByUserId: req.user.id });
+    } else {
+      fileTiersDb.create({ blobName, currentTier: targetTier, previousTier: 'Hot', tierChangedByUserId: req.user.id });
+    }
+
+    // Log
+    activityLogsDb.create('info', 'storage', 'tier_change', 
+      `${req.user.username} a changé ${blobName.split('/').pop()} vers ${targetTier}`,
+      req.user.username, JSON.stringify({ blobName, targetTier }), req.ip);
+
+    res.json({ success: true, message: `Fichier déplacé vers ${targetTier}` });
+  } catch (error) {
+    console.error('Erreur optimize:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -6756,6 +6982,116 @@ let statsCache = null;
 let statsCacheTime = 0;
 const STATS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
+// ============================================
+// Rapport HTML
+// ============================================
+const { generateReport } = require('./reportGenerator');
+const { generateFinOpsReport, generateFinOpsHTML } = require('./finops');
+
+// GET /api/admin/report - Générer un rapport HTML
+app.get('/api/admin/report', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const period = req.query.period || '24h';
+    const html = generateReport(db, { period, title: `Rapport ShareAzure — ${period}` });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// POST /api/admin/report/send - Envoyer le rapport par email
+app.post('/api/admin/report/send', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const { email, period } = req.body;
+    if (!email) return res.status(400).json({ success: false, error: 'Email requis' });
+    
+    const html = generateReport(db, { period: period || '24h', title: `Rapport ShareAzure — ${period || '24h'}` });
+    
+    const sent = await emailService.sendMail(
+      email,
+      `📊 Rapport ShareAzure — ${new Date().toLocaleDateString('fr-FR')}`,
+      html
+    );
+    
+    if (sent) {
+      res.json({ success: true, message: 'Rapport envoyé par email' });
+    } else {
+      res.json({ success: false, error: 'Erreur envoi email (vérifiez la configuration SMTP)' });
+    }
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// GET /api/admin/report/download - Télécharger le rapport en fichier HTML
+app.get('/api/admin/report/download', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const period = req.query.period || '24h';
+    const html = generateReport(db, { period, title: `Rapport ShareAzure — ${period}` });
+    const date = new Date().toISOString().substring(0, 10);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="rapport-shareazure-${date}.html"`);
+    res.send(html);
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ============================================
+// FinOps Routes
+// ============================================
+
+// GET /api/admin/finops - Rapport FinOps JSON
+app.get('/api/admin/finops', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const report = generateFinOpsReport(db);
+    res.json({ success: true, ...report });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// GET /api/admin/finops/html - Rapport FinOps HTML
+app.get('/api/admin/finops/html', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const html = generateFinOpsHTML(db);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// POST /api/admin/finops/send - Envoyer le rapport FinOps par email
+app.post('/api/admin/finops/send', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, error: 'Email requis' });
+    
+    const html = generateFinOpsHTML(db);
+    const sent = await emailService.sendMail(
+      email,
+      `💰 Rapport FinOps ShareAzure — ${new Date().toLocaleDateString('fr-FR')}`,
+      html
+    );
+    
+    res.json({ success: sent, message: sent ? 'Rapport FinOps envoyé' : 'Erreur envoi email' });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// POST /api/admin/finops/recalculate - Forcer le recalcul des coûts
+app.post('/api/admin/finops/recalculate', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    await calculateAllMonthlyCosts();
+    res.json({ success: true, message: 'Coûts recalculés' });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 app.get('/api/admin/stats', authenticateUser, requireAdmin, async (req, res) => {
   try {
     const now = Date.now();
@@ -7197,6 +7533,35 @@ if (require.main === module) {
             console.error('Purge error:', e.message);
           }
         }, 60 * 60 * 1000);
+
+        // Purge corbeille > 30 jours, quotidien à 4h du matin
+        setInterval(() => {
+          const now = new Date();
+          if (now.getHours() === 4 && now.getMinutes() < 1) {
+            (async () => {
+              try {
+                const trashedFiles = db.prepare(`
+                  SELECT * FROM file_ownership
+                  WHERE is_trashed = 1 AND trashed_at < datetime('now', '-30 days')
+                `).all();
+                if (trashedFiles.length === 0) return;
+                const cClient = blobServiceClient.getContainerClient(containerName);
+                let deleted = 0;
+                for (const f of trashedFiles) {
+                  try {
+                    await cClient.getBlockBlobClient(f.blob_name).deleteIfExists();
+                    fileOwnershipDb.delete(f.blob_name);
+                    deleted++;
+                  } catch (e) { console.error('Purge trash error:', f.blob_name, e.message); }
+                }
+                if (deleted > 0) {
+                  console.log(`🗑️ Purge corbeille: ${deleted} fichier(s) supprimé(s) définitivement (>30j)`);
+                  logOperation('trash_auto_purge', { count: deleted });
+                }
+              } catch (e) { console.error('Erreur purge corbeille:', e.message); }
+            })();
+          }
+        }, 60 * 1000);
 
         // Auto-tiering quotidien à 3h du matin
         setInterval(() => {
