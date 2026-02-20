@@ -2515,7 +2515,7 @@ function formatSize(bytes) {
 async function loadFinopsData() {
     try {
         const response = await fetch(`${API_URL}/finops/me`, {
-            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+            headers: { 'Authorization': `Bearer ${getAuthToken()}` }
         });
         const data = await response.json();
         if (!data.success) throw new Error(data.error);
@@ -2626,7 +2626,7 @@ async function applyOptimization(blobName, targetTier, btn) {
             method: 'POST',
             headers: { 
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${localStorage.getItem('token')}` 
+                'Authorization': `Bearer ${getAuthToken()}` 
             },
             body: JSON.stringify({ blobName, targetTier })
         });
@@ -2669,7 +2669,7 @@ function showPreview(blobName) {
     document.getElementById('commentCount').textContent = '';
     // Pre-load comment count
     fetch(`${API_URL}/files/${encodeBlobPath(blobName)}/comments`, {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        headers: { 'Authorization': `Bearer ${getAuthToken()}` }
     }).then(r => r.json()).then(d => {
         if (d.success && d.comments.length > 0) document.getElementById('commentCount').textContent = d.comments.length;
     }).catch(() => {});
@@ -2736,7 +2736,7 @@ function showPreview(blobName) {
         body.innerHTML = `<audio controls autoplay><source src="${previewUrl}" type="${contentType}">Votre navigateur ne supporte pas l'audio.</audio>`;
     } else if (contentType.startsWith('text/') || contentType === 'application/json' || contentType === 'application/xml' || /\.(txt|md|csv|log|json|xml|js|css|sh|py|sql|yml|yaml|conf|cfg|ini|env|html|htm)$/i.test(blobName)) {
         body.innerHTML = '<div class="spinner"></div>';
-        fetch(previewUrl, { headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` } }).then(r => {
+        fetch(previewUrl, { headers: { 'Authorization': `Bearer ${getAuthToken()}` } }).then(r => {
             if (!r.ok) throw new Error(r.status);
             return r.text();
         }).then(text => {
@@ -2918,7 +2918,7 @@ async function loadComments() {
     list.innerHTML = '<div class="comments-empty">Chargement...</div>';
     try {
         const res = await fetch(`${API_URL}/files/${encodeURIComponent(currentPreviewBlobName)}/comments`, {
-            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+            headers: { 'Authorization': `Bearer ${getAuthToken()}` }
         });
         const data = await res.json();
         if (!data.success) throw new Error(data.error);
@@ -2951,7 +2951,7 @@ async function addComment() {
     try {
         const res = await fetch(`${API_URL}/files/${encodeURIComponent(currentPreviewBlobName)}/comments`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
             body: JSON.stringify({ comment: text })
         });
         const data = await res.json();
@@ -2969,7 +2969,7 @@ async function deleteComment(id) {
     try {
         const res = await fetch(`${API_URL}/files/comments/${id}`, {
             method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+            headers: { 'Authorization': `Bearer ${getAuthToken()}` }
         });
         const data = await res.json();
         if (data.success) loadComments();
@@ -3101,7 +3101,7 @@ async function addVideoComment() {
     try {
         const res = await fetch(`${API_URL}/files/${encodeURIComponent(currentPreviewBlobName)}/comments`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
             body: JSON.stringify({ comment: text })
         });
         const data = await res.json();
@@ -3120,7 +3120,7 @@ async function loadVideoComments() {
     if (!currentPreviewBlobName) return;
     try {
         const res = await fetch(`${API_URL}/files/${encodeURIComponent(currentPreviewBlobName)}/comments`, {
-            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+            headers: { 'Authorization': `Bearer ${getAuthToken()}` }
         });
         const data = await res.json();
         if (!data.success) return;
@@ -3195,7 +3195,7 @@ document.addEventListener('click', (e) => {
 async function loadNotifications() {
     try {
         const res = await fetch(`${API_URL}/notifications?limit=30`, {
-            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+            headers: { 'Authorization': `Bearer ${getAuthToken()}` }
         });
         const data = await res.json();
         if (!data.success) return;
@@ -3246,7 +3246,7 @@ async function readNotif(id, link) {
     try {
         await fetch(`${API_URL}/notifications/${id}/read`, {
             method: 'PUT',
-            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+            headers: { 'Authorization': `Bearer ${getAuthToken()}` }
         });
         loadNotifications();
         if (link) window.open(link, '_blank');
@@ -3257,7 +3257,7 @@ async function markAllRead() {
     try {
         await fetch(`${API_URL}/notifications/read-all`, {
             method: 'PUT',
-            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+            headers: { 'Authorization': `Bearer ${getAuthToken()}` }
         });
         loadNotifications();
     } catch (e) { /* ignore */ }
@@ -3276,7 +3276,7 @@ function getTimeAgo(dateStr) {
 async function pollNotifCount() {
     try {
         const res = await fetch(`${API_URL}/notifications?unreadOnly=true&limit=1`, {
-            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+            headers: { 'Authorization': `Bearer ${getAuthToken()}` }
         });
         const data = await res.json();
         if (data.success) updateNotifBadge(data.unreadCount);
@@ -3344,7 +3344,7 @@ async function bulkDownloadZip() {
     try {
         const res = await fetch(`${API_URL}/files/bulk-download`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
             body: JSON.stringify({ blobNames: [...selectedFiles] })
         });
         const blob = await res.blob();
@@ -3363,7 +3363,7 @@ async function bulkDelete() {
     try {
         const res = await fetch(`${API_URL}/files/bulk-delete`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
             body: JSON.stringify({ blobNames: [...selectedFiles] })
         });
         const data = await res.json();
@@ -3434,7 +3434,7 @@ window.handleGenerateShareLink = async function() {
         try {
             const res = await fetch(`${API_URL}/files/bulk-share`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
                 body: JSON.stringify({
                     folderPath,
                     recipientEmail: recipientEmails,
