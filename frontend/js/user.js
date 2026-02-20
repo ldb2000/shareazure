@@ -3990,7 +3990,7 @@ async function changeFileTier(blobName, newTier, currentTier) {
         const res = await fetch(`${API_URL}/files/${encodeBlobPath(blobName)}/archive`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ targetTier: newTier })
+            body: JSON.stringify({ tier: newTier })
         });
         const data = await res.json();
         if (data.success) {
