@@ -11,7 +11,7 @@ const QRCode = require('qrcode');
 const bcrypt = require('bcrypt');
 const fs = require('fs');
 const path = require('path');
-const { db, shareLinksDb, downloadLogsDb, settingsDb, allowedEmailDomainsDb, usersDb, guestAccountsDb, fileOwnershipDb, teamsDb, teamMembersDb, costTrackingDb, operationLogsDb, fileTiersDb, activityLogsDb, uploadRequestsDb, teamQuotasDb, rolePermissionsDb, entraRoleMappingsDb, tieringPoliciesDb } = require('./database');
+const { db, shareLinksDb, downloadLogsDb, settingsDb, allowedEmailDomainsDb, usersDb, guestAccountsDb, fileOwnershipDb, teamsDb, teamMembersDb, costTrackingDb, operationLogsDb, fileTiersDb, activityLogsDb, uploadRequestsDb, teamQuotasDb, rolePermissionsDb, entraRoleMappingsDb, tieringPoliciesDb, geolocationDb, mediaAnalysisDb, transcriptionsDb, faceOccurrencesDb } = require('./database');
 const crypto = require('crypto');
 const { migrateHardcodedUsers } = require('./migrateUsers');
 const emailService = require('./emailService');
@@ -711,6 +711,7 @@ app.post('/api/upload', authenticateUserOrGuest, upload.single('file'), validate
       blobHTTPHeaders: {
         blobContentType: req.file.mimetype
       },
+      tier: 'Cool',
       metadata
     });
 
@@ -859,6 +860,7 @@ app.post('/api/upload/multiple', authenticateUserOrGuest, upload.array('files', 
         blobHTTPHeaders: {
           blobContentType: file.mimetype
         },
+        tier: 'Cool',
         metadata
       });
 
@@ -986,7 +988,7 @@ app.get('/api/files', authenticateUserOrGuest, async (req, res) => {
           ownerRole: record.user_role || null,
           teamId: record.team_id || null,
           teamName: record.team_name || null,
-          tier: properties.accessTier || 'Hot',
+          tier: properties.accessTier || 'Cool',
           metadata: properties.metadata
         });
       } catch (error) {
@@ -3328,6 +3330,158 @@ configureAi({
   getContainerClient: () => blobServiceClient.getContainerClient(containerName)
 });
 
+// ============================================
+// FILE TAGS ROUTES
+// ============================================
+const { fileTagsDb } = require('./database');
+
+// GET /api/files/:blobName/tags
+app.get('/api/files/:blobName(*)/tags', authenticateUser, (req, res) => {
+  try {
+    const { blobName } = req.params;
+    const tags = fileTagsDb.getByBlobName(blobName);
+    logOperation('file_tags_viewed', { blobName, username: req.user.username });
+    res.json({ success: true, tags });
+  } catch (error) {
+    console.error('Erreur récupération tags:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/files/:blobName/tags
+app.post('/api/files/:blobName(*)/tags', authenticateUser, (req, res) => {
+  try {
+    const { blobName } = req.params;
+    const { tag } = req.body;
+    if (!tag || !tag.trim()) {
+      return res.status(400).json({ success: false, error: 'Tag requis' });
+    }
+    fileTagsDb.add(blobName, tag, req.user.id);
+    logOperation('file_tag_added', { blobName, tag: tag.trim().toLowerCase(), username: req.user.username });
+    res.json({ success: true, tag: tag.trim().toLowerCase() });
+  } catch (error) {
+    console.error('Erreur ajout tag:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE /api/files/:blobName/tags/:tagName
+app.delete('/api/files/:blobName(*)/tags/:tagName', authenticateUser, (req, res) => {
+  try {
+    const { blobName, tagName } = req.params;
+    fileTagsDb.remove(blobName, tagName);
+    logOperation('file_tag_removed', { blobName, tag: tagName, username: req.user.username });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Erreur suppression tag:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/tags/all - Tous les tags groupés par blob_name (pour recherche)
+app.get('/api/tags/all', authenticateUser, (req, res) => {
+  try {
+    const rows = db.prepare('SELECT blob_name, tag FROM file_tags ORDER BY blob_name').all();
+    const map = {};
+    for (const r of rows) {
+      if (!map[r.blob_name]) map[r.blob_name] = [];
+      map[r.blob_name].push(r.tag);
+    }
+    res.json({ success: true, tags: map });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/tags/suggest?q=xxx
+app.get('/api/tags/suggest', authenticateUser, (req, res) => {
+  try {
+    const q = req.query.q || '';
+    const suggestions = fileTagsDb.suggest(q);
+    res.json({ success: true, suggestions });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============================================
+// FILE GEOLOCATION ROUTES
+// ============================================
+
+// GET /api/files/:blobName/geolocation
+app.get('/api/files/:blobName(*)/geolocation', authenticateUser, (req, res) => {
+  try {
+    const { blobName } = req.params;
+    const geo = geolocationDb.getByBlobName(blobName);
+    res.json({ success: true, geolocation: geo || null });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT /api/files/:blobName/geolocation
+app.put('/api/files/:blobName(*)/geolocation', authenticateUser, (req, res) => {
+  try {
+    const { blobName } = req.params;
+    const { latitude, longitude, address } = req.body;
+    if (latitude == null || longitude == null) {
+      return res.status(400).json({ success: false, error: 'Latitude et longitude requises' });
+    }
+    geolocationDb.create({
+      blobName,
+      latitude: parseFloat(latitude),
+      longitude: parseFloat(longitude),
+      address: address || null
+    });
+    logOperation('geolocation_updated', { blobName, latitude, longitude, username: req.user.username });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE /api/files/:blobName/geolocation
+app.delete('/api/files/:blobName(*)/geolocation', authenticateUser, (req, res) => {
+  try {
+    const { blobName } = req.params;
+    geolocationDb.delete(blobName);
+    logOperation('geolocation_deleted', { blobName, username: req.user.username });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============================================
+// FILE INFO ROUTE (general info for info panel)
+// ============================================
+app.get('/api/files/:blobName(*)/info', authenticateUser, async (req, res) => {
+  try {
+    const { blobName } = req.params;
+    const containerClient = blobServiceClient.getContainerClient(containerName);
+    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+    const properties = await blockBlobClient.getProperties();
+    const ownership = fileOwnershipDb.getByBlobName(blobName);
+
+    res.json({
+      success: true,
+      info: {
+        name: properties.metadata?.originalName || blobName.split('/').pop(),
+        blobName,
+        size: properties.contentLength,
+        contentType: properties.contentType,
+        createdOn: properties.createdOn || ownership?.uploaded_at,
+        lastModified: properties.lastModified,
+        tier: properties.accessTier || 'Cool',
+        metadata: properties.metadata
+      }
+    });
+  } catch (error) {
+    console.error('Erreur info fichier:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.use('/api/ai', aiRouter);
 app.use('/api/admin/ai', aiAdminRouter);
 
@@ -4686,10 +4840,39 @@ app.put('/api/user/files/rename', authenticateUser, async (req, res) => {
       
       await destClient.uploadData(buffer, {
         blobHTTPHeaders: { blobContentType: properties.contentType },
+        tier: properties.accessTier || 'Cool',
         metadata: metadata
       });
       
       await sourceClient.delete();
+    }
+
+    // Mettre à jour toutes les tables DB
+
+    // Mettre à jour toutes les tables DB
+    if (isFolder) {
+      const oldPrefix = oldPath;
+      const newPrefix = newPath;
+      // file_ownership
+      db.prepare(`UPDATE file_ownership SET blob_name = REPLACE(blob_name, ?, ?), original_name = REPLACE(original_name, ?, ?) WHERE blob_name LIKE ?`).run(oldPrefix, newPrefix, oldPrefix, newPrefix, oldPrefix + '%');
+      // file_tiers
+      db.prepare(`UPDATE file_tiers SET blob_name = REPLACE(blob_name, ?, ?) WHERE blob_name LIKE ?`).run(oldPrefix, newPrefix, oldPrefix + '%');
+      // file_tags
+      db.prepare(`UPDATE file_tags SET blob_name = REPLACE(blob_name, ?, ?) WHERE blob_name LIKE ?`).run(oldPrefix, newPrefix, oldPrefix + '%');
+      // file_comments
+      db.prepare(`UPDATE file_comments SET blob_name = REPLACE(blob_name, ?, ?) WHERE blob_name LIKE ?`).run(oldPrefix, newPrefix, oldPrefix + '%');
+      // geolocation
+      db.prepare(`UPDATE geolocation SET blob_name = REPLACE(blob_name, ?, ?) WHERE blob_name LIKE ?`).run(oldPrefix, newPrefix, oldPrefix + '%');
+      // media_analysis
+      db.prepare(`UPDATE media_analysis SET blob_name = REPLACE(blob_name, ?, ?) WHERE blob_name LIKE ?`).run(oldPrefix, newPrefix, oldPrefix + '%');
+    } else {
+      // Fichier unique
+      db.prepare(`UPDATE file_ownership SET blob_name = ?, original_name = ? WHERE blob_name = ?`).run(newPath, newName, oldPath);
+      db.prepare(`UPDATE file_tiers SET blob_name = ? WHERE blob_name = ?`).run(newPath, oldPath);
+      db.prepare(`UPDATE file_tags SET blob_name = ? WHERE blob_name = ?`).run(newPath, oldPath);
+      db.prepare(`UPDATE file_comments SET blob_name = ? WHERE blob_name = ?`).run(newPath, oldPath);
+      db.prepare(`UPDATE geolocation SET blob_name = ? WHERE blob_name = ?`).run(newPath, oldPath);
+      db.prepare(`UPDATE media_analysis SET blob_name = ? WHERE blob_name = ?`).run(newPath, oldPath);
     }
 
     logOperation('file_renamed', { oldPath, newPath });
@@ -5826,7 +6009,7 @@ app.get('/api/finops/me', authenticateUser, async (req, res) => {
     // 1. Fichiers de l'utilisateur avec tiers
     const userFiles = db.prepare(`
       SELECT fo.blob_name, fo.file_size, fo.uploaded_at,
-             COALESCE(ft.current_tier, 'Hot') as tier,
+             COALESCE(ft.current_tier, 'Cool') as tier,
              fo.original_name
       FROM file_ownership fo
       LEFT JOIN file_tiers ft ON fo.blob_name = ft.blob_name
@@ -5840,7 +6023,7 @@ app.get('/api/finops/me', authenticateUser, async (req, res) => {
 
     for (const f of userFiles) {
       const sizeGB = (f.file_size || 0) / (1024 * 1024 * 1024);
-      const tier = f.tier || 'Hot';
+      const tier = f.tier || 'Cool';
       totalSizeBytes += (f.file_size || 0);
       if (!costByTier[tier]) costByTier[tier] = { size: 0, count: 0, cost: 0 };
       costByTier[tier].size += (f.file_size || 0);
@@ -6175,7 +6358,7 @@ app.post('/api/files/:blobName(*)/archive', authenticateUser, async (req, res) =
     let currentTier = 'Hot';
     try {
       const properties = await blockBlobClient.getProperties();
-      currentTier = properties.accessTier || 'Hot';
+      currentTier = properties.accessTier || 'Cool';
     } catch (error) {
       console.error('Erreur récupération propriétés blob:', error);
     }
@@ -6339,6 +6522,14 @@ app.post('/api/files/:blobName(*)/rehydrate', authenticateUser, async (req, res)
       }
     });
 
+    // Notification in-app
+    const fileName = blobName.split('/').pop();
+    const eta = rehydratePriority === 'High' ? '~1 heure' : '~15 heures';
+    createNotification(req.user.id, 'rehydration_started', '❄️ Réhydratation en cours',
+      `Le fichier "${fileName}" est en cours de réhydratation vers ${targetTier}. Délai estimé : ${eta}.`);
+
+    logOperation('file_rehydration_started', { blobName, targetTier, priority: rehydratePriority, userId: req.user.id });
+
   } catch (error) {
     console.error('Erreur réhydratation fichier:', error);
     res.status(500).json({
@@ -6386,7 +6577,7 @@ app.get('/api/files/:blobName(*)/tier-status', authenticateUser, async (req, res
     const blockBlobClient = containerClient.getBlockBlobClient(blobName);
 
     const properties = await blockBlobClient.getProperties();
-    const azureTier = properties.accessTier || 'Hot';
+    const azureTier = properties.accessTier || 'Cool';
     const archiveStatus = properties.archiveStatus;
 
     // Récupérer les informations depuis la DB
@@ -7088,6 +7279,7 @@ app.post('/api/public/upload/:requestId/file', upload.single('file'), async (req
 
     await blockBlobClient.uploadData(req.file.buffer, {
       blobHTTPHeaders: { blobContentType: req.file.mimetype },
+      tier: 'Cool',
       metadata: {
         originalName: req.file.originalname,
         uploadedAt: new Date().toISOString(),
@@ -7940,7 +8132,7 @@ app.get('/api/admin/stats', authenticateUser, requireAdmin, async (req, res) => 
       totalFiles++;
       const size = blob.properties.contentLength || 0;
       totalSize += size;
-      const tier = (blob.properties.accessTier || 'Hot').toLowerCase();
+      const tier = (blob.properties.accessTier || 'Cool').toLowerCase();
       if (storageByTier[tier]) {
         storageByTier[tier].count++;
         storageByTier[tier].size += size;
@@ -7953,7 +8145,7 @@ app.get('/api/admin/stats', authenticateUser, requireAdmin, async (req, res) => 
         size,
         contentType: blob.properties.contentType,
         lastModified: blob.properties.lastModified,
-        tier: blob.properties.accessTier || 'Hot',
+        tier: blob.properties.accessTier || 'Cool',
         originalName: blob.metadata?.originalname || blob.metadata?.originalName || blob.name
       });
     }
@@ -8037,7 +8229,7 @@ async function runAutoTiering(dryRun = false) {
   const now = Date.now();
 
   for await (const blob of containerClient.listBlobsFlat({ includeMetadata: true })) {
-    const tier = (blob.properties.accessTier || 'Hot');
+    const tier = (blob.properties.accessTier || 'Cool');
     const lastModified = new Date(blob.properties.lastModified);
     const ageDays = Math.floor((now - lastModified.getTime()) / (1000 * 60 * 60 * 24));
 
@@ -8270,7 +8462,7 @@ app.get('/api/admin/storage/tree', authenticateUser, requireAdmin, async (req, r
         size: blob.properties.contentLength,
         contentType: blob.properties.contentType,
         lastModified: blob.properties.lastModified,
-        tier: blob.properties.accessTier || 'Hot',
+        tier: blob.properties.accessTier || 'Cool',
         inDb: !!db.prepare('SELECT 1 FROM file_ownership WHERE blob_name = ?').get(blob.name)
       });
     }
@@ -8362,6 +8554,35 @@ if (require.main === module) {
             console.error('Purge error:', e.message);
           }
         }, 60 * 60 * 1000);
+
+        // Check réhydratation terminée toutes les 15 min
+        setInterval(async () => {
+          try {
+            const pending = db.prepare(`
+              SELECT * FROM file_tiers WHERE rehydration_status = 'in-progress'
+            `).all();
+            if (pending.length === 0) return;
+            const cClient = blobServiceClient.getContainerClient(containerName);
+            for (const ft of pending) {
+              try {
+                const blob = cClient.getBlockBlobClient(ft.blob_name);
+                const props = await blob.getProperties();
+                const tier = props.accessTier;
+                if (tier && tier !== 'Archive') {
+                  // Réhydratation terminée !
+                  db.prepare(`UPDATE file_tiers SET current_tier = ?, rehydration_status = 'completed', rehydration_completed_at = datetime('now') WHERE blob_name = ?`).run(tier, ft.blob_name);
+                  const fileName = ft.blob_name.split('/').pop();
+                  const userId = ft.rehydration_requested_by_user_id || ft.tier_changed_by_user_id;
+                  if (userId) {
+                    createNotification(userId, 'rehydration_complete', '✅ Fichier disponible',
+                      `Le fichier "${fileName}" a été réhydraté et est maintenant accessible (tier: ${tier}).`);
+                  }
+                  console.log(`✅ Réhydratation terminée: ${ft.blob_name} → ${tier}`);
+                }
+              } catch (e) { /* blob en cours */ }
+            }
+          } catch (e) { console.error('Erreur check réhydratation:', e.message); }
+        }, 15 * 60 * 1000); // 15 min
 
         // Purge corbeille > 30 jours, quotidien à 4h du matin
         setInterval(() => {
