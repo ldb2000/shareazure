@@ -789,7 +789,7 @@ function downloadFile(fileName) {
     if (!file || file.isFolder) return;
 
     if (file.tier === 'Archive' || file.tier === 'archive') {
-        showError('Ce fichier est en stockage Archive (glacier). Il doit être réhydraté avant de pouvoir être téléchargé.');
+        showRehydrateDialog(file);
         return;
     }
 
@@ -2614,7 +2614,7 @@ function showPreview(blobName) {
 
     // Bloquer le preview si fichier archivé
     if (file.tier === 'Archive' || file.tier === 'archive') {
-        showError('Ce fichier est en stockage Archive (glacier). Il doit être réhydraté avant de pouvoir être consulté.');
+        showRehydrateDialog(file);
         return;
     }
 
@@ -2720,6 +2720,99 @@ function showPreview(blobName) {
     }
 
     document.getElementById('previewModal').style.display = 'flex';
+}
+
+// ============================================
+// Réhydratation fichier archivé
+// ============================================
+function showRehydrateDialog(file) {
+    const displayName = file.displayName || file.originalName || file.name.split('/').pop();
+    const size = formatBytes(file.size || 0);
+    
+    // Supprimer un dialog existant
+    document.getElementById('rehydrateDialog')?.remove();
+    document.getElementById('rehydrateOverlay')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'rehydrateOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;';
+    overlay.onclick = () => { overlay.remove(); dialog.remove(); };
+
+    const dialog = document.createElement('div');
+    dialog.id = 'rehydrateDialog';
+    dialog.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;border-radius:16px;padding:32px;max-width:440px;width:90%;z-index:9999;box-shadow:0 20px 60px rgba(0,0,0,.3);';
+    dialog.innerHTML = `
+        <div style="text-align:center;margin-bottom:20px;">
+            <div style="font-size:3rem;">🧊</div>
+            <h3 style="margin:12px 0 8px;font-size:1.2rem;color:#1a1a2e;">Fichier en Archive Glacier</h3>
+            <p style="color:#666;font-size:0.9rem;margin:0;">
+                <strong>${escapeHtml(displayName)}</strong> (${size})
+            </p>
+        </div>
+        <div style="background:#f0f4ff;border-radius:10px;padding:16px;margin-bottom:20px;">
+            <p style="margin:0 0 8px;font-size:0.85rem;color:#444;">
+                Ce fichier est en stockage froid (Archive). Pour y accéder, il faut le réhydrater vers un tier accessible.
+            </p>
+            <div style="display:flex;gap:8px;margin-top:12px;">
+                <label style="flex:1;cursor:pointer;">
+                    <input type="radio" name="rehydratePriority" value="Standard" checked style="margin-right:6px;">
+                    <strong>Standard</strong>
+                    <div style="font-size:0.75rem;color:#888;margin-top:2px;">~15 heures • Gratuit</div>
+                </label>
+                <label style="flex:1;cursor:pointer;">
+                    <input type="radio" name="rehydratePriority" value="High" style="margin-right:6px;">
+                    <strong>Prioritaire</strong>
+                    <div style="font-size:0.75rem;color:#888;margin-top:2px;">~1 heure • Coût supérieur</div>
+                </label>
+            </div>
+        </div>
+        <div style="display:flex;gap:10px;">
+            <button id="rehydrateCancel" style="flex:1;padding:12px;border:1px solid #ddd;border-radius:10px;background:#fff;cursor:pointer;font-size:0.9rem;color:#666;">
+                Annuler
+            </button>
+            <button id="rehydrateConfirm" style="flex:1;padding:12px;border:none;border-radius:10px;background:linear-gradient(135deg,#0066cc,#0052a3);color:#fff;cursor:pointer;font-size:0.9rem;font-weight:600;">
+                ❄️→🔥 Réhydrater
+            </button>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+    document.body.appendChild(dialog);
+
+    dialog.querySelector('#rehydrateCancel').onclick = () => {
+        overlay.remove(); dialog.remove();
+    };
+
+    dialog.querySelector('#rehydrateConfirm').onclick = async () => {
+        const priority = dialog.querySelector('input[name="rehydratePriority"]:checked').value;
+        const btn = dialog.querySelector('#rehydrateConfirm');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> En cours...';
+        
+        try {
+            const res = await fetch(`${API_URL}/files/${encodeBlobPath(file.name)}/rehydrate`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${getAuthToken()}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ targetTier: 'Cool', priority })
+            });
+            const data = await res.json();
+            if (data.success) {
+                overlay.remove(); dialog.remove();
+                showSuccess(`Réhydratation lancée pour "${displayName}". Délai estimé : ${priority === 'High' ? '~1 heure' : '~15 heures'}. Vous serez notifié quand ce sera prêt.`);
+            } else {
+                showError(data.error || 'Erreur lors de la réhydratation');
+                btn.disabled = false;
+                btn.innerHTML = '❄️→🔥 Réhydrater';
+            }
+        } catch (err) {
+            showError('Erreur réseau');
+            btn.disabled = false;
+            btn.innerHTML = '❄️→🔥 Réhydrater';
+        }
+    };
 }
 
 function closePreview() {

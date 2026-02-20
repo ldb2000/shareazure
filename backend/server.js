@@ -6476,6 +6476,14 @@ app.post('/api/files/:blobName(*)/rehydrate', authenticateUser, async (req, res)
       }
     });
 
+    // Notification in-app
+    const fileName = blobName.split('/').pop();
+    const eta = rehydratePriority === 'High' ? '~1 heure' : '~15 heures';
+    createNotification(req.user.id, 'rehydration_started', '❄️ Réhydratation en cours',
+      `Le fichier "${fileName}" est en cours de réhydratation vers ${targetTier}. Délai estimé : ${eta}.`);
+
+    logOperation('file_rehydration_started', { blobName, targetTier, priority: rehydratePriority, userId: req.user.id });
+
   } catch (error) {
     console.error('Erreur réhydratation fichier:', error);
     res.status(500).json({
@@ -8499,6 +8507,35 @@ if (require.main === module) {
             console.error('Purge error:', e.message);
           }
         }, 60 * 60 * 1000);
+
+        // Check réhydratation terminée toutes les 15 min
+        setInterval(async () => {
+          try {
+            const pending = db.prepare(`
+              SELECT * FROM file_tiers WHERE rehydration_status = 'in-progress'
+            `).all();
+            if (pending.length === 0) return;
+            const cClient = blobServiceClient.getContainerClient(containerName);
+            for (const ft of pending) {
+              try {
+                const blob = cClient.getBlockBlobClient(ft.blob_name);
+                const props = await blob.getProperties();
+                const tier = props.accessTier;
+                if (tier && tier !== 'Archive') {
+                  // Réhydratation terminée !
+                  db.prepare(`UPDATE file_tiers SET current_tier = ?, rehydration_status = 'completed', rehydration_completed_at = datetime('now') WHERE blob_name = ?`).run(tier, ft.blob_name);
+                  const fileName = ft.blob_name.split('/').pop();
+                  const userId = ft.rehydration_requested_by_user_id || ft.tier_changed_by_user_id;
+                  if (userId) {
+                    createNotification(userId, 'rehydration_complete', '✅ Fichier disponible',
+                      `Le fichier "${fileName}" a été réhydraté et est maintenant accessible (tier: ${tier}).`);
+                  }
+                  console.log(`✅ Réhydratation terminée: ${ft.blob_name} → ${tier}`);
+                }
+              } catch (e) { /* blob en cours */ }
+            }
+          } catch (e) { console.error('Erreur check réhydratation:', e.message); }
+        }, 15 * 60 * 1000); // 15 min
 
         // Purge corbeille > 30 jours, quotidien à 4h du matin
         setInterval(() => {
