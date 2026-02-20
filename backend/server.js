@@ -711,6 +711,7 @@ app.post('/api/upload', authenticateUserOrGuest, upload.single('file'), validate
       blobHTTPHeaders: {
         blobContentType: req.file.mimetype
       },
+      tier: 'Cool',
       metadata
     });
 
@@ -859,6 +860,7 @@ app.post('/api/upload/multiple', authenticateUserOrGuest, upload.array('files', 
         blobHTTPHeaders: {
           blobContentType: file.mimetype
         },
+        tier: 'Cool',
         metadata
       });
 
@@ -986,7 +988,7 @@ app.get('/api/files', authenticateUserOrGuest, async (req, res) => {
           ownerRole: record.user_role || null,
           teamId: record.team_id || null,
           teamName: record.team_name || null,
-          tier: properties.accessTier || 'Hot',
+          tier: properties.accessTier || 'Cool',
           metadata: properties.metadata
         });
       } catch (error) {
@@ -3470,7 +3472,7 @@ app.get('/api/files/:blobName(*)/info', authenticateUser, async (req, res) => {
         contentType: properties.contentType,
         createdOn: properties.createdOn || ownership?.uploaded_at,
         lastModified: properties.lastModified,
-        tier: properties.accessTier || 'Hot',
+        tier: properties.accessTier || 'Cool',
         metadata: properties.metadata
       }
     });
@@ -5978,7 +5980,7 @@ app.get('/api/finops/me', authenticateUser, async (req, res) => {
     // 1. Fichiers de l'utilisateur avec tiers
     const userFiles = db.prepare(`
       SELECT fo.blob_name, fo.file_size, fo.uploaded_at,
-             COALESCE(ft.current_tier, 'Hot') as tier,
+             COALESCE(ft.current_tier, 'Cool') as tier,
              fo.original_name
       FROM file_ownership fo
       LEFT JOIN file_tiers ft ON fo.blob_name = ft.blob_name
@@ -5992,7 +5994,7 @@ app.get('/api/finops/me', authenticateUser, async (req, res) => {
 
     for (const f of userFiles) {
       const sizeGB = (f.file_size || 0) / (1024 * 1024 * 1024);
-      const tier = f.tier || 'Hot';
+      const tier = f.tier || 'Cool';
       totalSizeBytes += (f.file_size || 0);
       if (!costByTier[tier]) costByTier[tier] = { size: 0, count: 0, cost: 0 };
       costByTier[tier].size += (f.file_size || 0);
@@ -6327,7 +6329,7 @@ app.post('/api/files/:blobName(*)/archive', authenticateUser, async (req, res) =
     let currentTier = 'Hot';
     try {
       const properties = await blockBlobClient.getProperties();
-      currentTier = properties.accessTier || 'Hot';
+      currentTier = properties.accessTier || 'Cool';
     } catch (error) {
       console.error('Erreur récupération propriétés blob:', error);
     }
@@ -6546,7 +6548,7 @@ app.get('/api/files/:blobName(*)/tier-status', authenticateUser, async (req, res
     const blockBlobClient = containerClient.getBlockBlobClient(blobName);
 
     const properties = await blockBlobClient.getProperties();
-    const azureTier = properties.accessTier || 'Hot';
+    const azureTier = properties.accessTier || 'Cool';
     const archiveStatus = properties.archiveStatus;
 
     // Récupérer les informations depuis la DB
@@ -7248,6 +7250,7 @@ app.post('/api/public/upload/:requestId/file', upload.single('file'), async (req
 
     await blockBlobClient.uploadData(req.file.buffer, {
       blobHTTPHeaders: { blobContentType: req.file.mimetype },
+      tier: 'Cool',
       metadata: {
         originalName: req.file.originalname,
         uploadedAt: new Date().toISOString(),
@@ -8100,7 +8103,7 @@ app.get('/api/admin/stats', authenticateUser, requireAdmin, async (req, res) => 
       totalFiles++;
       const size = blob.properties.contentLength || 0;
       totalSize += size;
-      const tier = (blob.properties.accessTier || 'Hot').toLowerCase();
+      const tier = (blob.properties.accessTier || 'Cool').toLowerCase();
       if (storageByTier[tier]) {
         storageByTier[tier].count++;
         storageByTier[tier].size += size;
@@ -8113,7 +8116,7 @@ app.get('/api/admin/stats', authenticateUser, requireAdmin, async (req, res) => 
         size,
         contentType: blob.properties.contentType,
         lastModified: blob.properties.lastModified,
-        tier: blob.properties.accessTier || 'Hot',
+        tier: blob.properties.accessTier || 'Cool',
         originalName: blob.metadata?.originalname || blob.metadata?.originalName || blob.name
       });
     }
@@ -8197,7 +8200,7 @@ async function runAutoTiering(dryRun = false) {
   const now = Date.now();
 
   for await (const blob of containerClient.listBlobsFlat({ includeMetadata: true })) {
-    const tier = (blob.properties.accessTier || 'Hot');
+    const tier = (blob.properties.accessTier || 'Cool');
     const lastModified = new Date(blob.properties.lastModified);
     const ageDays = Math.floor((now - lastModified.getTime()) / (1000 * 60 * 60 * 24));
 
@@ -8430,7 +8433,7 @@ app.get('/api/admin/storage/tree', authenticateUser, requireAdmin, async (req, r
         size: blob.properties.contentLength,
         contentType: blob.properties.contentType,
         lastModified: blob.properties.lastModified,
-        tier: blob.properties.accessTier || 'Hot',
+        tier: blob.properties.accessTier || 'Cool',
         inDb: !!db.prepare('SELECT 1 FROM file_ownership WHERE blob_name = ?').get(blob.name)
       });
     }

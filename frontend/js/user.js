@@ -1095,7 +1095,7 @@ function showContextMenu(event, fileName, isFolder) {
                 const newTier = btn.dataset.tier;
                 const file = filteredFiles.find(f => f.name === contextMenuFile);
                 if (!file) return;
-                const currentTier = file.tier || 'Hot';
+                const currentTier = file.tier || 'Cool';
                 changeFileTier(contextMenuFile, newTier, currentTier);
             };
         });
@@ -1109,7 +1109,7 @@ function showContextMenu(event, fileName, isFolder) {
     } else {
         tierMenu.style.display = '';
         const file = filteredFiles.find(f => f.name === fileName);
-        const currentTier = file?.tier || 'Hot';
+        const currentTier = file?.tier || 'Cool';
         document.querySelectorAll('#contextTierSubmenu .context-menu-item').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.tier === currentTier);
         });
@@ -4127,9 +4127,9 @@ async function loadInfoGeneral(blobName, isFolder, token) {
                 <div class="info-row"><span class="info-label">Créé le</span><span class="info-value">${i.createdOn ? new Date(i.createdOn).toLocaleString('fr-FR') : '—'}</span></div>
                 <div class="info-row"><span class="info-label">Modifié le</span><span class="info-value">${i.lastModified ? new Date(i.lastModified).toLocaleString('fr-FR') : '—'}</span></div>
                 <div class="info-row"><span class="info-label">Tier</span><span class="info-value" style="display:flex;align-items:center;gap:8px;">
-                    <span class="badge badge-tier-${(i.tier||'Hot').toLowerCase()}">${i.tier || 'Hot'}</span>
-                    <select id="infoTierSelect" class="form-input" style="font-size:0.8rem;padding:4px 8px;width:auto;border-radius:6px;" onchange="changeFileTier('${escapeHtml(blobName)}', this.value, '${i.tier || 'Hot'}')">
-                        <option value="Hot" ${(i.tier||'Hot')==='Hot'?'selected':''}>🔥 Hot</option>
+                    <span class="badge badge-tier-${(i.tier||'Cool').toLowerCase()}">${i.tier || 'Cool'}</span>
+                    <select id="infoTierSelect" class="form-input" style="font-size:0.8rem;padding:4px 8px;width:auto;border-radius:6px;" onchange="changeFileTier('${escapeHtml(blobName)}', this.value, '${i.tier || 'Cool'}')">
+                        <option value="Hot" ${(i.tier||'Cool')==='Hot'?'selected':''}>🔥 Hot</option>
                         <option value="Cool" ${i.tier==='Cool'?'selected':''}>❄️ Cool</option>
                         <option value="Archive" ${i.tier==='Archive'?'selected':''}>🧊 Archive</option>
                     </select>
