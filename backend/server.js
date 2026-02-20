@@ -3376,6 +3376,21 @@ app.delete('/api/files/:blobName(*)/tags/:tagName', authenticateUser, (req, res)
   }
 });
 
+// GET /api/tags/all - Tous les tags groupés par blob_name (pour recherche)
+app.get('/api/tags/all', authenticateUser, (req, res) => {
+  try {
+    const rows = db.prepare('SELECT blob_name, tag FROM file_tags ORDER BY blob_name').all();
+    const map = {};
+    for (const r of rows) {
+      if (!map[r.blob_name]) map[r.blob_name] = [];
+      map[r.blob_name].push(r.tag);
+    }
+    res.json({ success: true, tags: map });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // GET /api/tags/suggest?q=xxx
 app.get('/api/tags/suggest', authenticateUser, (req, res) => {
   try {

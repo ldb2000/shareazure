@@ -319,6 +319,20 @@ async function loadFiles(path = '') {
             }
             
             allFiles = files;
+            
+            // Charger les tags pour la recherche
+            try {
+                const tagsRes = await fetch(`${API_URL}/tags/all`, {
+                    headers: { 'Authorization': `Bearer ${getAuthToken()}` }
+                });
+                const tagsData = await tagsRes.json();
+                if (tagsData.success && tagsData.tags) {
+                    for (const f of allFiles) {
+                        f.tags = tagsData.tags[f.name] || tagsData.tags[f.blobName] || [];
+                    }
+                }
+            } catch (e) { /* tags optionnels */ }
+            
             filteredFiles = [...allFiles];
             imageFiles = allFiles.filter(f => !f.isFolder && f.contentType && f.contentType.startsWith('image/'));
             updateBreadcrumb();
@@ -337,7 +351,8 @@ function applyFilters() {
 
     filteredFiles = allFiles.filter(file => {
         const displayName = (file.displayName || file.originalName || file.name).toLowerCase();
-        const matchesSearch = !searchTerm || displayName.includes(searchTerm);
+        const tagsStr = (file.tags || []).join(' ').toLowerCase();
+        const matchesSearch = !searchTerm || displayName.includes(searchTerm) || tagsStr.includes(searchTerm);
         
         let matchesType = true;
         if (typeFilter === 'image') {
