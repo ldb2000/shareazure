@@ -11,7 +11,7 @@ const QRCode = require('qrcode');
 const bcrypt = require('bcrypt');
 const fs = require('fs');
 const path = require('path');
-const { db, shareLinksDb, downloadLogsDb, settingsDb, allowedEmailDomainsDb, usersDb, guestAccountsDb, fileOwnershipDb, teamsDb, teamMembersDb, costTrackingDb, operationLogsDb, fileTiersDb, activityLogsDb, uploadRequestsDb, teamQuotasDb, rolePermissionsDb, entraRoleMappingsDb, tieringPoliciesDb } = require('./database');
+const { db, shareLinksDb, downloadLogsDb, settingsDb, allowedEmailDomainsDb, usersDb, guestAccountsDb, fileOwnershipDb, teamsDb, teamMembersDb, costTrackingDb, operationLogsDb, fileTiersDb, activityLogsDb, uploadRequestsDb, teamQuotasDb, rolePermissionsDb, entraRoleMappingsDb, tieringPoliciesDb, geolocationDb, mediaAnalysisDb, transcriptionsDb, faceOccurrencesDb } = require('./database');
 const crypto = require('crypto');
 const { migrateHardcodedUsers } = require('./migrateUsers');
 const emailService = require('./emailService');
@@ -3326,6 +3326,143 @@ async function getBlobBufferHelper(blobName) {
 configureAi({
   getBlobBuffer: getBlobBufferHelper,
   getContainerClient: () => blobServiceClient.getContainerClient(containerName)
+});
+
+// ============================================
+// FILE TAGS ROUTES
+// ============================================
+const { fileTagsDb } = require('./database');
+
+// GET /api/files/:blobName/tags
+app.get('/api/files/:blobName(*)/tags', authenticateUser, (req, res) => {
+  try {
+    const { blobName } = req.params;
+    const tags = fileTagsDb.getByBlobName(blobName);
+    logOperation('file_tags_viewed', { blobName, username: req.user.username });
+    res.json({ success: true, tags });
+  } catch (error) {
+    console.error('Erreur récupération tags:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/files/:blobName/tags
+app.post('/api/files/:blobName(*)/tags', authenticateUser, (req, res) => {
+  try {
+    const { blobName } = req.params;
+    const { tag } = req.body;
+    if (!tag || !tag.trim()) {
+      return res.status(400).json({ success: false, error: 'Tag requis' });
+    }
+    fileTagsDb.add(blobName, tag, req.user.id);
+    logOperation('file_tag_added', { blobName, tag: tag.trim().toLowerCase(), username: req.user.username });
+    res.json({ success: true, tag: tag.trim().toLowerCase() });
+  } catch (error) {
+    console.error('Erreur ajout tag:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE /api/files/:blobName/tags/:tagName
+app.delete('/api/files/:blobName(*)/tags/:tagName', authenticateUser, (req, res) => {
+  try {
+    const { blobName, tagName } = req.params;
+    fileTagsDb.remove(blobName, tagName);
+    logOperation('file_tag_removed', { blobName, tag: tagName, username: req.user.username });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Erreur suppression tag:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/tags/suggest?q=xxx
+app.get('/api/tags/suggest', authenticateUser, (req, res) => {
+  try {
+    const q = req.query.q || '';
+    const suggestions = fileTagsDb.suggest(q);
+    res.json({ success: true, suggestions });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============================================
+// FILE GEOLOCATION ROUTES
+// ============================================
+
+// GET /api/files/:blobName/geolocation
+app.get('/api/files/:blobName(*)/geolocation', authenticateUser, (req, res) => {
+  try {
+    const { blobName } = req.params;
+    const geo = geolocationDb.getByBlobName(blobName);
+    res.json({ success: true, geolocation: geo || null });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT /api/files/:blobName/geolocation
+app.put('/api/files/:blobName(*)/geolocation', authenticateUser, (req, res) => {
+  try {
+    const { blobName } = req.params;
+    const { latitude, longitude, address } = req.body;
+    if (latitude == null || longitude == null) {
+      return res.status(400).json({ success: false, error: 'Latitude et longitude requises' });
+    }
+    geolocationDb.create({
+      blobName,
+      latitude: parseFloat(latitude),
+      longitude: parseFloat(longitude),
+      address: address || null
+    });
+    logOperation('geolocation_updated', { blobName, latitude, longitude, username: req.user.username });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE /api/files/:blobName/geolocation
+app.delete('/api/files/:blobName(*)/geolocation', authenticateUser, (req, res) => {
+  try {
+    const { blobName } = req.params;
+    geolocationDb.delete(blobName);
+    logOperation('geolocation_deleted', { blobName, username: req.user.username });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============================================
+// FILE INFO ROUTE (general info for info panel)
+// ============================================
+app.get('/api/files/:blobName(*)/info', authenticateUser, async (req, res) => {
+  try {
+    const { blobName } = req.params;
+    const containerClient = blobServiceClient.getContainerClient(containerName);
+    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+    const properties = await blockBlobClient.getProperties();
+    const ownership = fileOwnershipDb.getByBlobName(blobName);
+
+    res.json({
+      success: true,
+      info: {
+        name: properties.metadata?.originalName || blobName.split('/').pop(),
+        blobName,
+        size: properties.contentLength,
+        contentType: properties.contentType,
+        createdOn: properties.createdOn || ownership?.uploaded_at,
+        lastModified: properties.lastModified,
+        tier: properties.accessTier || 'Hot',
+        metadata: properties.metadata
+      }
+    });
+  } catch (error) {
+    console.error('Erreur info fichier:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 app.use('/api/ai', aiRouter);

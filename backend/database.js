@@ -438,6 +438,19 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_geolocation_blob_name ON geolocation(blob_name);
   CREATE INDEX IF NOT EXISTS idx_geolocation_coords ON geolocation(latitude, longitude);
 
+  -- Table pour les tags de fichiers
+  CREATE TABLE IF NOT EXISTS file_tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    blob_name TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    created_by INTEGER,
+    UNIQUE(blob_name, tag)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_file_tags_blob_name ON file_tags(blob_name);
+  CREATE INDEX IF NOT EXISTS idx_file_tags_tag ON file_tags(tag);
+
   -- Table pour les scans planifiés IA
   CREATE TABLE IF NOT EXISTS scan_schedules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2947,6 +2960,28 @@ const tieringPoliciesDb = {
   }
 };
 
+// ============================================
+// File Tags DB
+// ============================================
+const fileTagsDb = {
+  getByBlobName(blobName) {
+    return db.prepare('SELECT * FROM file_tags WHERE blob_name = ? ORDER BY created_at DESC').all(blobName);
+  },
+  add(blobName, tag, userId) {
+    const stmt = db.prepare('INSERT OR IGNORE INTO file_tags (blob_name, tag, created_by) VALUES (?, ?, ?)');
+    return stmt.run(blobName, tag.trim().toLowerCase(), userId);
+  },
+  remove(blobName, tag) {
+    return db.prepare('DELETE FROM file_tags WHERE blob_name = ? AND tag = ?').run(blobName, tag.trim().toLowerCase());
+  },
+  suggest(query, limit = 10) {
+    return db.prepare('SELECT tag, COUNT(*) as count FROM file_tags WHERE tag LIKE ? GROUP BY tag ORDER BY count DESC LIMIT ?').all(`%${query}%`, limit);
+  },
+  getAllTags(limit = 100) {
+    return db.prepare('SELECT tag, COUNT(*) as count FROM file_tags GROUP BY tag ORDER BY count DESC LIMIT ?').all(limit);
+  }
+};
+
 module.exports = {
   db,
   shareLinksDb,
@@ -2977,5 +3012,6 @@ module.exports = {
   virusQuarantineDb,
   rolePermissionsDb,
   entraRoleMappingsDb,
-  tieringPoliciesDb
+  tieringPoliciesDb,
+  fileTagsDb
 };

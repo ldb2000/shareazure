@@ -649,16 +649,15 @@ function renderListView() {
 }
 
 function getFileIcon(contentType) {
-    if (!contentType) return '📄';
-    if (contentType.startsWith('image/')) return '🖼️';
-    if (contentType.startsWith('video/')) return '🎬';
-    if (contentType.startsWith('audio/')) return '🎵';
-    if (contentType === 'application/pdf') return '📕';
-    if (contentType.includes('word') || contentType.includes('document')) return '📝';
-    if (contentType.includes('excel') || contentType.includes('spreadsheet')) return '📊';
-    if (contentType.includes('powerpoint') || contentType.includes('presentation')) return '📊';
-    if (contentType.includes('zip') || contentType.includes('compressed')) return '📦';
-    return '📄';
+    const icon = getFileIconClass(contentType);
+    const colors = {
+        'fa-file-image': '#10b981', 'fa-file-video': '#6366f1', 'fa-file-audio': '#f59e0b',
+        'fa-file-pdf': '#DC2626', 'fa-file-word': '#2563eb', 'fa-file-excel': '#16a34a',
+        'fa-file-powerpoint': '#ea580c', 'fa-file-archive': '#8b5cf6', 'fa-file-code': '#06b6d4',
+        'fa-file-alt': '#64748b', 'fa-file': '#94a3b8'
+    };
+    const color = colors[icon] || '#94a3b8';
+    return `<i class="fas ${icon}" style="font-size:2.5rem;color:${color};"></i>`;
 }
 
 function switchView(view) {
@@ -788,6 +787,11 @@ function previewFile(fileName) {
 function downloadFile(fileName) {
     const file = filteredFiles.find(f => f.name === fileName);
     if (!file || file.isFolder) return;
+
+    if (file.tier === 'Archive' || file.tier === 'archive') {
+        showError('Ce fichier est en stockage Archive (glacier). Il doit être réhydraté avant de pouvoir être téléchargé.');
+        return;
+    }
 
     const token = getAuthToken();
     window.location.href = `${API_URL}/download/${encodeBlobPath(fileName)}${token ? '?token=' + encodeURIComponent(token) : ''}`;
@@ -1059,6 +1063,10 @@ function showContextMenu(event, fileName, isFolder) {
         document.getElementById('contextShare').onclick = () => {
             menu.style.display = 'none';
             showShareModal();
+        };
+        document.getElementById('contextInfo').onclick = () => {
+            menu.style.display = 'none';
+            showFileInfoPanel(contextMenuFile, contextMenuIsFolder);
         };
         document.getElementById('contextDelete').onclick = () => {
             menu.style.display = 'none';
@@ -1621,7 +1629,10 @@ function getFileIconClass(contentType) {
     if (contentType.includes('pdf')) return 'fa-file-pdf';
     if (contentType.includes('word')) return 'fa-file-word';
     if (contentType.includes('excel') || contentType.includes('spreadsheet')) return 'fa-file-excel';
-    if (contentType.includes('zip') || contentType.includes('archive')) return 'fa-file-archive';
+    if (contentType.includes('powerpoint') || contentType.includes('presentation')) return 'fa-file-powerpoint';
+    if (contentType.includes('zip') || contentType.includes('archive') || contentType.includes('compressed')) return 'fa-file-archive';
+    if (contentType.startsWith('text/') || contentType === 'application/json' || contentType === 'application/xml') return 'fa-file-alt';
+    if (contentType.includes('javascript') || contentType.includes('css') || contentType.includes('html')) return 'fa-file-code';
     return 'fa-file';
 }
 
@@ -2600,6 +2611,12 @@ async function applyOptimization(blobName, targetTier, btn) {
 function showPreview(blobName) {
     const file = filteredFiles.find(f => f.name === blobName);
     if (!file || file.isFolder) return;
+
+    // Bloquer le preview si fichier archivé
+    if (file.tier === 'Archive' || file.tier === 'archive') {
+        showError('Ce fichier est en stockage Archive (glacier). Il doit être réhydraté avant de pouvoir être consulté.');
+        return;
+    }
 
     currentPreviewBlobName = blobName;
     const displayName = file.displayName || file.originalName || blobName.split('/').pop();
@@ -3809,4 +3826,391 @@ function uploadTeamLogo() {
         } catch (e) { showError(e.message); }
     };
     input.click();
+}
+
+// ============================================
+// File Info Panel
+// ============================================
+
+function closeFileInfoPanel() {
+    document.getElementById('infoPanel').style.display = 'none';
+    document.getElementById('infoPanelOverlay').style.display = 'none';
+    document.getElementById('infoPanel').classList.remove('open');
+}
+
+async function showFileInfoPanel(blobName, isFolder) {
+    const panel = document.getElementById('infoPanel');
+    const overlay = document.getElementById('infoPanelOverlay');
+    const body = document.getElementById('infoPanelBody');
+    const title = document.getElementById('infoPanelTitle');
+
+    panel.style.display = 'flex';
+    overlay.style.display = 'block';
+    setTimeout(() => panel.classList.add('open'), 10);
+
+    const file = allFiles.find(f => f.name === blobName);
+    const displayName = file ? (file.displayName || file.originalName || file.name) : blobName.split('/').pop();
+    title.textContent = displayName;
+
+    body.innerHTML = '<div class="spinner" style="margin:40px auto;"></div>';
+
+    const token = getAuthToken();
+
+    // Build sections
+    let html = '';
+
+    // === Section Général ===
+    html += `<div class="info-section">
+        <div class="info-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+            <span>📋 Général</span>
+            <i class="fas fa-chevron-down"></i>
+        </div>
+        <div class="info-section-content" id="infoGeneral">
+            <div class="spinner" style="margin:10px auto;"></div>
+        </div>
+    </div>`;
+
+    // === Section Tags ===
+    html += `<div class="info-section">
+        <div class="info-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+            <span>🏷️ Tags</span>
+            <i class="fas fa-chevron-down"></i>
+        </div>
+        <div class="info-section-content" id="infoTags">
+            <div class="spinner" style="margin:10px auto;"></div>
+        </div>
+    </div>`;
+
+    // === Section IA (images/vidéos uniquement) ===
+    const contentType = file ? (file.contentType || '') : '';
+    const isImage = contentType.startsWith('image/');
+    const isVideo = contentType.startsWith('video/');
+    if (!isFolder && (isImage || isVideo)) {
+        html += `<div class="info-section">
+            <div class="info-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                <span>🤖 Intelligence Artificielle</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="info-section-content" id="infoAI">
+                <div class="spinner" style="margin:10px auto;"></div>
+            </div>
+        </div>`;
+    }
+
+    // === Section Géolocalisation (fichiers uniquement) ===
+    if (!isFolder) {
+        html += `<div class="info-section">
+            <div class="info-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                <span>📍 Géolocalisation</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="info-section-content" id="infoGeo">
+                <div class="spinner" style="margin:10px auto;"></div>
+            </div>
+        </div>`;
+    }
+
+    body.innerHTML = html;
+
+    // Load data
+    loadInfoGeneral(blobName, isFolder, token);
+    loadInfoTags(blobName, token);
+    if (!isFolder && (isImage || isVideo)) loadInfoAI(blobName, contentType, token);
+    if (!isFolder) loadInfoGeo(blobName, token);
+}
+
+async function loadInfoGeneral(blobName, isFolder, token) {
+    const el = document.getElementById('infoGeneral');
+    if (isFolder) {
+        const file = allFiles.find(f => f.name === blobName);
+        el.innerHTML = `
+            <div class="info-row"><span class="info-label">Nom</span><span class="info-value">${escapeHtml(file?.displayName || blobName)}</span></div>
+            <div class="info-row"><span class="info-label">Type</span><span class="info-value">Dossier</span></div>
+        `;
+        return;
+    }
+    try {
+        const res = await fetch(`${API_URL}/files/${encodeBlobPath(blobName)}/info`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (data.success) {
+            const i = data.info;
+            el.innerHTML = `
+                <div class="info-row"><span class="info-label">Nom</span><span class="info-value">${escapeHtml(i.name)}</span></div>
+                <div class="info-row"><span class="info-label">Taille</span><span class="info-value">${formatBytes(i.size || 0)}</span></div>
+                <div class="info-row"><span class="info-label">Type MIME</span><span class="info-value">${escapeHtml(i.contentType || '—')}</span></div>
+                <div class="info-row"><span class="info-label">Créé le</span><span class="info-value">${i.createdOn ? new Date(i.createdOn).toLocaleString('fr-FR') : '—'}</span></div>
+                <div class="info-row"><span class="info-label">Modifié le</span><span class="info-value">${i.lastModified ? new Date(i.lastModified).toLocaleString('fr-FR') : '—'}</span></div>
+                <div class="info-row"><span class="info-label">Tier</span><span class="info-value"><span class="badge badge-tier-${(i.tier||'Hot').toLowerCase()}">${i.tier || 'Hot'}</span></span></div>
+            `;
+        } else {
+            el.innerHTML = '<p style="color:#999;">Impossible de charger les informations</p>';
+        }
+    } catch (e) {
+        el.innerHTML = '<p style="color:#999;">Erreur de chargement</p>';
+    }
+}
+
+async function loadInfoTags(blobName, token) {
+    const el = document.getElementById('infoTags');
+    try {
+        const res = await fetch(`${API_URL}/files/${encodeBlobPath(blobName)}/tags`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        const tags = data.tags || [];
+
+        let tagsHtml = '<div class="info-tags-list" id="infoTagsList">';
+        tags.forEach(t => {
+            tagsHtml += `<span class="info-tag">${escapeHtml(t.tag)} <button class="info-tag-remove" onclick="removeInfoTag('${escapeHtml(blobName)}','${escapeHtml(t.tag)}')">&times;</button></span>`;
+        });
+        tagsHtml += '</div>';
+        tagsHtml += `<div class="info-tag-input-wrapper">
+            <input type="text" id="infoTagInput" class="form-input" placeholder="Ajouter un tag..." autocomplete="off" style="font-size:0.85rem;padding:6px 10px;">
+            <div class="info-tag-suggestions" id="infoTagSuggestions" style="display:none;"></div>
+        </div>`;
+        el.innerHTML = tagsHtml;
+
+        // Autocomplete + add on Enter
+        const input = document.getElementById('infoTagInput');
+        let sugTimeout;
+        input.addEventListener('input', () => {
+            clearTimeout(sugTimeout);
+            const q = input.value.trim();
+            if (q.length < 1) { document.getElementById('infoTagSuggestions').style.display = 'none'; return; }
+            sugTimeout = setTimeout(async () => {
+                try {
+                    const sr = await fetch(`${API_URL}/tags/suggest?q=${encodeURIComponent(q)}`, { headers: { 'Authorization': `Bearer ${token}` } });
+                    const sd = await sr.json();
+                    const sug = document.getElementById('infoTagSuggestions');
+                    if (sd.suggestions && sd.suggestions.length > 0) {
+                        sug.innerHTML = sd.suggestions.map(s => `<div class="info-tag-sug-item" onclick="selectInfoTagSuggestion('${escapeHtml(s.tag)}','${escapeHtml(blobName)}')">${escapeHtml(s.tag)} <small>(${s.count})</small></div>`).join('');
+                        sug.style.display = 'block';
+                    } else {
+                        sug.style.display = 'none';
+                    }
+                } catch {}
+            }, 200);
+        });
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                addInfoTag(blobName, input.value);
+            }
+        });
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.info-tag-input-wrapper')) {
+                document.getElementById('infoTagSuggestions').style.display = 'none';
+            }
+        });
+    } catch (e) {
+        el.innerHTML = '<p style="color:#999;">Erreur de chargement des tags</p>';
+    }
+}
+
+function selectInfoTagSuggestion(tag, blobName) {
+    document.getElementById('infoTagSuggestions').style.display = 'none';
+    addInfoTag(blobName, tag);
+}
+
+async function addInfoTag(blobName, tag) {
+    tag = tag.trim();
+    if (!tag) return;
+    const token = getAuthToken();
+    try {
+        const res = await fetch(`${API_URL}/files/${encodeBlobPath(blobName)}/tags`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ tag })
+        });
+        const data = await res.json();
+        if (data.success) {
+            document.getElementById('infoTagInput').value = '';
+            loadInfoTags(blobName, token);
+        } else {
+            showError(data.error || 'Erreur ajout tag');
+        }
+    } catch (e) { showError('Erreur ajout tag'); }
+}
+
+async function removeInfoTag(blobName, tag) {
+    const token = getAuthToken();
+    try {
+        const res = await fetch(`${API_URL}/files/${encodeBlobPath(blobName)}/tags/${encodeURIComponent(tag)}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (data.success) {
+            loadInfoTags(blobName, token);
+        } else {
+            showError(data.error || 'Erreur suppression tag');
+        }
+    } catch (e) { showError('Erreur suppression tag'); }
+}
+
+async function loadInfoAI(blobName, contentType, token) {
+    const el = document.getElementById('infoAI');
+    const isImage = contentType.startsWith('image/');
+    const isVideo = contentType.startsWith('video/');
+
+    // Load existing analysis
+    let existingHtml = '';
+    try {
+        const res = await fetch(`${API_URL}/ai/analysis/${encodeBlobPath(blobName)}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (data.success && data.analysis) {
+            const a = data.analysis;
+            if (a.description) existingHtml += `<div class="info-ai-result"><strong>📝 Description :</strong> ${escapeHtml(a.description)}</div>`;
+            if (a.tags && a.tags.length > 0) existingHtml += `<div class="info-ai-result"><strong>🏷️ Tags IA :</strong> ${a.tags.map(t => `<span class="info-tag info-tag-ai">${escapeHtml(t)}</span>`).join(' ')}</div>`;
+            if (a.faces && a.faces.length > 0) existingHtml += `<div class="info-ai-result"><strong>👤 Visages :</strong> ${a.faces.length} détecté(s)</div>`;
+            if (a.transcription) existingHtml += `<div class="info-ai-result"><strong>🎤 Transcription :</strong> ${escapeHtml(a.transcription.substring(0, 300))}${a.transcription.length > 300 ? '...' : ''}</div>`;
+        }
+    } catch {}
+
+    // Check for transcription separately
+    if (isVideo && !existingHtml.includes('Transcription')) {
+        try {
+            const tres = await fetch(`${API_URL}/ai/analysis/${encodeBlobPath(blobName)}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            // Already checked above
+        } catch {}
+    }
+
+    let buttonsHtml = '<div class="info-ai-buttons">';
+    if (isImage || isVideo) {
+        buttonsHtml += `<button class="btn btn-sm btn-secondary" onclick="infoAIAction('analyze','${escapeHtml(blobName)}')"><i class="fas fa-search"></i> Analyser</button>`;
+    }
+    if (isVideo) {
+        buttonsHtml += `<button class="btn btn-sm btn-secondary" onclick="infoAIAction('transcribe','${escapeHtml(blobName)}')"><i class="fas fa-microphone"></i> Transcrire</button>`;
+    }
+    buttonsHtml += '</div>';
+
+    el.innerHTML = existingHtml + buttonsHtml;
+}
+
+async function infoAIAction(action, blobName) {
+    const token = getAuthToken();
+    try {
+        let url, body;
+        if (action === 'analyze') {
+            url = `${API_URL}/ai/analyze/${encodeBlobPath(blobName)}`;
+            body = {};
+        } else if (action === 'transcribe') {
+            url = `${API_URL}/ai/transcribe/${encodeBlobPath(blobName)}`;
+            body = {};
+        }
+        showSuccess('Analyse lancée...');
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (data.success) {
+            showSuccess('Analyse en cours, rechargez dans quelques instants');
+            // Reload AI section after delay
+            setTimeout(() => {
+                const file = allFiles.find(f => f.name === blobName);
+                if (file) loadInfoAI(blobName, file.contentType || '', token);
+            }, 5000);
+        } else {
+            showError(data.error || 'Erreur analyse IA');
+        }
+    } catch (e) { showError('Erreur analyse IA'); }
+}
+
+async function loadInfoGeo(blobName, token) {
+    const el = document.getElementById('infoGeo');
+    try {
+        const res = await fetch(`${API_URL}/files/${encodeBlobPath(blobName)}/geolocation`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        const geo = data.geolocation;
+
+        if (geo) {
+            el.innerHTML = `
+                <div class="info-row"><span class="info-label">Latitude</span><span class="info-value">${geo.latitude}</span></div>
+                <div class="info-row"><span class="info-label">Longitude</span><span class="info-value">${geo.longitude}</span></div>
+                ${geo.address ? `<div class="info-row"><span class="info-label">Adresse</span><span class="info-value">${escapeHtml(geo.address)}</span></div>` : ''}
+                <div class="info-geo-actions">
+                    <button class="btn btn-sm btn-secondary" onclick="editInfoGeo('${escapeHtml(blobName)}',${geo.latitude},${geo.longitude},'${escapeHtml(geo.address||'')}')"><i class="fas fa-edit"></i> Modifier</button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteInfoGeo('${escapeHtml(blobName)}')"><i class="fas fa-trash"></i> Supprimer</button>
+                </div>
+            `;
+        } else {
+            el.innerHTML = `
+                <p style="color:#999;font-size:0.85rem;">Aucune géolocalisation</p>
+                <button class="btn btn-sm btn-secondary" onclick="editInfoGeo('${escapeHtml(blobName)}',0,0,'')"><i class="fas fa-plus"></i> Ajouter</button>
+            `;
+        }
+    } catch (e) {
+        el.innerHTML = '<p style="color:#999;">Erreur de chargement</p>';
+    }
+}
+
+function editInfoGeo(blobName, lat, lng, address) {
+    const el = document.getElementById('infoGeo');
+    el.innerHTML = `
+        <div class="form-group" style="margin-bottom:8px;">
+            <label style="font-size:0.8rem;">Latitude</label>
+            <input type="number" step="any" id="geoLatInput" class="form-input" value="${lat}" style="font-size:0.85rem;padding:6px 10px;">
+        </div>
+        <div class="form-group" style="margin-bottom:8px;">
+            <label style="font-size:0.8rem;">Longitude</label>
+            <input type="number" step="any" id="geoLngInput" class="form-input" value="${lng}" style="font-size:0.85rem;padding:6px 10px;">
+        </div>
+        <div class="form-group" style="margin-bottom:8px;">
+            <label style="font-size:0.8rem;">Adresse</label>
+            <input type="text" id="geoAddrInput" class="form-input" value="${escapeHtml(address)}" placeholder="Optionnel" style="font-size:0.85rem;padding:6px 10px;">
+        </div>
+        <div style="display:flex;gap:8px;">
+            <button class="btn btn-sm btn-primary" onclick="saveInfoGeo('${escapeHtml(blobName)}')"><i class="fas fa-save"></i> Enregistrer</button>
+            <button class="btn btn-sm btn-secondary" onclick="loadInfoGeo('${escapeHtml(blobName)}',getAuthToken())">Annuler</button>
+        </div>
+    `;
+}
+
+async function saveInfoGeo(blobName) {
+    const lat = parseFloat(document.getElementById('geoLatInput').value);
+    const lng = parseFloat(document.getElementById('geoLngInput').value);
+    const address = document.getElementById('geoAddrInput').value.trim();
+    if (isNaN(lat) || isNaN(lng)) { showError('Coordonnées invalides'); return; }
+    const token = getAuthToken();
+    try {
+        const res = await fetch(`${API_URL}/files/${encodeBlobPath(blobName)}/geolocation`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ latitude: lat, longitude: lng, address })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showSuccess('Géolocalisation enregistrée');
+            loadInfoGeo(blobName, token);
+        } else {
+            showError(data.error || 'Erreur');
+        }
+    } catch (e) { showError('Erreur sauvegarde géolocalisation'); }
+}
+
+async function deleteInfoGeo(blobName) {
+    const token = getAuthToken();
+    try {
+        const res = await fetch(`${API_URL}/files/${encodeBlobPath(blobName)}/geolocation`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (data.success) {
+            showSuccess('Géolocalisation supprimée');
+            loadInfoGeo(blobName, token);
+        } else {
+            showError(data.error || 'Erreur');
+        }
+    } catch (e) { showError('Erreur suppression géolocalisation'); }
 }

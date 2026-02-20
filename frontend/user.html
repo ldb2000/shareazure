@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ShareAzure - Mon espace de stockage</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="css/user.css?v=20260219e">
+    <link rel="stylesheet" href="css/user.css?v=20260220b">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -471,6 +471,10 @@
             <i class="fas fa-share-alt"></i>
             <span>Partager</span>
         </button>
+        <button class="context-menu-item" id="contextInfo">
+            <i class="fas fa-info-circle"></i>
+            <span>Informations</span>
+        </button>
         <button class="context-menu-item context-menu-item-danger" id="contextDelete">
             <i class="fas fa-trash"></i>
             <span>Supprimer</span>
@@ -761,7 +765,19 @@
         </div>
     </div>
 
-    <script src="js/user.js?v=20260220a"></script>
+    <!-- File Info Panel -->
+    <div class="info-panel-overlay" id="infoPanelOverlay" style="display:none;" onclick="closeFileInfoPanel()"></div>
+    <div class="info-panel" id="infoPanel" style="display:none;">
+        <div class="info-panel-header">
+            <h3 id="infoPanelTitle">Informations</h3>
+            <button class="btn-close" onclick="closeFileInfoPanel()"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="info-panel-body" id="infoPanelBody">
+            <div class="spinner"></div>
+        </div>
+    </div>
+
+    <script src="js/user.js?v=20260220c"></script>
     <!-- Modal Corbeille -->
     <div class="modal-overlay" id="trashModal" style="display: none;">
         <div class="modal-content" style="max-width: 750px;">
