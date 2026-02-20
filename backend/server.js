@@ -54,8 +54,8 @@ const limiter = rateLimit({
 app.use('/api/', limiter);
 
 // Servir les fichiers statiques frontend et admin depuis Express
-app.use('/admin', express.static(path.join(__dirname, '../admin')));
-app.use(express.static(path.join(__dirname, '../frontend')));
+app.use('/admin', express.static(path.join(__dirname, '../admin'), { maxAge: 0, etag: false }));
+app.use(express.static(path.join(__dirname, '../frontend'), { maxAge: 0, etag: false }));
 
 // Fonction pour obtenir la taille maximale de fichier
 function getMaxFileSizeMB() {

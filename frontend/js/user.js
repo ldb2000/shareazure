@@ -2453,19 +2453,7 @@ async function emptyTrash() {
     } catch (e) { showError(e.message); }
 }
 
-function getFileIcon(name) {
-    const ext = (name || '').split('.').pop().toLowerCase();
-    const icons = {
-        pdf: 'fas fa-file-pdf', doc: 'fas fa-file-word', docx: 'fas fa-file-word',
-        xls: 'fas fa-file-excel', xlsx: 'fas fa-file-excel', ppt: 'fas fa-file-powerpoint',
-        pptx: 'fas fa-file-powerpoint', jpg: 'fas fa-file-image', jpeg: 'fas fa-file-image',
-        png: 'fas fa-file-image', gif: 'fas fa-file-image', svg: 'fas fa-file-image',
-        mp4: 'fas fa-file-video', mov: 'fas fa-file-video', avi: 'fas fa-file-video',
-        mp3: 'fas fa-file-audio', wav: 'fas fa-file-audio', zip: 'fas fa-file-archive',
-        rar: 'fas fa-file-archive', txt: 'fas fa-file-alt', csv: 'fas fa-file-csv'
-    };
-    return icons[ext] || 'fas fa-file';
-}
+// getFileIcon supprimé ici — utilise la version SVG définie plus haut (ligne ~666)
 
 async function restoreAllTrash() {
     if (!confirm('Restaurer tous les fichiers de la corbeille ?\n\nLa réhydratation depuis Archive peut prendre quelques heures.')) return;
