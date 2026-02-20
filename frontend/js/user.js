@@ -841,18 +841,32 @@ function setupDragAndDrop() {
         handleFiles(files);
     });
 
-    uploadZone.addEventListener('click', () => {
+    uploadZone.addEventListener('click', (e) => {
+        // Ne pas déclencher si on clique sur le bouton (il a son propre onclick)
+        if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
         document.getElementById('fileInput').click();
     });
 }
 
 function handleFileSelect(e) {
     const files = Array.from(e.target.files);
+    if (files.length === 0) return;
     handleFiles(files);
+    // Reset input pour permettre re-upload du même fichier
+    e.target.value = '';
 }
 
 async function handleFiles(files) {
+    if (!files || files.length === 0) {
+        showError('Aucun fichier sélectionné');
+        return;
+    }
     const token = getAuthToken();
+    if (!token) {
+        showError('Session expirée, veuillez vous reconnecter');
+        window.location.href = 'login.html';
+        return;
+    }
     const uploadProgress = document.getElementById('uploadProgress');
     const progressFill = document.getElementById('progressFill');
     const progressText = document.getElementById('progressText');
