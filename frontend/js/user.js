@@ -1,6 +1,11 @@
 // Configuration
 const API_URL = window.location.origin + '/api';
 
+// Encode blob path: encode each segment but keep slashes
+function encodeBlobPath(blobName) {
+    return blobName.split('/').map(s => encodeURIComponent(s)).join('/');
+}
+
 // État de l'application
 let currentView = 'grid';
 let allFiles = [];
@@ -13,12 +18,17 @@ let discoverMapInstance = null;
 let discoverCurrentTab = 'tags';
 let discoverSuggestionTimeout = null;
 
+// État du contexte équipe
+let currentContext = 'my'; // 'my' ou teamId (number)
+let userTeamsList = []; // équipes de l'utilisateur
+let currentTeamRole = null; // rôle dans l'équipe courante
+
 // Initialisation
 document.addEventListener('DOMContentLoaded', () => {
     checkAuth();
     initializeEventListeners();
     loadFiles();
-    loadTeamFilesSection();
+    initContextTabs();
 });
 
 // ============================================
@@ -57,7 +67,16 @@ function checkAuth() {
     const userData = localStorage.getItem('userData') || sessionStorage.getItem('userData');
     if (userData) {
         const user = JSON.parse(userData);
-        document.getElementById('userName').textContent = user.name || user.username;
+        const displayName = user.username || user.full_name || user.fullName || user.name || 'Utilisateur';
+        document.getElementById('userName').textContent = displayName + ' ▾';
+        // Fill dropdown header
+        const ddName = document.getElementById('dropdownUserName');
+        const ddRole = document.getElementById('dropdownUserRole');
+        if (ddName) ddName.textContent = displayName;
+        if (ddRole) {
+            const roleLabels = { admin: 'Administrateur', com: 'Communication', user: 'Utilisateur', viewer: 'Lecteur' };
+            ddRole.textContent = roleLabels[user.role] || user.role || '';
+        }
     }
 }
 
@@ -72,7 +91,12 @@ function initializeEventListeners() {
     });
 
     document.getElementById('refreshBtn').addEventListener('click', () => {
-        loadFiles(currentPath);
+        if (currentContext !== 'my') {
+            currentPath = '';
+            loadFiles();
+        } else {
+            loadFiles(currentPath);
+        }
     });
 
     document.getElementById('createFolderBtn')?.addEventListener('click', showCreateFolderModal);
@@ -259,7 +283,14 @@ function initializeEventListeners() {
 async function loadFiles(path = '') {
     try {
         const token = getAuthToken();
-        const url = path ? `${API_URL}/user/files?path=${encodeURIComponent(path)}` : `${API_URL}/user/files`;
+        let url;
+        if (currentContext !== 'my') {
+            // Team context: use /api/files?teamId=X
+            url = `${API_URL}/files?teamId=${currentContext}`;
+            if (path) url += `&path=${encodeURIComponent(path)}`;
+        } else {
+            url = path ? `${API_URL}/user/files?path=${encodeURIComponent(path)}` : `${API_URL}/user/files`;
+        }
         const response = await fetch(url, {
             headers: {
                 'Authorization': `Bearer ${token}`
@@ -272,9 +303,22 @@ async function loadFiles(path = '') {
         }
 
         const data = await response.json();
-        if (data.success) {
+        if (data.success || data.files) {
             currentPath = data.currentPath || '';
-            allFiles = data.files || [];
+            if (data.userPrefix) window._userPrefix = data.userPrefix;
+            let files = data.files || [];
+            
+            // Normalize team files to match user files format
+            if (currentContext !== 'my') {
+                files = files.map(f => ({
+                    ...f,
+                    displayName: f.displayName || f.originalName || (f.metadata && f.metadata.originalName) || f.name.split('/').pop(),
+                    isFolder: f.isFolder || false,
+                    blobName: f.name
+                }));
+            }
+            
+            allFiles = files;
             filteredFiles = [...allFiles];
             imageFiles = allFiles.filter(f => !f.isFolder && f.contentType && f.contentType.startsWith('image/'));
             updateBreadcrumb();
@@ -383,16 +427,17 @@ function renderFiles() {
         return;
     }
 
-    if (currentView === 'grid') {
-        renderGridView();
-    } else {
+    if (currentView === 'list') {
         renderListView();
+    } else {
+        renderGridView();
     }
 }
 
 function renderGridView() {
     const grid = document.getElementById('filesGrid');
     grid.style.display = 'grid';
+    grid.classList.toggle('compact', currentView === 'grid-compact');
     document.getElementById('filesList').style.display = 'none';
 
     const token = getAuthToken();
@@ -402,15 +447,30 @@ function renderGridView() {
         const isImage = !isFolder && file.contentType && file.contentType.startsWith('image/');
         const displayName = file.displayName || file.originalName || file.name;
         
+        const isVideo = !isFolder && file.contentType && file.contentType.startsWith('video/');
+        const isPdf = !isFolder && file.contentType === 'application/pdf';
+        const isArchived = file.tier === 'Archive';
+        const thumbSize = currentView === 'grid-compact' ? '&size=sm' : '';
+        const archiveFallback = (type) => `onerror="this.outerHTML='<img src=\\'img/archive-${type}.svg\\' class=\\'file-card-image\\' style=\\'object-fit:contain;padding:8px;\\'>'"`; 
         let thumbnail;
         if (isFolder) {
             thumbnail = `<div class="file-card-icon folder-icon"><i class="fas fa-folder"></i></div>`;
+        } else if (isArchived && (isImage || isVideo || isPdf)) {
+            // Fichier archivé : utiliser le cache thumbnail, fallback SVG glacier
+            const thumbUrl = `${API_URL}/thumbnail/${encodeBlobPath(file.name)}?token=${encodeURIComponent(token)}${thumbSize}`;
+            const svgType = isVideo ? 'video' : isImage ? 'image' : 'pdf';
+            thumbnail = `<img src="${thumbUrl}" alt="${displayName}" class="file-card-image" loading="lazy" style="object-fit:contain;" ${archiveFallback(svgType)}>`;
         } else if (isImage) {
-            // Utiliser l'endpoint preview pour les miniatures d'images
-            const imageUrl = token 
-                ? `${API_URL}/preview/${encodeURIComponent(file.name)}?token=${encodeURIComponent(token)}`
-                : `${API_URL}/preview/${encodeURIComponent(file.name)}`;
+            const imageUrl = `${API_URL}/preview/${encodeBlobPath(file.name)}?token=${encodeURIComponent(token)}`;
             thumbnail = `<img src="${imageUrl}" alt="${displayName}" class="file-card-image" loading="lazy">`;
+        } else if (isVideo) {
+            const thumbUrl = `${API_URL}/thumbnail/${encodeBlobPath(file.name)}?token=${encodeURIComponent(token)}${thumbSize}`;
+            thumbnail = `<div class="file-card-video-thumb"><img src="${thumbUrl}" alt="${displayName}" class="file-card-image" loading="lazy" onerror="this.parentElement.innerHTML='<div class=\\'file-card-icon\\'><i class=\\'fas fa-file-video\\' style=\\'color:#6366f1;font-size:2.5rem;\\'></i></div>'"><div class="video-play-overlay"><i class="fas fa-play-circle"></i></div></div>`;
+        } else if (isPdf) {
+            const thumbUrl = `${API_URL}/thumbnail/${encodeBlobPath(file.name)}?token=${encodeURIComponent(token)}${thumbSize}`;
+            thumbnail = `<div class="file-card-pdf-thumb"><img src="${thumbUrl}" alt="${displayName}" class="file-card-image" loading="lazy" onerror="this.parentElement.innerHTML='<div class=\\'file-card-icon\\'><i class=\\'fas fa-file-pdf\\' style=\\'color:#DC2626;\\'></i></div>'"><div class="pdf-badge">PDF</div></div>`;
+        } else if (isArchived) {
+            thumbnail = `<img src="img/archive-file.svg" alt="Archivé" class="file-card-image" style="object-fit:contain;padding:8px;">`;
         } else {
             thumbnail = `<div class="file-card-icon">${getFileIcon(file.contentType)}</div>`;
         }
@@ -494,15 +554,24 @@ function renderListView() {
         const isImage = !isFolder && file.contentType && file.contentType.startsWith('image/');
         const displayName = file.displayName || file.originalName || file.name;
         
+        const isVideo = !isFolder && file.contentType && file.contentType.startsWith('video/');
+        const isPdf = !isFolder && file.contentType === 'application/pdf';
+        const isArchived = file.tier === 'Archive';
         let icon;
         if (isFolder) {
             icon = `<div class="file-icon-placeholder folder-icon"><i class="fas fa-folder"></i></div>`;
+        } else if (isArchived && (isImage || isVideo || isPdf)) {
+            const thumbUrl = `${API_URL}/thumbnail/${encodeBlobPath(file.name)}?token=${encodeURIComponent(token)}&size=sm`;
+            const svgType = isVideo ? 'video' : isImage ? 'image' : 'pdf';
+            icon = `<img src="${thumbUrl}" alt="${displayName}" class="file-icon" loading="lazy" style="border-radius:4px;" onerror="this.src='img/archive-${svgType}.svg';this.style.objectFit='contain';this.onerror=null;">`;
+        } else if (isArchived) {
+            icon = `<img src="img/archive-file.svg" alt="Archivé" class="file-icon" style="object-fit:contain;">`;
         } else if (isImage) {
-            // Utiliser l'endpoint preview pour les miniatures d'images
-            const imageUrl = token 
-                ? `${API_URL}/preview/${encodeURIComponent(file.name)}?token=${encodeURIComponent(token)}`
-                : `${API_URL}/preview/${encodeURIComponent(file.name)}`;
+            const imageUrl = `${API_URL}/preview/${encodeBlobPath(file.name)}?token=${encodeURIComponent(token)}`;
             icon = `<img src="${imageUrl}" alt="${displayName}" class="file-icon" loading="lazy">`;
+        } else if (isVideo || isPdf) {
+            const thumbUrl = `${API_URL}/thumbnail/${encodeBlobPath(file.name)}?token=${encodeURIComponent(token)}&size=sm`;
+            icon = `<img src="${thumbUrl}" alt="${displayName}" class="file-icon" loading="lazy" style="border-radius:4px;" onerror="this.outerHTML='<div class=\\'file-icon-placeholder\\'>' + (this.alt.match(/\\.pdf$/i) ? '<i class=\\'fas fa-file-pdf\\' style=\\'color:#DC2626;\\'></i>' : '<i class=\\'fas fa-file-video\\' style=\\'color:#6366f1;\\'></i>') + '</div>'">`;
         } else {
             icon = `<div class="file-icon-placeholder">${getFileIcon(file.contentType)}</div>`;
         }
@@ -632,8 +701,8 @@ function updateGallery() {
     // Utiliser l'endpoint preview au lieu de l'URL directe du blob
     const token = getAuthToken();
     const imageUrl = token 
-        ? `${API_URL}/preview/${encodeURIComponent(currentImage.name)}?token=${encodeURIComponent(token)}`
-        : `${API_URL}/preview/${encodeURIComponent(currentImage.name)}`;
+        ? `${API_URL}/preview/${encodeBlobPath(currentImage.name)}?token=${encodeURIComponent(token)}`
+        : `${API_URL}/preview/${encodeBlobPath(currentImage.name)}`;
     
     const galleryImage = document.getElementById('galleryImage');
     
@@ -713,15 +782,7 @@ function closeGallery() {
 // ============================================
 
 function previewFile(fileName) {
-    const file = filteredFiles.find(f => f.name === fileName);
-    if (!file || file.isFolder) return;
-
-    const token = getAuthToken();
-    if (token) {
-        window.open(`${API_URL}/preview/${encodeURIComponent(fileName)}?token=${encodeURIComponent(token)}`, '_blank');
-    } else {
-        window.open(`${API_URL}/preview/${encodeURIComponent(fileName)}`, '_blank');
-    }
+    showPreview(fileName);
 }
 
 function downloadFile(fileName) {
@@ -729,11 +790,7 @@ function downloadFile(fileName) {
     if (!file || file.isFolder) return;
 
     const token = getAuthToken();
-    if (token) {
-        window.location.href = `${API_URL}/download/${encodeURIComponent(fileName)}?token=${encodeURIComponent(token)}`;
-    } else {
-        window.location.href = `${API_URL}/download/${encodeURIComponent(fileName)}`;
-    }
+    window.location.href = `${API_URL}/download/${encodeBlobPath(fileName)}${token ? '?token=' + encodeURIComponent(token) : ''}`;
 }
 
 // ============================================
@@ -790,11 +847,20 @@ async function handleFiles(files) {
         if (currentPath) {
             formData.append('path', currentPath);
         }
+        
+        // Ajouter teamId si contexte équipe
+        if (currentContext !== 'my') {
+            formData.append('teamId', currentContext);
+        }
 
         try {
-            const url = currentPath ? `${API_URL}/upload?path=${encodeURIComponent(currentPath)}` : `${API_URL}/upload`;
+            let url = currentPath ? `${API_URL}/upload?path=${encodeURIComponent(currentPath)}` : `${API_URL}/upload`;
+            if (currentContext !== 'my') {
+                url += (url.includes('?') ? '&' : '?') + `teamId=${currentContext}`;
+            }
             const response = await fetch(url, {
                 method: 'POST',
+                headers: { 'Authorization': `Bearer ${getAuthToken()}` },
                 body: formData
             });
 
@@ -1372,7 +1438,7 @@ function showShareLinksSection() {
     document.getElementById('filesSection').style.display = 'none';
     document.getElementById('shareLinksSection').style.display = 'block';
     document.getElementById('discoverSection').style.display = 'none';
-    document.getElementById('teamFilesSection').style.display = 'none';
+    
     loadShareLinks();
 }
 
@@ -1409,6 +1475,17 @@ async function loadShareLinks() {
 
 function renderShareLinks(links) {
     const container = document.getElementById('shareLinksContainer');
+    
+    // Show/hide "delete expired" button
+    const now = new Date();
+    const expiredLinks = links.filter(l => new Date(l.expires_at) < now);
+    const deleteExpiredBtn = document.getElementById('deleteExpiredLinksBtn');
+    if (deleteExpiredBtn) {
+        deleteExpiredBtn.style.display = expiredLinks.length > 0 ? '' : 'none';
+        deleteExpiredBtn.textContent = '';
+        deleteExpiredBtn.innerHTML = `<i class="fas fa-trash"></i> Supprimer les expirés (${expiredLinks.length})`;
+        deleteExpiredBtn.onclick = () => deleteExpiredShareLinks(expiredLinks);
+    }
     
     if (links.length === 0) {
         container.innerHTML = `
@@ -1607,6 +1684,23 @@ async function regenerateShareLink(link) {
     
     // Générer automatiquement le nouveau lien
     await handleGenerateShareLink();
+}
+
+async function deleteExpiredShareLinks(expiredLinks) {
+    if (!confirm(`Supprimer ${expiredLinks.length} lien(s) de partage expiré(s) ?`)) return;
+    const token = getAuthToken();
+    let deleted = 0;
+    for (const link of expiredLinks) {
+        try {
+            const res = await fetch(`${API_URL}/user/share-links/${link.link_id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) deleted++;
+        } catch {}
+    }
+    showSuccess(`${deleted} lien(s) expiré(s) supprimé(s)`);
+    loadShareLinks();
 }
 
 async function deleteShareLink(linkId) {
@@ -1845,135 +1939,13 @@ async function handleCreateGuest() {
 }
 
 // ============================================
-// Team Files Section (read-only)
-// ============================================
-
-async function loadTeamFilesSection() {
-    // Check if user has teams via userData
-    const userDataStr = localStorage.getItem('userData') || sessionStorage.getItem('userData');
-    if (!userDataStr) return;
-
-    let user;
-    try {
-        user = JSON.parse(userDataStr);
-    } catch (e) { return; }
-
-    const teams = user.teams || [];
-    if (teams.length === 0) return;
-
-    // Show the team files button in header
-    const btn = document.getElementById('teamFilesBtn');
-    if (btn) {
-        btn.style.display = '';
-        btn.addEventListener('click', showTeamFilesSection);
-    }
-
-    const closeBtn = document.getElementById('closeTeamFilesBtn');
-    if (closeBtn) {
-        closeBtn.addEventListener('click', hideTeamFilesSection);
-    }
-}
-
-function showTeamFilesSection() {
-    document.getElementById('filesSection').style.display = 'none';
-    document.getElementById('shareLinksSection').style.display = 'none';
-    document.getElementById('discoverSection').style.display = 'none';
-    document.getElementById('teamFilesSection').style.display = 'block';
-    loadTeamFiles();
-}
-
-function hideTeamFilesSection() {
-    document.getElementById('teamFilesSection').style.display = 'none';
-    document.getElementById('filesSection').style.display = 'block';
-}
-
-async function loadTeamFiles() {
-    const container = document.getElementById('teamFilesContainer');
-    container.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Chargement...</p></div>';
-
-    const userDataStr = localStorage.getItem('userData') || sessionStorage.getItem('userData');
-    if (!userDataStr) return;
-
-    let user;
-    try { user = JSON.parse(userDataStr); } catch (e) { return; }
-
-    const teams = user.teams || [];
-    if (teams.length === 0) {
-        container.innerHTML = '<div class="empty-state"><p>Vous n\'etes membre d\'aucune equipe</p></div>';
-        return;
-    }
-
-    let html = '';
-    const token = getAuthToken();
-
-    for (const team of teams) {
-        try {
-            const response = await fetch(`${API_URL}/files?teamId=${team.teamId}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            const data = await response.json();
-            const files = data.files || [];
-
-            html += `<div class="team-files-group">
-                <h3 style="margin: 16px 0 12px; color: #003C61;">
-                    <i class="fas fa-users"></i> ${escapeHtml(team.displayName || team.name)}
-                    <span style="color: #999; font-size: 0.85rem; font-weight: 400;"> (${files.length} fichier${files.length !== 1 ? 's' : ''})</span>
-                </h3>`;
-
-            if (files.length === 0) {
-                html += '<p style="color: #999; padding: 8px 0;">Aucun fichier dans cette equipe</p>';
-            } else {
-                html += `<table class="files-table" style="width: 100%; margin-bottom: 16px;">
-                    <thead><tr><th>Nom</th><th>Taille</th><th>Type</th><th>Date</th><th>Actions</th></tr></thead>
-                    <tbody>`;
-
-                files.forEach(file => {
-                    const displayName = file.metadata?.originalName || file.name;
-                    html += `<tr>
-                        <td><div class="file-name-cell">${getFileIcon(file.contentType)} <span>${escapeHtml(displayName)}</span></div></td>
-                        <td>${formatBytes(file.size || 0)}</td>
-                        <td>${getFileType(file.contentType)}</td>
-                        <td>${formatDate(file.lastModified)}</td>
-                        <td style="white-space:nowrap;">
-                            <button class="btn-icon" onclick="window.open('${API_URL}/download/${encodeURIComponent(file.name)}', '_blank')" title="Télécharger">
-                                <i class="fas fa-download"></i>
-                            </button>
-                            <button class="btn-icon" onclick="shareTeamFile('${escapeHtml(file.name)}', '${escapeHtml(displayName)}')" title="Partager">
-                                <i class="fas fa-share-alt"></i>
-                            </button>
-                            <button class="btn-icon" onclick="trashTeamFile('${escapeHtml(file.name)}', '${escapeHtml(displayName)}')" title="Corbeille" style="color:#ef5350;">
-                                <i class="fas fa-trash-alt"></i>
-                            </button>
-                        </td>
-                    </tr>`;
-                });
-
-                html += '</tbody></table>';
-            }
-            html += '</div>';
-        } catch (e) {
-            html += `<div class="team-files-group">
-                <h3 style="margin: 16px 0 12px; color: #003C61;">
-                    <i class="fas fa-users"></i> ${escapeHtml(team.displayName || team.name)}
-                </h3>
-                <p style="color: #dc3545; padding: 8px 0;">Erreur de chargement</p>
-            </div>`;
-        }
-    }
-
-    container.innerHTML = html;
-    document.getElementById('teamFilesSectionTitle').textContent =
-        `Fichiers d'equipe (${teams.length} equipe${teams.length > 1 ? 's' : ''})`;
-}
-
-// ============================================
 // Discover Section
 // ============================================
 
 function showDiscoverSection() {
     document.getElementById('filesSection').style.display = 'none';
     document.getElementById('shareLinksSection').style.display = 'none';
-    document.getElementById('teamFilesSection').style.display = 'none';
+    
     document.getElementById('discoverSection').style.display = 'block';
 
     // Load current tab data
@@ -2294,14 +2266,14 @@ function renderDiscoverFileCard(file) {
 
 function getDiscoverThumbnailUrl(blobName) {
     const token = getAuthToken();
-    const url = `${API_URL}/preview/${encodeURIComponent(blobName)}`;
+    const url = `${API_URL}/preview/${encodeBlobPath(blobName)}`;
     return token ? `${url}?token=${encodeURIComponent(token)}` : url;
 }
 
 function handleDiscoverFileClick(blobName) {
     if (!blobName) return;
     const token = getAuthToken();
-    const previewUrl = `${API_URL}/preview/${encodeURIComponent(blobName)}`;
+    const previewUrl = `${API_URL}/preview/${encodeBlobPath(blobName)}`;
     window.open(token ? `${previewUrl}?token=${encodeURIComponent(token)}` : previewUrl, '_blank');
 }
 
@@ -2459,45 +2431,13 @@ async function restoreAllTrash() {
 }
 
 // Share a team file directly
-async function shareTeamFile(blobName, displayName) {
-    contextMenuFile = blobName;
-    // Build a fake file entry for showShareModal
-    const fakeFile = { name: blobName, displayName: displayName, isFolder: false, size: null };
-    // Temporarily inject into filteredFiles
-    if (!filteredFiles.find(f => f.name === blobName)) {
-        filteredFiles.push(fakeFile);
-    }
-    showShareModal();
-}
-
-// Trash a team file
-async function trashTeamFile(blobName, displayName) {
-    if (!confirm(`Mettre "${displayName}" en corbeille ?\n\nLe fichier sera archivé et pourra être restauré.`)) return;
-    try {
-        const token = getAuthToken();
-        const res = await fetch(`${API_URL}/files/trash`, {
-            method: 'PUT',
-            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ blobName })
-        });
-        const data = await res.json();
-        if (data.success) {
-            showSuccess('Fichier mis en corbeille');
-            loadTeamFiles(); // Refresh team files
-        } else {
-            showError(data.error || 'Erreur');
-        }
-    } catch (e) { showError(e.message); }
-}
-
-// ============================================================================
 // FINOPS
 // ============================================================================
 
 function showFinopsSection() {
     document.getElementById('filesSection').style.display = 'none';
     document.getElementById('shareLinksSection').style.display = 'none';
-    document.getElementById('teamFilesSection').style.display = 'none';
+    
     document.getElementById('discoverSection').style.display = 'none';
     document.getElementById('finopsSection').style.display = 'block';
     loadFinopsData();
@@ -2665,13 +2605,13 @@ function showPreview(blobName) {
     const displayName = file.displayName || file.originalName || blobName.split('/').pop();
     const contentType = file.contentType || '';
     const token = getAuthToken();
-    const previewUrl = `${API_URL}/preview/${encodeURIComponent(blobName)}?token=${encodeURIComponent(token)}`;
+    const previewUrl = `${API_URL}/preview/${encodeBlobPath(blobName)}?token=${encodeURIComponent(token)}`;
     
     // Reset comments panel
     document.getElementById('commentsPanel').style.display = 'none';
     document.getElementById('commentCount').textContent = '';
     // Pre-load comment count
-    fetch(`${API_URL}/files/${encodeURIComponent(blobName)}/comments`, {
+    fetch(`${API_URL}/files/${encodeBlobPath(blobName)}/comments`, {
         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
     }).then(r => r.json()).then(d => {
         if (d.success && d.comments.length > 0) document.getElementById('commentCount').textContent = d.comments.length;
@@ -2682,7 +2622,7 @@ function showPreview(blobName) {
     // Download button
     document.getElementById('previewDownloadBtn').onclick = () => {
         const a = document.createElement('a');
-        a.href = `${API_URL}/download/${encodeURIComponent(blobName)}?token=${encodeURIComponent(token)}`;
+        a.href = `${API_URL}/download/${encodeBlobPath(blobName)}?token=${encodeURIComponent(token)}`;
         a.download = displayName;
         a.click();
     };
@@ -2704,7 +2644,7 @@ function showPreview(blobName) {
     } else if (contentType.startsWith('video/')) {
         body.innerHTML = `
         <div class="video-player-container" id="videoPlayerContainer">
-            <video id="videoPlayer" preload="metadata"><source src="${previewUrl}" type="${contentType}"></video>
+            <video id="videoPlayer" preload="metadata"><source src="${previewUrl}" type="video/mp4"></video>
             <div class="video-overlay" id="videoOverlay" onclick="toggleVideoPlay()">
                 <div class="video-play-icon"><i class="fas fa-play"></i></div>
             </div>
@@ -2737,10 +2677,17 @@ function showPreview(blobName) {
         initVideoPlayer();
     } else if (contentType.startsWith('audio/')) {
         body.innerHTML = `<audio controls autoplay><source src="${previewUrl}" type="${contentType}">Votre navigateur ne supporte pas l'audio.</audio>`;
-    } else if (contentType.startsWith('text/') || contentType === 'application/json' || contentType === 'application/xml') {
+    } else if (contentType.startsWith('text/') || contentType === 'application/json' || contentType === 'application/xml' || /\.(txt|md|csv|log|json|xml|js|css|sh|py|sql|yml|yaml|conf|cfg|ini|env|html|htm)$/i.test(blobName)) {
         body.innerHTML = '<div class="spinner"></div>';
-        fetch(previewUrl).then(r => r.text()).then(text => {
-            body.innerHTML = `<pre style="color:#e0e0e0;background:#111;padding:20px;border-radius:8px;overflow:auto;width:100%;max-height:100%;font-size:0.85rem;white-space:pre-wrap;">${escapeHtml(text)}</pre>`;
+        fetch(previewUrl, { headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` } }).then(r => {
+            if (!r.ok) throw new Error(r.status);
+            return r.text();
+        }).then(text => {
+            const lines = escapeHtml(text).split('\n');
+            const numbered = lines.map((line, i) => 
+                `<span style="color:#666;user-select:none;display:inline-block;width:3em;text-align:right;margin-right:1em;border-right:1px solid #333;padding-right:0.5em;">${i+1}</span>${line}`
+            ).join('\n');
+            body.innerHTML = `<pre style="color:#e0e0e0;background:#1a1a2e;padding:20px;border-radius:8px;overflow:auto;width:100%;max-height:100%;font-size:0.85rem;white-space:pre-wrap;line-height:1.6;font-family:'Fira Code',Consolas,monospace;">${numbered}</pre>`;
         }).catch(() => {
             body.innerHTML = '<div class="preview-unsupported"><i class="fas fa-exclamation-triangle"></i>Erreur de chargement</div>';
         });
@@ -3382,3 +3329,484 @@ const filesObserver = new MutationObserver(() => {
     });
 });
 filesObserver.observe(document.getElementById('filesGrid') || document.body, { childList: true, subtree: true });
+
+// === Changement de mot de passe ===
+function showChangePasswordModal() {
+    const old = document.getElementById('changePasswordModal');
+    if (old) old.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'changePasswordModal';
+    modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10000;';
+    modal.innerHTML = `
+        <div style="background:#fff;border-radius:12px;padding:32px;width:400px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.2);">
+            <h3 style="margin:0 0 24px;color:#333;"><i class="fas fa-key" style="color:#1976d2;margin-right:8px;"></i>Changer le mot de passe</h3>
+            <div style="margin-bottom:16px;">
+                <label style="display:block;font-size:0.85rem;color:#666;margin-bottom:4px;">Mot de passe actuel</label>
+                <input type="password" id="cpCurrentPwd" style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box;" autocomplete="current-password">
+            </div>
+            <div style="margin-bottom:16px;">
+                <label style="display:block;font-size:0.85rem;color:#666;margin-bottom:4px;">Nouveau mot de passe</label>
+                <input type="password" id="cpNewPwd" style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box;" autocomplete="new-password">
+            </div>
+            <div style="margin-bottom:24px;">
+                <label style="display:block;font-size:0.85rem;color:#666;margin-bottom:4px;">Confirmer le nouveau mot de passe</label>
+                <input type="password" id="cpConfirmPwd" style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box;" autocomplete="new-password">
+            </div>
+            <div id="cpError" style="display:none;color:#d32f2f;font-size:0.85rem;margin-bottom:16px;padding:8px 12px;background:#ffeaea;border-radius:6px;"></div>
+            <div id="cpSuccess" style="display:none;color:#2e7d32;font-size:0.85rem;margin-bottom:16px;padding:8px 12px;background:#e8f5e9;border-radius:6px;"></div>
+            <div style="display:flex;gap:12px;justify-content:flex-end;">
+                <button onclick="document.getElementById('changePasswordModal').remove();" style="padding:10px 20px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer;font-size:0.9rem;">Annuler</button>
+                <button onclick="submitPasswordChange();" id="cpSubmitBtn" style="padding:10px 20px;border:none;border-radius:8px;background:#1976d2;color:#fff;cursor:pointer;font-size:0.9rem;font-weight:600;">Modifier</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+    document.getElementById('cpCurrentPwd').focus();
+}
+
+async function submitPasswordChange() {
+    const current = document.getElementById('cpCurrentPwd').value;
+    const newPwd = document.getElementById('cpNewPwd').value;
+    const confirm = document.getElementById('cpConfirmPwd').value;
+    const errDiv = document.getElementById('cpError');
+    const successDiv = document.getElementById('cpSuccess');
+    const btn = document.getElementById('cpSubmitBtn');
+
+    errDiv.style.display = 'none';
+    successDiv.style.display = 'none';
+
+    if (!current) { errDiv.textContent = 'Veuillez saisir votre mot de passe actuel'; errDiv.style.display = 'block'; return; }
+    if (!newPwd) { errDiv.textContent = 'Veuillez saisir un nouveau mot de passe'; errDiv.style.display = 'block'; return; }
+    if (newPwd.length < 8) { errDiv.textContent = 'Le nouveau mot de passe doit contenir au moins 8 caractères'; errDiv.style.display = 'block'; return; }
+    if (newPwd !== confirm) { errDiv.textContent = 'Les mots de passe ne correspondent pas'; errDiv.style.display = 'block'; return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Modification...';
+
+    try {
+        const token = localStorage.getItem('authToken') || localStorage.getItem('userToken');
+        const resp = await fetch(window.location.origin + '/api/user/password', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ currentPassword: current, newPassword: newPwd })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            successDiv.textContent = '✅ Mot de passe modifié avec succès !';
+            successDiv.style.display = 'block';
+            btn.textContent = '✓ Modifié';
+            setTimeout(() => { document.getElementById('changePasswordModal')?.remove(); }, 2000);
+        } else {
+            errDiv.textContent = data.error || 'Erreur lors de la modification';
+            errDiv.style.display = 'block';
+            btn.disabled = false;
+            btn.textContent = 'Modifier';
+        }
+    } catch (e) {
+        errDiv.textContent = 'Erreur de connexion au serveur';
+        errDiv.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Modifier';
+    }
+}
+
+// Fermer le dropdown user si clic en dehors
+document.addEventListener('click', (e) => {
+    const dropdown = document.getElementById('userMenuDropdown');
+    const userName = document.getElementById('userName');
+    if (dropdown && !dropdown.contains(e.target) && e.target !== userName) {
+        dropdown.style.display = 'none';
+    }
+});
+
+// ============================================================================
+// CONTEXTE ÉQUIPE - Tabs & Switching
+// ============================================================================
+
+async function loadUserTeams() {
+    try {
+        const token = getAuthToken();
+        const res = await fetch(`${API_URL}/user/teams`, { headers: { 'Authorization': `Bearer ${token}` } });
+        const data = await res.json();
+        if (!data.success) return;
+        userTeamsList = data.teams;
+        // Update localStorage
+        const userDataStr = localStorage.getItem('userData') || sessionStorage.getItem('userData');
+        if (userDataStr) {
+            try {
+                const user = JSON.parse(userDataStr);
+                user.teams = data.teams;
+                const storage = localStorage.getItem('userData') ? localStorage : sessionStorage;
+                storage.setItem('userData', JSON.stringify(user));
+            } catch {}
+        }
+        // Rebuild tabs
+        const teamTabsList = document.getElementById('teamTabsList');
+        teamTabsList.innerHTML = '';
+        for (const team of data.teams) {
+            const btn = document.createElement('button');
+            btn.className = 'context-tab';
+            btn.dataset.context = team.teamId;
+            const teamIcon = team.role === 'owner' ? 'fa-users' : 'fa-user';
+            btn.innerHTML = `<i class="fas ${teamIcon}"></i> ${escapeHtml(team.displayName || team.name)}`;
+            const logoImg = new Image();
+            logoImg.onload = () => { btn.innerHTML = `<img src="${logoImg.src}" class="team-logo-mini" alt=""> ${escapeHtml(team.displayName || team.name)}`; };
+            logoImg.src = `${API_URL}/teams/${team.teamId}/logo?t=${Date.now()}`;
+            btn.addEventListener('click', () => switchContext(team.teamId));
+            teamTabsList.appendChild(btn);
+        }
+        document.getElementById('teamTabsGroup').style.display = 'flex';
+        document.getElementById('contextTabs').style.display = 'flex';
+    } catch (e) { console.error('loadUserTeams error:', e); }
+}
+
+async function initContextTabs() {
+    const userDataStr = localStorage.getItem('userData') || sessionStorage.getItem('userData');
+    if (!userDataStr) return;
+    let user;
+    try { user = JSON.parse(userDataStr); } catch (e) { return; }
+
+    const teams = user.teams || [];
+
+    userTeamsList = teams;
+    const tabsContainer = document.getElementById('contextTabs');
+    tabsContainer.style.display = 'flex';
+
+    // Show team tabs group
+    const teamTabsGroup = document.getElementById('teamTabsGroup');
+    const teamTabsList = document.getElementById('teamTabsList');
+    teamTabsGroup.style.display = 'flex';
+
+    // Add team tabs
+    for (const team of teams) {
+        const btn = document.createElement('button');
+        btn.className = 'context-tab';
+        btn.dataset.context = team.teamId;
+        const teamIcon = team.role === 'owner' ? 'fa-users' : 'fa-user';
+        btn.innerHTML = `<i class="fas ${teamIcon}"></i> ${escapeHtml(team.displayName || team.name)}`;
+        
+        // Try to load team logo as mini icon
+        const logoImg = new Image();
+        logoImg.onload = () => {
+            btn.innerHTML = `<img src="${logoImg.src}" class="team-logo-mini" alt=""> ${escapeHtml(team.displayName || team.name)}`;
+        };
+        logoImg.src = `${API_URL}/teams/${team.teamId}/logo?t=${Date.now()}`;
+        
+        btn.addEventListener('click', () => switchContext(team.teamId));
+        teamTabsList.appendChild(btn);
+    }
+
+    // Click handler for "Mes fichiers" tab
+    document.getElementById('ctxTabMy').addEventListener('click', () => switchContext('my'));
+    
+    // Toujours afficher le groupe d'onglets (même sans équipe, pour le bouton +)
+    document.getElementById('teamTabsGroup').style.display = 'flex';
+}
+
+// ============================================================================
+// CRÉATION D'ÉQUIPE
+// ============================================================================
+function showCreateTeamModal() {
+    let modal = document.getElementById('createTeamModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'createTeamModal';
+        modal.className = 'modal-overlay';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width:420px;">
+                <div class="modal-header">
+                    <h3><i class="fas fa-plus-circle"></i> Créer une équipe</h3>
+                    <button class="modal-close" onclick="document.getElementById('createTeamModal').style.display='none'">&times;</button>
+                </div>
+                <div class="modal-body" style="padding:20px;">
+                    <div style="margin-bottom:16px;">
+                        <label style="font-weight:600;font-size:0.85rem;color:#555;display:block;margin-bottom:4px;">Nom de l'équipe *</label>
+                        <input type="text" id="newTeamName" placeholder="Ex: Équipe Développement" style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box;">
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <label style="font-weight:600;font-size:0.85rem;color:#555;display:block;margin-bottom:4px;">Description</label>
+                        <textarea id="newTeamDesc" rows="3" placeholder="Description optionnelle..." style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:0.95rem;resize:vertical;box-sizing:border-box;"></textarea>
+                    </div>
+                    <button onclick="createTeam()" style="width:100%;padding:12px;background:#639E30;color:#fff;border:none;border-radius:8px;font-size:0.95rem;font-weight:600;cursor:pointer;">
+                        <i class="fas fa-check"></i> Créer l'équipe
+                    </button>
+                </div>
+            </div>`;
+        document.body.appendChild(modal);
+    }
+    document.getElementById('newTeamName').value = '';
+    document.getElementById('newTeamDesc').value = '';
+    modal.style.display = 'flex';
+}
+
+async function createTeam() {
+    const name = document.getElementById('newTeamName').value.trim();
+    const desc = document.getElementById('newTeamDesc').value.trim();
+    if (!name) { showError('Le nom est obligatoire'); return; }
+
+    try {
+        const token = getAuthToken();
+        const res = await fetch(`${API_URL}/teams`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name, displayName: name, description: desc })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showSuccess('Équipe créée !');
+            document.getElementById('createTeamModal').style.display = 'none';
+            // Recharger les équipes
+            await loadUserTeams();
+            // Basculer sur la nouvelle équipe
+            if (data.team && data.team.id) switchContext(data.team.id);
+        } else {
+            showError(data.error || 'Erreur lors de la création');
+        }
+    } catch (e) { showError(e.message); }
+}
+
+function switchContext(context) {
+    currentContext = context;
+    currentPath = '';
+
+    // Update active tab
+    document.querySelectorAll('.context-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.context == context);
+    });
+
+    // Show/hide team-specific action buttons
+    const isTeam = context !== 'my';
+    const team = isTeam ? userTeamsList.find(t => t.teamId == context) : null;
+    currentTeamRole = team ? team.role : null;
+    const isOwnerOrAdmin = currentTeamRole === 'owner' || currentTeamRole === 'admin';
+
+    document.getElementById('teamActions').style.display = isTeam ? 'flex' : 'none';
+    document.getElementById('teamMembersBtn').style.display = isTeam ? '' : 'none';
+    const mb2 = document.getElementById('teamMembersBtn2');
+    if (mb2) mb2.style.display = isTeam ? '' : 'none';
+    document.getElementById('teamSettingsBtn').style.display = isTeam && isOwnerOrAdmin ? '' : 'none';
+    
+    // Hide other sections, show files
+    document.getElementById('shareLinksSection').style.display = 'none';
+    document.getElementById('discoverSection').style.display = 'none';
+    
+    document.getElementById('finopsSection').style.display = 'none';
+    document.getElementById('filesSection').style.display = 'block';
+
+    // Update header title
+    const titleEl = document.querySelector('.header-title');
+    if (isTeam && team) {
+        titleEl.textContent = team.displayName || team.name;
+    } else {
+        titleEl.textContent = 'Mon espace de stockage';
+    }
+
+    loadFiles();
+}
+
+// ============================================================================
+// MODAL MEMBRES ÉQUIPE
+// ============================================================================
+
+async function showTeamMembersModal() {
+    if (currentContext === 'my') return;
+    const teamId = currentContext;
+    const isOwnerOrAdmin = currentTeamRole === 'owner' || currentTeamRole === 'admin';
+
+    document.getElementById('teamMembersAddSection').style.display = isOwnerOrAdmin ? 'block' : 'none';
+    document.getElementById('teamMembersModal').style.display = 'flex';
+
+    const list = document.getElementById('teamMembersList');
+    list.innerHTML = '<p style="text-align:center;color:#666;padding:20px;"><i class="fas fa-spinner fa-spin"></i> Chargement...</p>';
+
+    try {
+        const token = getAuthToken();
+        const res = await fetch(`${API_URL}/teams/${teamId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error);
+
+        const members = data.team.members || [];
+        const roleLabels = { owner: 'Propriétaire', admin: 'Admin', member: 'Membre', viewer: 'Lecteur' };
+
+        if (members.length === 0) {
+            list.innerHTML = '<p style="text-align:center;color:#888;padding:20px;">Aucun membre</p>';
+            return;
+        }
+
+        list.innerHTML = members.map(m => {
+            const canManage = isOwnerOrAdmin && m.role !== 'owner';
+            return `<div style="display:flex;align-items:center;justify-content:space-between;padding:12px;border:1px solid #e0e0e0;border-radius:8px;margin-bottom:8px;">
+                <div>
+                    <strong>${escapeHtml(m.full_name || m.username)}</strong>
+                    <span style="display:inline-block;background:${m.role === 'owner' ? '#003C61' : '#639E30'};color:#fff;font-size:0.7rem;padding:2px 8px;border-radius:10px;margin-left:8px;">${roleLabels[m.role] || m.role}</span>
+                    ${m.email ? `<div style="font-size:0.8rem;color:#888;margin-top:2px;">${escapeHtml(m.email)}</div>` : ''}
+                </div>
+                ${canManage ? `<div style="display:flex;gap:6px;">
+                    <select onchange="changeTeamMemberRole(${teamId}, ${m.user_id}, this.value)" style="padding:4px 8px;border:1px solid #ddd;border-radius:6px;font-size:0.8rem;">
+                        <option value="member" ${m.role === 'member' ? 'selected' : ''}>Membre</option>
+                        <option value="viewer" ${m.role === 'viewer' ? 'selected' : ''}>Lecteur</option>
+                    </select>
+                    <button onclick="removeTeamMember(${teamId}, ${m.user_id}, '${escapeHtml(m.username)}')" style="background:#ef5350;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:0.8rem;" title="Retirer">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>` : ''}
+            </div>`;
+        }).join('');
+    } catch (e) {
+        list.innerHTML = `<p style="color:#c62828;text-align:center;">Erreur: ${e.message}</p>`;
+    }
+}
+
+async function addTeamMember() {
+    const username = document.getElementById('teamMemberUsername').value.trim();
+    const role = document.getElementById('teamMemberRole').value;
+    if (!username) { showError('Entrez un nom d\'utilisateur'); return; }
+
+    try {
+        const token = getAuthToken();
+        const res = await fetch(`${API_URL}/teams/${currentContext}/members`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, role })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showSuccess('Membre ajouté');
+            document.getElementById('teamMemberUsername').value = '';
+            showTeamMembersModal();
+        } else {
+            showError(data.error || 'Erreur');
+        }
+    } catch (e) { showError(e.message); }
+}
+
+async function changeTeamMemberRole(teamId, userId, newRole) {
+    try {
+        const token = getAuthToken();
+        const res = await fetch(`${API_URL}/teams/${teamId}/members/${userId}`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: newRole })
+        });
+        const data = await res.json();
+        if (data.success) showSuccess('Rôle mis à jour');
+        else showError(data.error || 'Erreur');
+    } catch (e) { showError(e.message); }
+}
+
+async function removeTeamMember(teamId, userId, username) {
+    const confirmed = await showConfirmDialog('Retirer le membre', `Retirer ${username} de l'équipe ?`);
+    if (!confirmed) return;
+    try {
+        const token = getAuthToken();
+        const res = await fetch(`${API_URL}/teams/${teamId}/members/${userId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (data.success) {
+            showSuccess('Membre retiré');
+            showTeamMembersModal();
+        } else showError(data.error || 'Erreur');
+    } catch (e) { showError(e.message); }
+}
+
+// ============================================================================
+// MODAL PARAMÈTRES ÉQUIPE
+// ============================================================================
+
+async function showTeamSettingsModal() {
+    if (currentContext === 'my') return;
+    const teamId = currentContext;
+
+    document.getElementById('teamSettingsModal').style.display = 'flex';
+
+    try {
+        const token = getAuthToken();
+        const res = await fetch(`${API_URL}/teams/${teamId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (data.success) {
+            document.getElementById('teamSettingsName').value = data.team.display_name || data.team.name || '';
+            // Try loading logo preview
+            const preview = document.getElementById('teamSettingsLogoPreview');
+            const testImg = new Image();
+            testImg.onload = () => { preview.src = testImg.src; preview.style.display = 'block'; };
+            testImg.onerror = () => { preview.style.display = 'none'; };
+            testImg.src = `${API_URL}/teams/${teamId}/logo?t=${Date.now()}`;
+        }
+    } catch (e) { showError(e.message); }
+}
+
+async function saveTeamSettings() {
+    const teamId = currentContext;
+    const displayName = document.getElementById('teamSettingsName').value.trim();
+    if (!displayName) { showError('Le nom est requis'); return; }
+
+    try {
+        const token = getAuthToken();
+        const res = await fetch(`${API_URL}/teams/${teamId}`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ displayName })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showSuccess('Paramètres enregistrés');
+            // Update local data
+            const team = userTeamsList.find(t => t.teamId == teamId);
+            if (team) team.displayName = displayName;
+            // Update tab label
+            const tab = document.querySelector(`.context-tab[data-context="${teamId}"]`);
+            if (tab) {
+                const img = tab.querySelector('img');
+                if (img) tab.innerHTML = `<img src="${img.src}" class="team-logo-mini" alt=""> ${escapeHtml(displayName)}`;
+                else { const ti = currentTeamRole === 'owner' ? 'fa-users' : 'fa-user'; tab.innerHTML = `<i class="fas ${ti}"></i> ${escapeHtml(displayName)}`; }
+            }
+            // Update header
+            document.querySelector('.header-title').textContent = displayName;
+            document.getElementById('teamSettingsModal').style.display = 'none';
+        } else showError(data.error || 'Erreur');
+    } catch (e) { showError(e.message); }
+}
+
+function uploadTeamLogo() {
+    const teamId = currentContext;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.svg,image/svg+xml';
+    input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (!file.name.endsWith('.svg')) { showError('Format SVG uniquement'); return; }
+        try {
+            const svgText = await file.text();
+            const token = getAuthToken();
+            const res = await fetch(`${API_URL}/teams/${teamId}/logo`, {
+                method: 'PUT',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'image/svg+xml' },
+                body: svgText
+            });
+            const data = await res.json();
+            if (data.success) {
+                showSuccess('Logo mis à jour');
+                const preview = document.getElementById('teamSettingsLogoPreview');
+                preview.src = `${API_URL}/teams/${teamId}/logo?t=${Date.now()}`;
+                preview.style.display = 'block';
+                // Update tab logo
+                const tab = document.querySelector(`.context-tab[data-context="${teamId}"]`);
+                if (tab) {
+                    const team = userTeamsList.find(t => t.teamId == teamId);
+                    const name = team ? (team.displayName || team.name) : '';
+                    tab.innerHTML = `<img src="${API_URL}/teams/${teamId}/logo?t=${Date.now()}" class="team-logo-mini" alt=""> ${escapeHtml(name)}`;
+                }
+            } else showError(data.error || 'Erreur');
+        } catch (e) { showError(e.message); }
+    };
+    input.click();
+}

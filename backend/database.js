@@ -1397,6 +1397,29 @@ const fileOwnershipDb = {
     return stmt.all();
   },
 
+  // Obtenir les fichiers accessibles par un utilisateur (ses fichiers + fichiers de ses équipes + fichiers de ses invités)
+  getAccessibleByUser: (userId) => {
+    const stmt = db.prepare(`
+      SELECT DISTINCT fo.*,
+             u.username as user_owner,
+             u.role as user_role,
+             ga.email as guest_owner,
+             t.name as team_name
+      FROM file_ownership fo
+      LEFT JOIN users u ON fo.uploaded_by_user_id = u.id
+      LEFT JOIN guest_accounts ga ON fo.uploaded_by_guest_id = ga.id
+      LEFT JOIN teams t ON fo.team_id = t.id
+      WHERE (
+        fo.uploaded_by_user_id = ?
+        OR fo.team_id IN (SELECT team_id FROM team_members WHERE user_id = ?)
+        OR ga.created_by_user_id = ?
+      )
+        AND (fo.is_trashed = 0 OR fo.is_trashed IS NULL)
+      ORDER BY fo.uploaded_at DESC
+    `);
+    return stmt.all(userId, userId, userId);
+  },
+
   // Obtenir les fichiers accessibles par un utilisateur april_user
   getAccessibleByAprilUser: (userId) => {
     const stmt = db.prepare(`

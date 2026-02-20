@@ -30,6 +30,8 @@ body {
     background: var(--bg-primary);
     color: var(--text-primary);
     line-height: 1.6;
+    overflow-x: hidden;
+    max-width: 100vw;
 }
 
 /* Header */
@@ -112,6 +114,139 @@ body {
     max-width: 1400px;
     margin: 0 auto;
     padding: 2rem;
+}
+
+/* Context Tabs */
+.context-tabs {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    padding: 8px 12px;
+    background: var(--bg-secondary);
+    border-radius: 12px;
+    box-shadow: var(--shadow-sm);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: wrap;
+}
+
+.context-tabs-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.context-tabs-list {
+    display: flex;
+    gap: 4px;
+}
+
+.context-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    opacity: 0.7;
+    white-space: nowrap;
+    padding-right: 4px;
+}
+
+.context-separator {
+    width: 1px;
+    height: 28px;
+    background: var(--border-color);
+    flex-shrink: 0;
+}
+
+.context-tab {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s;
+    font-family: inherit;
+}
+
+.context-tab:hover {
+    background: var(--bg-primary);
+    color: var(--primary);
+}
+
+.context-tab.active {
+    background: var(--primary);
+    color: white;
+    box-shadow: 0 2px 8px rgba(0, 60, 97, 0.25);
+}
+
+.context-tab .team-logo-mini {
+    height: 18px;
+    width: 18px;
+    object-fit: contain;
+    border-radius: 3px;
+}
+
+.team-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.btn-team-action {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.4rem 0.85rem;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: white;
+    color: var(--primary);
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s;
+    font-family: inherit;
+}
+
+.btn-team-action:hover {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+@media (max-width: 768px) {
+    .context-tabs {
+        margin-bottom: 0.75rem;
+        padding: 6px 8px;
+        gap: 0.5rem;
+    }
+    .context-tab {
+        padding: 0.4rem 0.75rem;
+        font-size: 0.78rem;
+    }
+    .context-label {
+        font-size: 0.6rem;
+    }
+    .team-actions {
+        margin-left: 0;
+        width: 100%;
+        justify-content: flex-end;
+        padding-top: 6px;
+        border-top: 1px solid var(--border-color);
+    }
 }
 
 /* Toolbar */
@@ -1817,9 +1952,105 @@ body {
 /* Bulk Actions */
 .bulk-bar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: #e3f2fd; border-radius: 8px; margin-bottom: 12px; }
 .bulk-info { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 0.9rem; color: #1565c0; }
-.bulk-actions { display: flex; gap: 6px; }
+.bulk-actions { display: flex; gap: 8px; }
+.bulk-actions .btn-sm { padding: 8px 18px; font-size: 0.85rem; border-radius: 8px; border: 1px solid #d0d5dd; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 120px; height: 38px; font-weight: 500; white-space: nowrap; background: #fff; color: #344054; }
+.bulk-actions .btn-sm:hover { background: #f5f5f5; }
+.bulk-actions .btn-sm.btn-danger { background: #ef5350; color: #fff; border-color: #ef5350; }
+.bulk-actions .btn-sm.btn-danger:hover { background: #c62828; border-color: #c62828; }
 .btn-sm { padding: 6px 12px; font-size: 0.8rem; border-radius: 6px; border: none; cursor: pointer; display: flex; align-items: center; gap: 4px; }
 .btn-danger { background: #ef5350; color: #fff; }
 .btn-danger:hover { background: #c62828; }
 .file-card.selected, .file-row.selected { outline: 2px solid #1565c0; background: #e3f2fd !important; }
 .file-select-checkbox { position: absolute; top: 8px; left: 8px; z-index: 5; width: 18px; height: 18px; cursor: pointer; }
+
+/* Mobile overflow fix */
+@media (max-width: 480px) {
+    .main-content, .content-area, .toolbar, header, .header {
+        max-width: 100vw;
+        overflow-x: hidden;
+    }
+    .files-table-container, .table-container {
+        overflow-x: auto;
+        max-width: 100vw;
+    }
+    .filter-panel {
+        max-width: 100%;
+    }
+}
+
+/* Video thumbnail overlay */
+.file-card-video-thumb {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+.file-card-video-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+.video-play-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 2.5rem;
+    color: rgba(255, 255, 255, 0.9);
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    pointer-events: none;
+}
+
+/* Compact grid view */
+.files-grid.compact {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 0.75rem;
+}
+.files-grid.compact .file-card-image,
+.files-grid.compact .file-card-icon,
+.files-grid.compact .file-card-video-thumb,
+.files-grid.compact .file-card-pdf-thumb {
+    height: 100px;
+}
+.files-grid.compact .file-card-icon {
+    font-size: 2rem;
+}
+.files-grid.compact .file-card-info {
+    padding: 0.5rem 0.6rem;
+}
+.files-grid.compact .file-card-name {
+    font-size: 0.72rem;
+}
+.files-grid.compact .file-card-meta {
+    font-size: 0.65rem;
+}
+.files-grid.compact .file-action-btn {
+    width: 24px;
+    height: 24px;
+    font-size: 0.7rem;
+}
+.files-grid.compact .file-card-actions {
+    top: 4px;
+    right: 4px;
+    gap: 3px;
+}
+.files-grid.compact .video-play-overlay {
+    font-size: 1.5rem;
+}
+.files-grid.compact .pdf-badge {
+    font-size: 0.55rem;
+    padding: 1px 5px;
+    bottom: 4px;
+    right: 4px;
+}
+@media (max-width: 480px) {
+    .files-grid.compact {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.5rem;
+    }
+    .files-grid.compact .file-card-image,
+    .files-grid.compact .file-card-icon,
+    .files-grid.compact .file-card-video-thumb,
+    .files-grid.compact .file-card-pdf-thumb {
+        height: 80px;
+    }
+}

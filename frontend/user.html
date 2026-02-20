@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ShareAzure - Mon espace de stockage</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="css/user.css?v=20260218i">
+    <link rel="stylesheet" href="css/user.css?v=20260219e">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -25,9 +25,6 @@
                 <h1 class="header-title app-title">Mon espace de stockage</h1>
             </div>
             <div class="header-right">
-                <button class="btn-icon" id="teamFilesBtn" title="Fichiers d'equipe" style="display: none;">
-                    <i class="fas fa-users"></i>
-                </button>
                 <button class="btn-icon" id="shareLinksBtn" title="Mes liens de partage">
                     <i class="fas fa-link"></i>
                 </button>
@@ -47,6 +44,27 @@
                         </button>
                     </div>
                 </div>
+                <button class="btn-icon" id="finopsBtn" title="Mes coûts" onclick="showFinopsSection()">
+                    <i class="fas fa-chart-line"></i>
+                </button>
+                <button class="btn-icon" id="trashBtn" title="Corbeille" onclick="showTrashModal()">
+                    <i class="fas fa-trash-alt"></i>
+                </button>
+                <button class="btn-icon" id="createFolderBtn" title="Créer un dossier">
+                    <i class="fas fa-folder-plus"></i>
+                </button>
+                <button class="btn-icon" id="uploadBtn" title="Uploader un fichier">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                </button>
+                <button class="btn-icon" id="teamMembersBtn" title="Membres de l'équipe" style="display:none;" onclick="showTeamMembersModal()">
+                    <i class="fas fa-users"></i>
+                </button>
+                <button class="btn-icon" id="teamSettingsBtn" title="Paramètres équipe" style="display:none;" onclick="showTeamSettingsModal()">
+                    <i class="fas fa-cog"></i>
+                </button>
+                <button class="btn-icon" id="refreshBtn" title="Actualiser">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
                 <div class="notif-wrapper" style="position:relative;display:inline-block;">
                     <button class="btn-icon" id="notifBtn" title="Notifications" onclick="toggleNotifPanel()">
                         <i class="fas fa-bell"></i>
@@ -60,24 +78,22 @@
                         <div class="notif-list" id="notifList"></div>
                     </div>
                 </div>
-                <button class="btn-icon" id="finopsBtn" title="Mes coûts" onclick="showFinopsSection()">
-                    <i class="fas fa-chart-line"></i>
-                </button>
-                <button class="btn-icon" id="trashBtn" title="Corbeille" onclick="showTrashModal()">
-                    <i class="fas fa-trash-alt"></i>
-                </button>
-                <button class="btn-icon" id="createFolderBtn" title="Créer un dossier">
-                    <i class="fas fa-folder-plus"></i>
-                </button>
-                <button class="btn-icon" id="uploadBtn" title="Uploader un fichier">
-                    <i class="fas fa-cloud-upload-alt"></i>
-                </button>
-                <button class="btn-icon" id="refreshBtn" title="Actualiser">
-                    <i class="fas fa-sync-alt"></i>
-                </button>
-                <div class="user-menu">
-                    <span class="user-name" id="userName">Utilisateur</span>
-                    <button class="btn-icon" id="logoutBtn" title="Déconnexion">
+                <div class="user-menu" style="position:relative;">
+                    <span class="user-name" id="userName" style="cursor:pointer;" onclick="document.getElementById('userMenuDropdown').style.display=document.getElementById('userMenuDropdown').style.display==='none'?'block':'none';">Utilisateur ▾</span>
+                    <div id="userMenuDropdown" style="display:none;position:absolute;top:calc(100% + 6px);right:0;background:#fff;border:1px solid #e5e9f0;border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,0.18);min-width:230px;z-index:200;overflow:hidden;">
+                        <div style="padding:14px 16px;border-bottom:1px solid #f0f2f5;background:#f8fafc;">
+                            <div style="font-weight:600;color:#0A2540;font-size:0.9rem;" id="dropdownUserName"></div>
+                            <div style="font-size:0.75rem;color:#5F6B7A;margin-top:2px;" id="dropdownUserRole"></div>
+                        </div>
+                        <button onclick="showChangePasswordModal();document.getElementById('userMenuDropdown').style.display='none';" style="display:flex;align-items:center;gap:10px;width:100%;padding:12px 16px;border:none;background:none;cursor:pointer;font-size:0.85rem;color:#1A1A2E;transition:background 0.15s;" onmouseover="this.style.background='#f5f7fa'" onmouseout="this.style.background='none'">
+                            <i class="fas fa-key" style="color:#1a73e8;width:18px;text-align:center;"></i> Changer le mot de passe
+                        </button>
+                        <div style="height:1px;background:#f0f2f5;margin:0 12px;"></div>
+                        <button onclick="document.getElementById('logoutBtn').click();document.getElementById('userMenuDropdown').style.display='none';" style="display:flex;align-items:center;gap:10px;width:100%;padding:12px 16px;border:none;background:none;cursor:pointer;font-size:0.85rem;color:#DC2626;transition:background 0.15s;" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background='none'">
+                            <i class="fas fa-sign-out-alt" style="width:18px;text-align:center;"></i> Se déconnecter
+                        </button>
+                    </div>
+                    <button class="btn-icon" id="logoutBtn" title="Déconnexion" style="display:none;">
                         <i class="fas fa-sign-out-alt"></i>
                     </button>
                 </div>
@@ -87,10 +103,39 @@
 
     <!-- Main Content -->
     <main class="user-main">
+        <!-- Context Tabs (Mes fichiers / Équipes) -->
+                <div class="context-tabs" id="contextTabs" style="display:none;">
+            <div class="context-tabs-group">
+                
+                <button class="context-tab active" data-context="my" id="ctxTabMy">
+                    <i class="fas fa-folder"></i> Mes fichiers
+                </button>
+            </div>
+            <div class="context-separator"></div>
+            <div class="context-tabs-group" id="teamTabsGroup" style="display:none;">
+                <span class="context-label">Mes équipes</span>
+                <div class="context-tabs-list" id="teamTabsList"></div>
+                <button class="context-tab" id="createTeamBtn" title="Créer une équipe" onclick="showCreateTeamModal()" style="min-width:36px;padding:6px 10px;font-size:1.1rem;color:#639E30;">
+                    <i class="fas fa-plus"></i>
+                </button>
+            </div>
+            <div class="team-actions" id="teamActions" style="display:none;">
+                <button class="btn-team-action" id="teamMembersBtn2" title="Gérer les membres" onclick="showTeamMembersModal()">
+                    <i class="fas fa-users-gear"></i> Membres
+                </button>
+                <button class="btn-team-action" id="teamSettingsBtn" title="Paramètres de l'équipe" style="display:none;">
+                    <i class="fas fa-cog"></i>
+                </button>
+            </div>
+        </div>
+
         <!-- Toolbar -->
         <div class="toolbar">
             <div class="toolbar-left">
                 <button class="btn-view active" data-view="grid" title="Vue grille">
+                    <i class="fas fa-th-large"></i>
+                </button>
+                <button class="btn-view" data-view="grid-compact" title="Vue grille compacte">
                     <i class="fas fa-th"></i>
                 </button>
                 <button class="btn-view" data-view="list" title="Vue liste">
@@ -151,10 +196,15 @@
             <div class="share-links-section" id="shareLinksSection" style="display: none;">
                 <div class="section-header">
                     <h2>Mes liens de partage</h2>
-                    <button class="btn btn-secondary" id="closeShareLinksBtn">
-                        <i class="fas fa-times"></i>
-                        Fermer
-                    </button>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <button class="btn btn-danger" id="deleteExpiredLinksBtn" style="display:none;font-size:0.85rem;padding:8px 14px;background:#DC2626;color:#fff;border:none;border-radius:8px;cursor:pointer;" title="Supprimer tous les liens expirés">
+                            <i class="fas fa-trash"></i> Supprimer les expirés
+                        </button>
+                        <button class="btn btn-secondary" id="closeShareLinksBtn">
+                            <i class="fas fa-times"></i>
+                            Fermer
+                        </button>
+                    </div>
                 </div>
                 <div class="share-links-container" id="shareLinksContainer">
                     <div class="loading-state">
@@ -165,22 +215,6 @@
             </div>
 
             <!-- Team Files Section (read-only for team members) -->
-            <div class="team-files-section" id="teamFilesSection" style="display: none;">
-                <div class="section-header">
-                    <h2 id="teamFilesSectionTitle">Fichiers d'equipe</h2>
-                    <button class="btn btn-secondary" id="closeTeamFilesBtn">
-                        <i class="fas fa-times"></i>
-                        Fermer
-                    </button>
-                </div>
-                <div class="team-files-container" id="teamFilesContainer">
-                    <div class="loading-state">
-                        <div class="spinner"></div>
-                        <p>Chargement des fichiers d'equipe...</p>
-                    </div>
-                </div>
-            </div>
-
             <!-- Discover Section -->
             <div class="discover-section" id="discoverSection" style="display: none;">
                 <div class="section-header">
@@ -677,7 +711,57 @@
         </div>
     </div>
 
-    <script src="js/user.js?v=20260218i"></script>
+    <!-- Team Members Modal -->
+    <div class="modal-overlay" id="teamMembersModal" style="display:none;">
+        <div class="modal-content" style="max-width:650px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-users"></i> Membres de l'équipe</h3>
+                <button class="btn-close" onclick="document.getElementById('teamMembersModal').style.display='none'"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div id="teamMembersAddSection" style="display:none;margin-bottom:16px;">
+                    <div style="display:flex;gap:8px;">
+                        <input type="text" id="teamMemberUsername" class="form-input" placeholder="Nom d'utilisateur" style="flex:1;">
+                        <select id="teamMemberRole" class="form-select" style="width:auto;">
+                            <option value="member">Membre</option>
+                            <option value="viewer">Lecteur</option>
+                        </select>
+                        <button class="btn btn-primary" onclick="addTeamMember()"><i class="fas fa-plus"></i></button>
+                    </div>
+                </div>
+                <div id="teamMembersList" style="max-height:400px;overflow-y:auto;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Team Settings Modal -->
+    <div class="modal-overlay" id="teamSettingsModal" style="display:none;">
+        <div class="modal-content" style="max-width:500px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-cog"></i> Paramètres de l'équipe</h3>
+                <button class="btn-close" onclick="document.getElementById('teamSettingsModal').style.display='none'"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Nom affiché</label>
+                    <input type="text" id="teamSettingsName" class="form-input" placeholder="Nom de l'équipe">
+                </div>
+                <div class="form-group">
+                    <label>Logo (SVG uniquement)</label>
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <img id="teamSettingsLogoPreview" src="" style="height:48px;display:none;border:1px solid #eee;border-radius:8px;padding:4px;">
+                        <button class="btn btn-secondary" onclick="uploadTeamLogo()"><i class="fas fa-upload"></i> Changer le logo</button>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="document.getElementById('teamSettingsModal').style.display='none'">Annuler</button>
+                    <button class="btn btn-primary" onclick="saveTeamSettings()"><i class="fas fa-save"></i> Enregistrer</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/user.js?v=20260220a"></script>
     <!-- Modal Corbeille -->
     <div class="modal-overlay" id="trashModal" style="display: none;">
         <div class="modal-content" style="max-width: 750px;">

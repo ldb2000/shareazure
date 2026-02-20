@@ -845,3 +845,49 @@ window.changeTeamLogoFromSidebar = () => {
 
 // Hook into team loading
 const _origLoadTeamDashboard = typeof loadTeamDashboard === 'function' ? loadTeamDashboard : null;
+
+// === Changement de mot de passe ===
+function showChangePasswordModal() {
+    const old = document.getElementById('changePasswordModal');
+    if (old) old.remove();
+    const modal = document.createElement('div');
+    modal.id = 'changePasswordModal';
+    modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10000;';
+    modal.innerHTML = `
+        <div style="background:#fff;border-radius:12px;padding:32px;width:400px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.2);">
+            <h3 style="margin:0 0 24px;color:#333;"><i class="fas fa-key" style="color:#003C61;margin-right:8px;"></i>Changer le mot de passe</h3>
+            <div style="margin-bottom:16px;"><label style="display:block;font-size:0.85rem;color:#666;margin-bottom:4px;">Mot de passe actuel</label><input type="password" id="cpCurrentPwd" style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box;" autocomplete="current-password"></div>
+            <div style="margin-bottom:16px;"><label style="display:block;font-size:0.85rem;color:#666;margin-bottom:4px;">Nouveau mot de passe</label><input type="password" id="cpNewPwd" style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box;" autocomplete="new-password"></div>
+            <div style="margin-bottom:24px;"><label style="display:block;font-size:0.85rem;color:#666;margin-bottom:4px;">Confirmer</label><input type="password" id="cpConfirmPwd" style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box;" autocomplete="new-password"></div>
+            <div id="cpError" style="display:none;color:#d32f2f;font-size:0.85rem;margin-bottom:16px;padding:8px 12px;background:#ffeaea;border-radius:6px;"></div>
+            <div id="cpSuccess" style="display:none;color:#2e7d32;font-size:0.85rem;margin-bottom:16px;padding:8px 12px;background:#e8f5e9;border-radius:6px;"></div>
+            <div style="display:flex;gap:12px;justify-content:flex-end;">
+                <button onclick="document.getElementById('changePasswordModal').remove();" style="padding:10px 20px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer;">Annuler</button>
+                <button onclick="submitPasswordChange();" id="cpSubmitBtn" style="padding:10px 20px;border:none;border-radius:8px;background:#003C61;color:#fff;cursor:pointer;font-weight:600;">Modifier</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+    document.getElementById('cpCurrentPwd').focus();
+}
+async function submitPasswordChange() {
+    const current = document.getElementById('cpCurrentPwd').value;
+    const newPwd = document.getElementById('cpNewPwd').value;
+    const confirm = document.getElementById('cpConfirmPwd').value;
+    const errDiv = document.getElementById('cpError');
+    const successDiv = document.getElementById('cpSuccess');
+    const btn = document.getElementById('cpSubmitBtn');
+    errDiv.style.display = 'none'; successDiv.style.display = 'none';
+    if (!current) { errDiv.textContent = 'Mot de passe actuel requis'; errDiv.style.display = 'block'; return; }
+    if (!newPwd || newPwd.length < 8) { errDiv.textContent = 'Minimum 8 caractères'; errDiv.style.display = 'block'; return; }
+    if (newPwd !== confirm) { errDiv.textContent = 'Les mots de passe ne correspondent pas'; errDiv.style.display = 'block'; return; }
+    btn.disabled = true; btn.textContent = 'Modification...';
+    try {
+        const token = localStorage.getItem('authToken') || localStorage.getItem('userToken');
+        const resp = await fetch(window.location.origin + '/api/user/password', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ currentPassword: current, newPassword: newPwd }) });
+        const data = await resp.json();
+        if (data.success) { successDiv.textContent = '✅ Mot de passe modifié !'; successDiv.style.display = 'block'; btn.textContent = '✓ Modifié'; setTimeout(() => document.getElementById('changePasswordModal')?.remove(), 2000); }
+        else { errDiv.textContent = data.error; errDiv.style.display = 'block'; btn.disabled = false; btn.textContent = 'Modifier'; }
+    } catch (e) { errDiv.textContent = 'Erreur serveur'; errDiv.style.display = 'block'; btn.disabled = false; btn.textContent = 'Modifier'; }
+}
+document.addEventListener('click', (e) => { const d = document.getElementById('teamUserDropdown'); const n = document.getElementById('currentUserName'); if (d && !d.contains(e.target) && e.target !== n) d.style.display = 'none'; });

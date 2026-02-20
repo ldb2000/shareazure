@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <!-- Background -->
+  <rect width="120" height="120" rx="12" fill="#E8F4FD"/>
+  <!-- Generic file -->
+  <path d="M38 24 L72 24 L82 34 L82 76 L38 76 Z" fill="#90CAF9" stroke="#5C9BD6" stroke-width="2"/>
+  <path d="M72 24 L72 34 L82 34 Z" fill="#B3E5FC" stroke="#5C9BD6" stroke-width="1.5"/>
+  <!-- File lines -->
+  <rect x="46" y="42" width="28" height="3" rx="1.5" fill="#5C9BD6" opacity="0.4"/>
+  <rect x="46" y="50" width="24" height="3" rx="1.5" fill="#5C9BD6" opacity="0.3"/>
+  <rect x="46" y="58" width="20" height="3" rx="1.5" fill="#5C9BD6" opacity="0.25"/>
+  <!-- Glacier / ice -->
+  <path d="M20 95 L35 78 L45 88 L55 72 L65 85 L75 75 L85 82 L100 95 Z" fill="#B3E5FC" stroke="#81D4FA" stroke-width="1.5"/>
+  <path d="M30 95 L40 82 L50 90 L60 76 L70 86 L80 78 L90 95 Z" fill="#E1F5FE" opacity="0.7"/>
+  <!-- Snowflake -->
+  <circle cx="94" cy="22" r="2.5" fill="#81D4FA"/>
+  <line x1="94" y1="17" x2="94" y2="27" stroke="#81D4FA" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="89" y1="22" x2="99" y2="22" stroke="#81D4FA" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="90.5" y1="18.5" x2="97.5" y2="25.5" stroke="#81D4FA" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="97.5" y1="18.5" x2="90.5" y2="25.5" stroke="#81D4FA" stroke-width="1.5" stroke-linecap="round"/>
+  <!-- Label -->
+  <text x="60" y="112" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" font-weight="bold" fill="#5C9BD6">ARCHIVÉ</text>
+</svg>

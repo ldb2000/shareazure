@@ -1,4 +1,5 @@
-require('dotenv').config();
+// Charger .env si présent (optionnel — en prod les vars viennent de systemd)
+try { require('dotenv').config({ path: require('path').join(__dirname, '.env') }); } catch(e) {}
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -16,6 +17,15 @@ const { migrateHardcodedUsers } = require('./migrateUsers');
 const emailService = require('./emailService');
 const { watermarkPDF, watermarkImage, canWatermark } = require('./watermarkService');
 const archiver = require('archiver');
+const jwt = require('jsonwebtoken');
+
+// JWT Secret — généré une fois et persisté, ou via variable d'env
+const JWT_SECRET = process.env.JWT_SECRET || (() => {
+  const secret = crypto.randomBytes(64).toString('hex');
+  console.log('⚠️  JWT_SECRET généré automatiquement (ajoutez JWT_SECRET dans .env pour persister)');
+  return secret;
+})();
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '8h';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -350,7 +360,12 @@ const logOperation = (operation, details = {}) => {
 function authenticateUser(req, res, next) {
   try {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    let token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+
+    // Fallback: token en query string (pour les <img src>, <video poster>, etc.)
+    if (!token && req.query.token) {
+      token = req.query.token;
+    }
 
     if (!token) {
       return res.status(401).json({
@@ -359,39 +374,20 @@ function authenticateUser(req, res, next) {
       });
     }
 
-    // Décoder le token
+    // Essayer JWT d'abord
     try {
-      const decoded = Buffer.from(token, 'base64').toString('utf-8');
-      const parts = decoded.split(':');
-
-      if (parts[0] !== 'user' || parts.length < 3) {
-        return res.status(401).json({
-          success: false,
-          error: 'Token invalide'
-        });
+      const decoded = jwt.verify(token, JWT_SECRET);
+      const user = usersDb.getById(decoded.userId);
+      if (!user || user.username !== decoded.username) {
+        return res.status(401).json({ success: false, error: 'Utilisateur invalide ou inactif' });
       }
-
-      const userId = parseInt(parts[1]);
-      const username = parts[2];
-
-      // Récupérer l'utilisateur depuis la DB
-      const user = usersDb.getById(userId);
-
-      if (!user || user.username !== username) {
-        return res.status(401).json({
-          success: false,
-          error: 'Utilisateur invalide ou inactif'
-        });
-      }
-
-      // Charger l'utilisateur dans req.user
       req.user = user;
-      next();
-
-    } catch (decodeError) {
+      return next();
+    } catch (jwtError) {
+      // Token n'est pas un JWT valide — rejeter
       return res.status(401).json({
         success: false,
-        error: 'Token invalide'
+        error: 'Token invalide ou expiré'
       });
     }
 
@@ -421,49 +417,26 @@ function authenticateGuest(req, res, next) {
       });
     }
 
-    // Décoder le token
+    // Vérifier le JWT guest
     try {
-      const decoded = Buffer.from(token, 'base64').toString('utf-8');
-      const parts = decoded.split(':');
-
-      if (parts[0] !== 'guest' || parts.length < 2) {
-        return res.status(401).json({
-          success: false,
-          error: 'Token invité invalide'
-        });
+      const decoded = jwt.verify(token, JWT_SECRET);
+      if (!decoded.guestId || decoded.type !== 'guest') {
+        return res.status(401).json({ success: false, error: 'Token invité invalide' });
       }
 
-      const guestId = parts[1];
-
-      // Récupérer l'invité depuis la DB
-      const guest = guestAccountsDb.getByGuestId(guestId);
-
+      const guest = guestAccountsDb.getByGuestId(decoded.guestId);
       if (!guest) {
-        return res.status(401).json({
-          success: false,
-          error: 'Compte invité introuvable'
-        });
+        return res.status(401).json({ success: false, error: 'Compte invité introuvable' });
       }
-
-      // Vérifier si le compte est actif
       if (!guest.is_active) {
-        return res.status(401).json({
-          success: false,
-          error: 'Compte invité désactivé'
-        });
+        return res.status(401).json({ success: false, error: 'Compte invité désactivé' });
       }
-
-      // Vérifier si le compte n'est pas expiré
       const now = new Date();
       const expiresAt = new Date(guest.account_expires_at);
       if (expiresAt <= now) {
-        return res.status(401).json({
-          success: false,
-          error: 'Compte invité expiré'
-        });
+        return res.status(401).json({ success: false, error: 'Compte invité expiré' });
       }
 
-      // Charger l'invité dans req.guest
       req.guest = guest;
       next();
 
@@ -500,18 +473,14 @@ function authenticateUserOrGuest(req, res, next) {
   }
 
   try {
-    const decoded = Buffer.from(token, 'base64').toString('utf-8');
-    const tokenType = decoded.split(':')[0];
-
-    if (tokenType === 'user') {
-      return authenticateUser(req, res, next);
-    } else if (tokenType === 'guest') {
+    // Décoder le JWT pour déterminer le type
+    const decoded = jwt.verify(token, JWT_SECRET);
+    if (decoded.guestId && decoded.type === 'guest') {
       return authenticateGuest(req, res, next);
+    } else if (decoded.userId) {
+      return authenticateUser(req, res, next);
     } else {
-      return res.status(401).json({
-        success: false,
-        error: 'Type de token non reconnu'
-      });
+      return res.status(401).json({ success: false, error: 'Type de token non reconnu' });
     }
   } catch (error) {
     return res.status(401).json({
@@ -590,7 +559,7 @@ app.get('/api/logo-april.svg', (req, res) => {
 });
 
 // Route pour créer le conteneur s'il n'existe pas
-app.post('/api/container/init', async (req, res) => {
+app.post('/api/container/init', authenticateUser, requireAdmin, async (req, res) => {
   try {
     const containerClient = blobServiceClient.getContainerClient(containerName);
     const exists = await containerClient.exists();
@@ -713,6 +682,13 @@ app.post('/api/upload', authenticateUserOrGuest, upload.single('file'), validate
     }
 
     const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+
+    // Fix mimetype if octet-stream (fallback on file extension)
+    const mimeMap = { '.mp4':'video/mp4', '.mov':'video/quicktime', '.avi':'video/x-msvideo', '.mkv':'video/x-matroska', '.webm':'video/webm', '.wmv':'video/x-ms-wmv', '.mp3':'audio/mpeg', '.wav':'audio/wav', '.ogg':'audio/ogg', '.m4a':'audio/mp4', '.flac':'audio/flac', '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.png':'image/png', '.gif':'image/gif', '.webp':'image/webp', '.svg':'image/svg+xml', '.pdf':'application/pdf', '.json':'application/json', '.txt':'text/plain', '.csv':'text/csv', '.html':'text/html', '.xml':'application/xml', '.md':'text/markdown', '.js':'text/javascript', '.css':'text/css', '.sh':'text/x-shellscript', '.py':'text/x-python', '.sql':'text/x-sql', '.log':'text/plain', '.yml':'text/yaml', '.yaml':'text/yaml', '.env':'text/plain', '.conf':'text/plain', '.cfg':'text/plain', '.ini':'text/plain', '.zip':'application/zip' };
+    if (req.file.mimetype === 'application/octet-stream') {
+      const ext = path.extname(req.file.originalname).toLowerCase();
+      if (mimeMap[ext]) req.file.mimetype = mimeMap[ext];
+    }
 
     // Déterminer le propriétaire
     const uploadedByUserId = req.user ? req.user.id : null;
@@ -978,8 +954,8 @@ app.get('/api/files', authenticateUserOrGuest, async (req, res) => {
         // April_user voit ses fichiers + fichiers de ses invités
         fileOwnershipRecords = fileOwnershipDb.getAccessibleByAprilUser(req.user.id);
       } else {
-        // User standard voit uniquement ses fichiers
-        fileOwnershipRecords = fileOwnershipDb.getByUser(req.user.id);
+        // User standard voit ses fichiers + fichiers de ses équipes + fichiers de ses invités
+        fileOwnershipRecords = fileOwnershipDb.getAccessibleByUser(req.user.id);
       }
     }
 
@@ -1039,23 +1015,10 @@ app.get('/api/files', authenticateUserOrGuest, async (req, res) => {
 });
 
 // Route pour télécharger un fichier
-app.get('/api/download/:blobName', async (req, res) => {
+app.get('/api/download/:blobName(*)', authenticateUser, async (req, res) => {
   try {
     const { blobName } = req.params;
-    // Vérification optionnelle du token (pour les utilisateurs connectés)
-    const token = req.query.token || (req.headers['authorization'] && req.headers['authorization'].split(' ')[1]);
-    
-    if (token) {
-      // Vérifier le token si fourni
-      try {
-        const decoded = Buffer.from(token, 'base64').toString('utf-8');
-        if (!decoded.startsWith('user:')) {
-          return res.status(401).json({ error: 'Token invalide' });
-        }
-      } catch (e) {
-        // Token invalide, mais on continue pour compatibilité
-      }
-    }
+    // Auth vérifiée par middleware authenticateUser
 
     const containerClient = blobServiceClient.getContainerClient(containerName);
     const blockBlobClient = containerClient.getBlockBlobClient(blobName);
@@ -1089,31 +1052,150 @@ app.get('/api/download/:blobName', async (req, res) => {
   }
 });
 
+// ============================================================================
+// HELPER: Pré-générer thumbnail avant archivage
+// ============================================================================
+async function preGenerateThumbnail(blobName, fileRecord, blobClient) {
+  try {
+    const crypto = require('crypto');
+    const { execSync } = require('child_process');
+    const fs = require('fs');
+    const pathModule = require('path');
+    const contentType = (fileRecord && fileRecord.content_type) || '';
+    if (!contentType.startsWith('video/') && !contentType.startsWith('image/') && contentType !== 'application/pdf') return;
+    
+    const hash = crypto.createHash('md5').update(blobName).digest('hex');
+    const thumbDir = pathModule.join(__dirname, 'thumbnails');
+    if (!fs.existsSync(thumbDir)) fs.mkdirSync(thumbDir, { recursive: true });
+    if (fs.existsSync(pathModule.join(thumbDir, `${hash}.jpg`))) return; // déjà en cache
+    
+    const tmpFile = `/tmp/thumb_archive_${hash}`;
+    const downloadResponse = await blobClient.download();
+    const writeStream = fs.createWriteStream(tmpFile);
+    await new Promise((resolve, reject) => {
+      downloadResponse.readableStreamBody.pipe(writeStream);
+      writeStream.on('finish', resolve);
+      writeStream.on('error', reject);
+    });
+    
+    for (const size of [320, 160]) {
+      const suffix = size === 160 ? '_sm' : '';
+      const thumbPath = pathModule.join(thumbDir, `${hash}${suffix}.jpg`);
+      if (fs.existsSync(thumbPath)) continue;
+      try {
+        if (contentType.startsWith('video/')) {
+          try { execSync(`ffmpeg -y -i "${tmpFile}" -ss 00:00:01 -vframes 1 -vf "scale=${size}:-1" -q:v 5 "${thumbPath}" 2>/dev/null`, { timeout: 15000 }); }
+          catch { execSync(`ffmpeg -y -i "${tmpFile}" -vframes 1 -vf "scale=${size}:-1" -q:v 5 "${thumbPath}" 2>/dev/null`, { timeout: 15000 }); }
+        } else if (contentType.startsWith('image/')) {
+          execSync(`ffmpeg -y -i "${tmpFile}" -vf "scale=${size}:-1" -q:v 5 "${thumbPath}" 2>/dev/null`, { timeout: 15000 });
+        } else if (contentType === 'application/pdf') {
+          const tmpPpm = `/tmp/thumb_archive_${hash}_pdf`;
+          execSync(`pdftoppm -jpeg -f 1 -l 1 -r 150 -singlefile "${tmpFile}" "${tmpPpm}"`, { timeout: 15000 });
+          const ppmOut = `${tmpPpm}.jpg`;
+          if (fs.existsSync(ppmOut)) {
+            execSync(`ffmpeg -y -i "${ppmOut}" -vf "scale=${size}:-1" -q:v 4 "${thumbPath}" 2>/dev/null`, { timeout: 10000 });
+            try { fs.unlinkSync(ppmOut); } catch {}
+          }
+        }
+      } catch (e) { console.error(`Thumbnail pre-gen (${size}) error:`, e.message); }
+    }
+    try { fs.unlinkSync(tmpFile); } catch {}
+    console.log(`✅ Thumbnails pré-générées pour archivage: ${blobName}`);
+  } catch (e) { console.error('Erreur pré-génération thumbnail:', e.message); }
+}
+
 // Route pour prévisualiser un fichier (inline, pas en téléchargement)
-app.get('/api/preview/:blobName(*)', async (req, res) => {
+// Route GET /api/thumbnail/:blobName(*) - Générer une thumbnail pour les vidéos
+app.get('/api/thumbnail/:blobName(*)', authenticateUser, async (req, res) => {
   try {
     const blobName = req.params.blobName || req.params[0];
-    // Vérification optionnelle du token (pour les utilisateurs connectés)
-    let token = req.query.token || (req.headers['authorization'] && req.headers['authorization'].split(' ')[1]);
-    
-    // Décoder le token de l'URL si nécessaire
-    if (token) {
-      try {
-        token = decodeURIComponent(token);
-      } catch (e) {
-        // Le token n'est pas encodé, on continue
-      }
-      
-      // Vérifier le token si fourni
-      try {
-        const decoded = Buffer.from(token, 'base64').toString('utf-8');
-        if (!decoded.startsWith('user:')) {
-          return res.status(401).json({ error: 'Token invalide' });
-        }
-      } catch (e) {
-        // Token invalide, mais on continue pour compatibilité
-      }
+    const crypto = require('crypto');
+    const { execSync } = require('child_process');
+    const fs = require('fs');
+    const path = require('path');
+
+    const size = req.query.size === 'sm' ? 160 : 320;
+    const hash = crypto.createHash('md5').update(blobName).digest('hex');
+    const thumbDir = path.join(__dirname, 'thumbnails');
+    const suffix = size === 160 ? '_sm' : '';
+    const thumbPath = path.join(thumbDir, `${hash}${suffix}.jpg`);
+
+    // Cache hit
+    if (fs.existsSync(thumbPath)) {
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      return fs.createReadStream(thumbPath).pipe(res);
     }
+
+    // Download file from Azure
+    const containerClient = blobServiceClient.getContainerClient(containerName);
+    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+    const properties = await blockBlobClient.getProperties();
+    const contentType = properties.contentType || '';
+    
+    // Check if blob is archived (cannot download)
+    const tier = (properties.accessTier || '').toLowerCase();
+    if (tier === 'archive') {
+      return res.status(404).json({ error: 'Fichier archivé' });
+    }
+    
+    const tmpFile = `/tmp/thumb_${hash}`;
+    const downloadResponse = await blockBlobClient.download();
+    const writeStream = fs.createWriteStream(tmpFile);
+    await new Promise((resolve, reject) => {
+      downloadResponse.readableStreamBody.pipe(writeStream);
+      writeStream.on('finish', resolve);
+      writeStream.on('error', reject);
+    });
+
+    let generated = false;
+
+    if (contentType.startsWith('video/')) {
+      // Video: extract frame at 1s (or first frame)
+      try {
+        execSync(`ffmpeg -y -i "${tmpFile}" -ss 00:00:01 -vframes 1 -vf "scale=${size}:-1" -q:v 5 "${thumbPath}" 2>/dev/null`, { timeout: 15000 });
+        generated = true;
+      } catch {
+        try {
+          execSync(`ffmpeg -y -i "${tmpFile}" -vframes 1 -vf "scale=${size}:-1" -q:v 5 "${thumbPath}" 2>/dev/null`, { timeout: 15000 });
+          generated = true;
+        } catch (e) { console.error('ffmpeg video thumb error:', e.message); }
+      }
+    } else if (contentType === 'application/pdf') {
+      // PDF: render first page with pdftoppm
+      try {
+        const tmpPpm = `/tmp/thumb_${hash}_pdf`;
+        execSync(`pdftoppm -jpeg -f 1 -l 1 -r 150 -singlefile "${tmpFile}" "${tmpPpm}"`, { timeout: 15000 });
+        const ppmOut = `${tmpPpm}.jpg`;
+        if (fs.existsSync(ppmOut)) {
+          // Resize to 320px width
+          execSync(`ffmpeg -y -i "${ppmOut}" -vf "scale=${size}:-1" -q:v 4 "${thumbPath}" 2>/dev/null`, { timeout: 10000 });
+          fs.unlinkSync(ppmOut);
+          generated = true;
+        }
+      } catch (e) { console.error('PDF thumb error:', e.message); }
+    }
+
+    // Cleanup temp
+    try { fs.unlinkSync(tmpFile); } catch {}
+
+    if (generated && fs.existsSync(thumbPath)) {
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      return fs.createReadStream(thumbPath).pipe(res);
+    }
+
+    res.status(404).json({ error: 'Impossible de générer la thumbnail' });
+  } catch (error) {
+    console.error('Erreur thumbnail:', error.message);
+    res.status(500).json({ error: 'Erreur génération thumbnail' });
+  }
+});
+
+app.get('/api/preview/:blobName(*)', authenticateUser, async (req, res) => {
+  try {
+    const blobName = req.params.blobName || req.params[0];
+    // Auth vérifiée par middleware authenticateUser
 
     const containerClient = blobServiceClient.getContainerClient(containerName);
     const blockBlobClient = containerClient.getBlockBlobClient(blobName);
@@ -1121,15 +1203,83 @@ app.get('/api/preview/:blobName(*)', async (req, res) => {
     const downloadResponse = await blockBlobClient.download();
     const properties = await blockBlobClient.getProperties();
 
-    // Set Content-Type mais inline au lieu d'attachment
-    res.setHeader('Content-Type', properties.contentType || 'application/octet-stream');
+    const ct = properties.contentType || 'application/octet-stream';
+    res.setHeader('Content-Type', ct);
     res.setHeader('Content-Disposition', 'inline');
-    
-    // Headers CORS pour les previews
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET');
+    // Allow SVG rendering in <img> tags
+    if (ct === 'image/svg+xml') {
+      res.removeHeader('X-Content-Type-Options');
+      // For SVG sprite files (only <symbol> elements, no visible content),
+      // rewrite to show the first symbol
+      const chunks = [];
+      downloadResponse.readableStreamBody.on('data', c => chunks.push(c));
+      downloadResponse.readableStreamBody.on('end', () => {
+        let svgStr = Buffer.concat(chunks).toString('utf-8');
+        // Detect sprite SVGs: root <svg> contains <symbol> but no direct visible children
+        const hasSymbol = /<symbol[\s>]/i.test(svgStr);
+        const hasDirectContent = /<(rect|circle|path|g|image|text|polygon|polyline|ellipse|line|use)[\s>]/i.test(
+          svgStr.replace(/<symbol[\s\S]*?<\/symbol>/gi, '') // remove symbols first
+        );
+        if (hasSymbol && !hasDirectContent) {
+          // Extract first symbol's id and viewBox
+          const symMatch = svgStr.match(/<symbol[^>]*\bviewBox="([^"]*)"[^>]*\bid="([^"]*)"/i) 
+                        || svgStr.match(/<symbol[^>]*\bid="([^"]*)"[^>]*\bviewBox="([^"]*)"/i);
+          if (symMatch) {
+            const viewBox = symMatch[1].includes(' ') ? symMatch[1] : symMatch[2];
+            const id = symMatch[1].includes(' ') ? symMatch[2] : symMatch[1];
+            // Inject <use> and viewBox on root <svg>
+            svgStr = svgStr.replace(/<svg([^>]*)>/, `<svg$1 viewBox="${viewBox}" width="100%" height="100%">`);
+            svgStr = svgStr.replace(/<\/svg>\s*$/, `<use href="#${id}"/></svg>`);
+          }
+        }
+        res.setHeader('Content-Length', Buffer.byteLength(svgStr));
+        res.end(svgStr);
+      });
+      downloadResponse.readableStreamBody.on('error', (err) => {
+        console.error('SVG stream error:', err);
+        if (!res.headersSent) res.status(500).json({ error: err.message });
+      });
+      // Log and return early — stream handled above
+      logOperation('file_previewed', { blobName, contentType: ct });
+      return;
+    }
+    // Cache previews for 1 hour
+    res.setHeader('Cache-Control', 'private, max-age=3600');
     
-    downloadResponse.readableStreamBody.pipe(res);
+    // Transcode non-browser-compatible video formats (MOV, AVI, MKV, WMV) to MP4 on the fly
+    const nonBrowserVideoTypes = ['video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/x-ms-wmv', 'video/avi'];
+    const ext = (blobName.split('.').pop() || '').toLowerCase();
+    const nonBrowserExts = ['mov', 'avi', 'mkv', 'wmv', 'flv', 'webm'];
+    
+    if (nonBrowserVideoTypes.includes(ct) || (ct.startsWith('video/') && nonBrowserExts.includes(ext) && ct !== 'video/mp4' && ct !== 'video/webm')) {
+      // Override content-type to MP4
+      res.setHeader('Content-Type', 'video/mp4');
+      res.removeHeader('Content-Length');
+      
+      const { spawn } = require('child_process');
+      const ffmpeg = spawn('ffmpeg', [
+        '-i', 'pipe:0',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
+        '-c:a', 'aac', '-b:a', '128k',
+        '-movflags', 'frag_keyframe+empty_moov+faststart',
+        '-f', 'mp4',
+        'pipe:1'
+      ], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+      downloadResponse.readableStreamBody.pipe(ffmpeg.stdin);
+      ffmpeg.stdout.pipe(res);
+
+      ffmpeg.stderr.on('data', () => {}); // Suppress ffmpeg stderr
+      ffmpeg.on('error', (err) => {
+        console.error('FFmpeg transcode error:', err.message);
+        if (!res.headersSent) res.status(500).json({ error: 'Transcode failed' });
+      });
+      ffmpeg.stdin.on('error', () => {}); // Ignore broken pipe
+    } else {
+      downloadResponse.readableStreamBody.pipe(res);
+    }
 
     logOperation('file_previewed', { blobName, contentType: properties.contentType });
 
@@ -1225,33 +1375,13 @@ app.delete('/api/files/:blobName', authenticateUser, async (req, res) => {
   }
 });
 
-// Fonction helper pour extraire l'utilisateur du token
+// Fonction helper pour extraire l'utilisateur du token (utilise req.user du middleware)
 function extractUserFromToken(req) {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-  
-  if (!token) {
-    return null;
-  }
-
-  try {
-    const decoded = Buffer.from(token, 'base64').toString('utf-8');
-    const parts = decoded.split(':');
-    if (parts[0] !== 'user') {
-      return null;
-    }
-    const userId = parseInt(parts[1]);
-    const username = parts[2];
-    
-    const user = USERS.find(u => u.id === userId && u.username === username);
-    return user ? username : null;
-  } catch (e) {
-    return null;
-  }
+  return req.user ? req.user.username : null;
 }
 
 // Route pour générer un lien de partage temporaire (SAS) - Version avancée
-app.post('/api/share/generate', async (req, res) => {
+app.post('/api/share/generate', authenticateUser, async (req, res) => {
   try {
     const { blobName, expiresInMinutes = 60, permissions = 'r', password, recipientEmail, watermarkText } = req.body;
 
@@ -1458,7 +1588,7 @@ app.post('/api/share/generate', async (req, res) => {
 });
 
 // Route pour envoyer le lien de partage par email
-app.post('/api/share/send-email', async (req, res) => {
+app.post('/api/share/send-email', authenticateUser, async (req, res) => {
   try {
     const { linkId, recipientEmails, fileName, shareLink } = req.body;
     if (!linkId || !recipientEmails || !shareLink) {
@@ -1863,7 +1993,7 @@ app.get('/api/share/download/:linkId', async (req, res) => {
             </div>
             <h2>🔒 Fichier protégé</h2>
             <div class="file-info">
-              <div class="file-name">${link.original_name}</div>
+              <div class="file-name">${(link.original_name || link.blob_name || '').split('/').pop()}</div>
             </div>
             <form id="downloadForm" onsubmit="return false;">
               ${link.recipient_email ? `
@@ -2030,7 +2160,7 @@ app.get('/api/share/download/:linkId', async (req, res) => {
 });
 
 // Route pour obtenir les informations d'un lien de partage existant
-app.get('/api/share/info/:blobName', async (req, res) => {
+app.get('/api/share/info/:blobName', authenticateUser, async (req, res) => {
   try {
     const { blobName } = req.params;
     const containerClient = blobServiceClient.getContainerClient(containerName);
@@ -2062,7 +2192,7 @@ app.get('/api/share/info/:blobName', async (req, res) => {
 });
 
 // Route pour obtenir l'historique des liens de partage
-app.get('/api/share/history', async (req, res) => {
+app.get('/api/share/history', authenticateUser, async (req, res) => {
   try {
     const { blobName, limit = 100 } = req.query;
 
@@ -2100,7 +2230,7 @@ app.get('/api/share/history', async (req, res) => {
 });
 
 // Route pour obtenir les statistiques d'un lien
-app.get('/api/share/stats/:linkId', async (req, res) => {
+app.get('/api/share/stats/:linkId', authenticateUser, async (req, res) => {
   try {
     const { linkId } = req.params;
 
@@ -2142,7 +2272,7 @@ app.get('/api/share/stats/:linkId', async (req, res) => {
 });
 
 // Route pour désactiver un lien
-app.delete('/api/share/:linkId', async (req, res) => {
+app.delete('/api/share/:linkId', authenticateUser, async (req, res) => {
   try {
     const { linkId } = req.params;
 
@@ -2254,7 +2384,7 @@ app.post('/api/settings/auth/test', authenticateUser, requireRole('admin'), asyn
 // ============================================
 
 // GET /api/settings - Récupérer tous les paramètres
-app.get('/api/settings', async (req, res) => {
+app.get('/api/settings', authenticateUser, requireAdmin, async (req, res) => {
   try {
     const settings = settingsDb.getAll();
     res.json({
@@ -2271,7 +2401,7 @@ app.get('/api/settings', async (req, res) => {
 });
 
 // GET /api/settings/:key - Récupérer un paramètre spécifique
-app.get('/api/settings/:key', async (req, res) => {
+app.get('/api/settings/:key', authenticateUser, requireAdmin, async (req, res) => {
   try {
     const { key } = req.params;
     const value = settingsDb.get(key);
@@ -2298,7 +2428,7 @@ app.get('/api/settings/:key', async (req, res) => {
 });
 
 // PUT /api/settings - Mettre à jour les paramètres
-app.put('/api/settings', async (req, res) => {
+app.put('/api/settings', authenticateUser, requireAdmin, async (req, res) => {
   try {
     const settings = req.body;
     
@@ -2325,7 +2455,7 @@ app.put('/api/settings', async (req, res) => {
 });
 
 // POST /api/settings/reset - Réinitialiser les paramètres
-app.post('/api/settings/reset', async (req, res) => {
+app.post('/api/settings/reset', authenticateUser, requireAdmin, async (req, res) => {
   try {
     settingsDb.reset();
     
@@ -2864,7 +2994,7 @@ app.delete('/api/files/comments/:id', authenticateUser, (req, res) => {
 // ============================================
 
 // GET /api/admin/logs - Récupérer les logs d'activité
-app.get('/api/admin/logs', async (req, res) => {
+app.get('/api/admin/logs', authenticateUser, requireAdmin, async (req, res) => {
   try {
     const { level, category, operation, search, page = 1, limit = 50 } = req.query;
     const pageNum = Math.max(1, parseInt(page));
@@ -2887,7 +3017,7 @@ app.get('/api/admin/logs', async (req, res) => {
 });
 
 // DELETE /api/admin/logs - Effacer tous les logs d'activité
-app.delete('/api/admin/logs', async (req, res) => {
+app.delete('/api/admin/logs', authenticateUser, requireAdmin, async (req, res) => {
   try {
     activityLogsDb.clear();
     res.json({ success: true });
@@ -2902,7 +3032,7 @@ app.delete('/api/admin/logs', async (req, res) => {
 // ============================================
 
 // GET /api/admin/email-domains - Récupérer tous les domaines autorisés
-app.get('/api/admin/email-domains', async (req, res) => {
+app.get('/api/admin/email-domains', authenticateUser, requireAdmin, async (req, res) => {
   try {
     const domains = allowedEmailDomainsDb.getAll();
     res.json({
@@ -2982,7 +3112,7 @@ async function performDomainChecks(domain) {
 }
 
 // POST /api/admin/email-domains - Ajouter un domaine autorisé
-app.post('/api/admin/email-domains', async (req, res) => {
+app.post('/api/admin/email-domains', authenticateUser, requireAdmin, async (req, res) => {
   try {
     const { domain } = req.body;
     
@@ -3035,7 +3165,7 @@ app.post('/api/admin/email-domains', async (req, res) => {
 });
 
 // POST /api/admin/email-domains/bulk - Import en masse de domaines
-app.post('/api/admin/email-domains/bulk', async (req, res) => {
+app.post('/api/admin/email-domains/bulk', authenticateUser, requireAdmin, async (req, res) => {
   try {
     const { domains } = req.body;
     if (!Array.isArray(domains) || domains.length === 0) {
@@ -3075,7 +3205,7 @@ app.post('/api/admin/email-domains/bulk', async (req, res) => {
 });
 
 // POST /api/admin/email-domains/:id/recheck - Relancer les vérifications RDAP + DMARC
-app.post('/api/admin/email-domains/:id/recheck', async (req, res) => {
+app.post('/api/admin/email-domains/:id/recheck', authenticateUser, requireAdmin, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const domainRecord = allowedEmailDomainsDb.getById(id);
@@ -3091,7 +3221,7 @@ app.post('/api/admin/email-domains/:id/recheck', async (req, res) => {
 });
 
 // DELETE /api/admin/email-domains/:domain - Supprimer un domaine
-app.delete('/api/admin/email-domains/:domain', async (req, res) => {
+app.delete('/api/admin/email-domains/:domain', authenticateUser, requireAdmin, async (req, res) => {
   try {
     const { domain } = req.params;
     
@@ -3121,7 +3251,7 @@ app.delete('/api/admin/email-domains/:domain', async (req, res) => {
 });
 
 // PUT /api/admin/email-domains/:domain/activate - Activer un domaine
-app.put('/api/admin/email-domains/:domain/activate', async (req, res) => {
+app.put('/api/admin/email-domains/:domain/activate', authenticateUser, requireAdmin, async (req, res) => {
   try {
     const { domain } = req.params;
 
@@ -3151,7 +3281,7 @@ app.put('/api/admin/email-domains/:domain/activate', async (req, res) => {
 });
 
 // PUT /api/admin/email-domains/:domain/deactivate - Désactiver un domaine
-app.put('/api/admin/email-domains/:domain/deactivate', async (req, res) => {
+app.put('/api/admin/email-domains/:domain/deactivate', authenticateUser, requireAdmin, async (req, res) => {
   try {
     const { domain } = req.params;
 
@@ -3304,7 +3434,7 @@ app.post('/api/auth/login', async (req, res) => {
         ).catch(err => console.error('OTP email error:', err));
       }
       // Return partial auth (requires OTP)
-      const pendingToken = Buffer.from(`pending:${user.id}:${Date.now()}`).toString('base64');
+      const pendingToken = jwt.sign({ userId: user.id, type: 'pending_otp' }, JWT_SECRET, { expiresIn: '10m' });
       return res.json({
         success: true,
         requires2FA: true,
@@ -3315,7 +3445,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     usersDb.updateLastLogin(user.id);
 
-    const token = Buffer.from(`user:${user.id}:${user.username}:${Date.now()}`).toString('base64');
+    const token = jwt.sign({ userId: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
     // Enrichir avec les infos d'équipe
     const memberships = teamMembersDb.getByUser(user.id);
@@ -3332,7 +3462,7 @@ app.post('/api/auth/login', async (req, res) => {
     if (user.role === 'admin') {
       redirect = '/admin/';
     } else if (isTeamLeader) {
-      redirect = 'team.html';
+      redirect = 'user.html';
     } else {
       redirect = 'user.html';
     }
@@ -3369,13 +3499,16 @@ app.post('/api/auth/verify-otp', async (req, res) => {
     const { pendingToken, code } = req.body;
     if (!pendingToken || !code) return res.status(400).json({ success: false, error: 'Token et code requis' });
 
-    const decoded = Buffer.from(pendingToken, 'base64').toString('utf-8');
-    const parts = decoded.split(':');
-    if (parts[0] !== 'pending') return res.status(401).json({ success: false, error: 'Token invalide' });
-    const userId = parseInt(parts[1]);
-    const ts = parseInt(parts[2]);
-    // Token valid 10 min
-    if (Date.now() - ts > 10 * 60 * 1000) return res.status(401).json({ success: false, error: 'Session expirée, reconnectez-vous' });
+    let decodedPending;
+    try {
+      decodedPending = jwt.verify(pendingToken, JWT_SECRET);
+    } catch (e) {
+      return res.status(401).json({ success: false, error: 'Session expirée, reconnectez-vous' });
+    }
+    if (!decodedPending.userId || decodedPending.type !== 'pending_otp') {
+      return res.status(401).json({ success: false, error: 'Token invalide' });
+    }
+    const userId = decodedPending.userId;
 
     const otp = db.prepare("SELECT * FROM otp_codes WHERE user_id = ? AND code = ? AND used = 0 AND expires_at > datetime('now') ORDER BY created_at DESC LIMIT 1").get(userId, code.trim());
     if (!otp) return res.status(401).json({ success: false, error: 'Code invalide ou expiré' });
@@ -3387,7 +3520,7 @@ app.post('/api/auth/verify-otp', async (req, res) => {
     if (!user) return res.status(401).json({ success: false, error: 'Utilisateur non trouvé' });
 
     usersDb.updateLastLogin(user.id);
-    const token = Buffer.from(`user:${user.id}:${user.username}:${Date.now()}`).toString('base64');
+    const token = jwt.sign({ userId: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
     const memberships = teamMembersDb.getByUser(user.id);
     const teams = memberships.map(m => ({ teamId: m.team_id, name: m.name, displayName: m.display_name, role: m.role }));
@@ -3395,7 +3528,7 @@ app.post('/api/auth/verify-otp', async (req, res) => {
 
     let redirect;
     if (user.role === 'admin') redirect = '/admin/';
-    else if (isTeamLeader) redirect = 'team.html';
+    else if (isTeamLeader) redirect = 'user.html';
     else redirect = 'user.html';
 
     res.json({
@@ -3407,6 +3540,37 @@ app.post('/api/auth/verify-otp', async (req, res) => {
   } catch (e) {
     console.error('OTP verify error:', e);
     res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// PUT /api/user/password — Changer son propre mot de passe
+app.put('/api/user/password', authenticateUser, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, error: 'Mot de passe actuel et nouveau requis' });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ success: false, error: 'Le nouveau mot de passe doit contenir au moins 8 caractères' });
+    }
+    // Vérifier le mot de passe actuel
+    const user = usersDb.getById(req.user.id);
+    const valid = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!valid) {
+      return res.status(401).json({ success: false, error: 'Mot de passe actuel incorrect' });
+    }
+    // Hasher et sauvegarder le nouveau
+    const newHash = await bcrypt.hash(newPassword, 10);
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newHash, req.user.id);
+    
+    activityLogsDb.log({ level: 'info', category: 'user', operation: 'password_changed',
+      message: `${req.user.username} a changé son mot de passe`,
+      username: req.user.username, details: {}, ip_address: req.ip });
+    
+    res.json({ success: true, message: 'Mot de passe modifié avec succès' });
+  } catch (error) {
+    console.error('Erreur changement mot de passe:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -3648,7 +3812,7 @@ app.get('/api/auth/callback', async (req, res) => {
       return res.redirect('/login.html?error=user_creation_failed');
     }
 
-    const token = Buffer.from(`user:${user.id}:${user.username}:${Date.now()}`).toString('base64');
+    const token = jwt.sign({ userId: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
     logOperation('auth_login', { username: user.username, role: user.role, provider: 'entra' });
 
     // Redirect to login page which will store token and redirect appropriately
@@ -3704,7 +3868,7 @@ app.post('/api/admin/login', async (req, res) => {
     usersDb.updateLastLogin(user.id);
 
     // Générer un token simple (en production, utiliser JWT)
-    const token = Buffer.from(`user:${user.id}:${user.username}:${Date.now()}`).toString('base64');
+    const token = jwt.sign({ userId: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
     logOperation('admin_login', { username: user.username });
 
@@ -3797,7 +3961,7 @@ app.post('/api/user/login', async (req, res) => {
     usersDb.updateLastLogin(user.id);
 
     // Générer un token simple (en production, utiliser JWT)
-    const token = Buffer.from(`user:${user.id}:${user.username}:${Date.now()}`).toString('base64');
+    const token = jwt.sign({ userId: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
     logOperation('user_login', { username: user.username, role: user.role });
 
@@ -4068,7 +4232,7 @@ app.post('/api/guest/login', async (req, res) => {
     guestAccountsDb.markCodeUsed(guest.guest_id);
 
     // Générer un token
-    const token = Buffer.from(`guest:${guest.guest_id}:${Date.now()}`).toString('base64');
+    const token = jwt.sign({ guestId: guest.guest_id, type: 'guest' }, JWT_SECRET, { expiresIn: '24h' });
 
     logOperation('guest_login', {
       guestId: guest.guest_id,
@@ -4314,54 +4478,59 @@ app.delete('/api/user/my-guests/:id', authenticateUser, async (req, res) => {
   }
 });
 
-// Route GET /api/user/files - Récupérer les fichiers de l'utilisateur
-app.get('/api/user/files', async (req, res) => {
+// Route GET /api/user/files - Récupérer les fichiers accessibles par l'utilisateur
+app.get('/api/user/files', authenticateUser, async (req, res) => {
   try {
-    // Vérifier l'authentification
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
-    
-    if (!token) {
-      return res.status(401).json({ error: 'Non authentifié' });
-    }
-
-    // Décoder et vérifier le token
-    const decoded = Buffer.from(token, 'base64').toString('utf-8');
-    const parts = decoded.split(':');
-    if (parts[0] !== 'user') {
-      return res.status(401).json({ error: 'Token invalide' });
-    }
-
     const folderPath = req.query.path || '';
-    const containerClient = blobServiceClient.getContainerClient(containerName);
+    const userId = req.user.id;
+    const role = req.user.role;
+    const userPrefix = `users/${userId}/`;
+
+    // Tous les utilisateurs (y compris admin) voient uniquement leurs fichiers + équipes + invités
+    let records = fileOwnershipDb.getAccessibleByUser(userId);
+
+    // Strip user prefix from own files to create logical paths
+    // Keep physical blob_name for API operations, use logical for display/navigation
+    for (const record of records) {
+      if (record.blob_name.startsWith(userPrefix) && record.uploaded_by_user_id === userId) {
+        record._logicalName = record.blob_name.substring(userPrefix.length);
+      } else {
+        record._logicalName = record.blob_name;
+      }
+    }
+
+    // Si un folderPath est spécifié, filtrer les fichiers qui commencent par ce chemin logique
+    if (folderPath) {
+      records = records.filter(r => r._logicalName.startsWith(folderPath));
+    }
+
+    // Construire la liste des fichiers et dossiers
     const files = [];
     const folders = new Set();
-    
-    // Lister les blobs avec le préfixe du dossier
-    const listOptions = folderPath ? { prefix: folderPath } : {};
-    
-    for await (const blob of containerClient.listBlobsFlat(listOptions)) {
-      // Ignorer si le blob est dans un sous-dossier
-      const relativePath = folderPath ? blob.name.substring(folderPath.length) : blob.name;
-      const pathParts = relativePath.split('/');
-      
-      if (pathParts.length === 1 && pathParts[0]) {
-        // Fichier à la racine du dossier courant
-        const blockBlobClient = containerClient.getBlockBlobClient(blob.name);
-        const properties = await blockBlobClient.getProperties();
-        
+
+    for (const record of records) {
+      const blobName = record.blob_name;
+      const logicalName = record._logicalName;
+      const relativePath = folderPath ? logicalName.substring(folderPath.length) : logicalName;
+      const pathParts = relativePath.split('/').filter(Boolean);
+
+      if (pathParts.length === 1) {
+        // Fichier directement dans le dossier courant
+        const tierInfo = fileTiersDb.getByBlobName(blobName);
         files.push({
-          name: blob.name,
+          name: blobName,
           displayName: pathParts[0],
-          originalName: properties.metadata?.originalName || pathParts[0],
-          size: blob.properties.contentLength,
-          contentType: blob.properties.contentType,
-          lastModified: blob.properties.lastModified.toISOString(),
-          url: blockBlobClient.url,
-          isFolder: false
+          originalName: record.original_name || pathParts[0],
+          size: record.file_size || 0,
+          contentType: record.content_type || 'application/octet-stream',
+          lastModified: record.uploaded_at || new Date().toISOString(),
+          isFolder: false,
+          tier: tierInfo ? tierInfo.current_tier : 'Hot',
+          teamName: record.team_name || null,
+          ownerName: record.user_owner || record.guest_owner || null,
+          isOwn: record.uploaded_by_user_id === userId
         });
       } else if (pathParts.length > 1 && pathParts[0]) {
-        // Sous-dossier
         folders.add(pathParts[0]);
       }
     }
@@ -4378,17 +4547,16 @@ app.get('/api/user/files', async (req, res) => {
 
     // Combiner fichiers et dossiers, trier
     const allItems = [...folderEntries, ...files].sort((a, b) => {
-      // Dossiers en premier
       if (a.isFolder && !b.isFolder) return -1;
       if (!a.isFolder && b.isFolder) return 1;
-      // Puis par nom
       return (a.displayName || a.originalName || '').localeCompare(b.displayName || b.originalName || '');
     });
 
     res.json({
       success: true,
       files: allItems,
-      currentPath: folderPath
+      currentPath: folderPath,
+      userPrefix: userPrefix
     });
 
   } catch (error) {
@@ -4398,21 +4566,8 @@ app.get('/api/user/files', async (req, res) => {
 });
 
 // Route POST /api/user/folders/create - Créer un dossier
-app.post('/api/user/folders/create', async (req, res) => {
+app.post('/api/user/folders/create', authenticateUser, async (req, res) => {
   try {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
-    
-    if (!token) {
-      return res.status(401).json({ error: 'Non authentifié' });
-    }
-
-    const decoded = Buffer.from(token, 'base64').toString('utf-8');
-    const parts = decoded.split(':');
-    if (parts[0] !== 'user') {
-      return res.status(401).json({ error: 'Token invalide' });
-    }
-
     const { folderName, parentPath = '' } = req.body;
     
     if (!folderName || folderName.includes('/')) {
@@ -4471,21 +4626,8 @@ app.post('/api/user/folders/create', async (req, res) => {
 });
 
 // Route PUT /api/user/files/rename - Renommer un fichier ou dossier
-app.put('/api/user/files/rename', async (req, res) => {
+app.put('/api/user/files/rename', authenticateUser, async (req, res) => {
   try {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
-    
-    if (!token) {
-      return res.status(401).json({ error: 'Non authentifié' });
-    }
-
-    const decoded = Buffer.from(token, 'base64').toString('utf-8');
-    const parts = decoded.split(':');
-    if (parts[0] !== 'user') {
-      return res.status(401).json({ error: 'Token invalide' });
-    }
-
     const { oldPath, newName } = req.body;
     
     if (!oldPath || !newName || newName.includes('/')) {
@@ -4566,21 +4708,8 @@ app.put('/api/user/files/rename', async (req, res) => {
 });
 
 // Route PUT /api/user/files/move - Déplacer un fichier ou dossier
-app.put('/api/user/files/move', async (req, res) => {
+app.put('/api/user/files/move', authenticateUser, async (req, res) => {
   try {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
-    
-    if (!token) {
-      return res.status(401).json({ error: 'Non authentifié' });
-    }
-
-    const decoded = Buffer.from(token, 'base64').toString('utf-8');
-    const parts = decoded.split(':');
-    if (parts[0] !== 'user') {
-      return res.status(401).json({ error: 'Token invalide' });
-    }
-
     const { sourcePath, destinationPath } = req.body;
     
     if (!sourcePath || !destinationPath) {
@@ -4818,21 +4947,8 @@ app.delete('/api/files/trash/empty', authenticateUser, async (req, res) => {
 });
 
 // Route DELETE /api/user/files - Supprimer un fichier ou dossier
-app.delete('/api/user/files', async (req, res) => {
+app.delete('/api/user/files', authenticateUser, async (req, res) => {
   try {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
-    
-    if (!token) {
-      return res.status(401).json({ error: 'Non authentifié' });
-    }
-
-    const decoded = Buffer.from(token, 'base64').toString('utf-8');
-    const parts = decoded.split(':');
-    if (parts[0] !== 'user') {
-      return res.status(401).json({ error: 'Token invalide' });
-    }
-
     const { path } = req.body;
     
     if (!path) {
@@ -4881,22 +4997,9 @@ app.delete('/api/user/files', async (req, res) => {
 });
 
 // Route GET /api/user/share-links - Récupérer les liens de partage de l'utilisateur
-app.get('/api/user/share-links', async (req, res) => {
+app.get('/api/user/share-links', authenticateUser, async (req, res) => {
   try {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
-    
-    if (!token) {
-      return res.status(401).json({ error: 'Non authentifié' });
-    }
-
-    const decoded = Buffer.from(token, 'base64').toString('utf-8');
-    const parts = decoded.split(':');
-    if (parts[0] !== 'user') {
-      return res.status(401).json({ error: 'Token invalide' });
-    }
-    
-    const username = parts[2];
+    const username = req.user.username;
     
     // Récupérer tous les liens de l'utilisateur
     const links = shareLinksDb.getAllByUser(username, 100);
@@ -4954,22 +5057,9 @@ app.get('/api/user/share-links', async (req, res) => {
 });
 
 // Route DELETE /api/user/share-links/:linkId - Supprimer un lien de partage
-app.delete('/api/user/share-links/:linkId', async (req, res) => {
+app.delete('/api/user/share-links/:linkId', authenticateUser, async (req, res) => {
   try {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
-    
-    if (!token) {
-      return res.status(401).json({ error: 'Non authentifié' });
-    }
-
-    const decoded = Buffer.from(token, 'base64').toString('utf-8');
-    const parts = decoded.split(':');
-    if (parts[0] !== 'user') {
-      return res.status(401).json({ error: 'Token invalide' });
-    }
-    
-    const username = parts[2];
+    const username = req.user.username;
     const { linkId } = req.params;
     
     // Vérifier que le lien existe et appartient à l'utilisateur
@@ -5027,6 +5117,22 @@ function requireAdmin(req, res, next) {
   }
   next();
 }
+
+// Route GET /api/user/teams - Lister les équipes de l'utilisateur connecté
+app.get('/api/user/teams', authenticateUser, (req, res) => {
+  try {
+    const memberships = teamMembersDb.getByUser(req.user.id);
+    const teams = memberships.map(m => ({
+      teamId: m.team_id,
+      name: m.name,
+      displayName: m.display_name,
+      role: m.role
+    }));
+    res.json({ success: true, teams });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 // Route GET /api/admin/users - Lister tous les utilisateurs avec leurs équipes
 app.get('/api/admin/users', authenticateUser, requireAdmin, async (req, res) => {
@@ -5261,8 +5367,8 @@ app.delete('/api/admin/users/:id/permanent', authenticateUser, requireAdmin, asy
 // API ÉQUIPES (TEAMS)
 // ============================================================================
 
-// Route POST /api/teams - Créer une équipe (admin uniquement)
-app.post('/api/teams', authenticateUser, requireAdmin, async (req, res) => {
+// Route POST /api/teams - Créer une équipe (tout utilisateur authentifié)
+app.post('/api/teams', authenticateUser, async (req, res) => {
   try {
     const { name, displayName, description } = req.body;
 
@@ -5847,9 +5953,14 @@ app.post('/api/finops/optimize', authenticateUser, async (req, res) => {
       return res.status(403).json({ success: false, error: 'Ce fichier ne vous appartient pas' });
     }
 
-    // Changer le tier sur Azure
+    // Pré-générer les thumbnails avant archivage
     const containerClient = blobServiceClient.getContainerClient(CONTAINER_NAME);
     const blobClient = containerClient.getBlobClient(blobName);
+    if (targetTier === 'Archive') {
+      await preGenerateThumbnail(blobName, ownership, blobClient);
+    }
+
+    // Changer le tier sur Azure
     await blobClient.setAccessTier(targetTier);
 
     // Mettre à jour en DB
@@ -6081,6 +6192,11 @@ app.post('/api/files/:blobName(*)/archive', authenticateUser, async (req, res) =
         success: false,
         error: `Transition invalide de ${currentTier} vers ${tier}`
       });
+    }
+
+    // Pré-générer les thumbnails avant archivage
+    if (tier === 'Archive') {
+      await preGenerateThumbnail(blobName, fileOwnership, blockBlobClient);
     }
 
     // Changer le tier

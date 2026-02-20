@@ -1,0 +1,4 @@
+Tests exécutés: 94
+PASS: 71
+FAIL: 19
+WARN: 4

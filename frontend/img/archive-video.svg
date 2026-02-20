@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <!-- Background -->
+  <rect width="120" height="120" rx="12" fill="#E8F4FD"/>
+  <!-- Film/Video icon -->
+  <rect x="28" y="30" width="64" height="44" rx="6" fill="#90CAF9" stroke="#5C9BD6" stroke-width="2"/>
+  <rect x="34" y="36" width="12" height="8" rx="2" fill="#5C9BD6" opacity="0.5"/>
+  <rect x="50" y="36" width="12" height="8" rx="2" fill="#5C9BD6" opacity="0.5"/>
+  <rect x="66" y="36" width="12" height="8" rx="2" fill="#5C9BD6" opacity="0.5"/>
+  <rect x="34" y="60" width="12" height="8" rx="2" fill="#5C9BD6" opacity="0.5"/>
+  <rect x="50" y="60" width="12" height="8" rx="2" fill="#5C9BD6" opacity="0.5"/>
+  <rect x="66" y="60" width="12" height="8" rx="2" fill="#5C9BD6" opacity="0.5"/>
+  <!-- Play triangle -->
+  <polygon points="54,48 54,58 63,53" fill="#5C9BD6"/>
+  <!-- Glacier / ice -->
+  <path d="M20 95 L35 78 L45 88 L55 72 L65 85 L75 75 L85 82 L100 95 Z" fill="#B3E5FC" stroke="#81D4FA" stroke-width="1.5"/>
+  <path d="M30 95 L40 82 L50 90 L60 76 L70 86 L80 78 L90 95 Z" fill="#E1F5FE" opacity="0.7"/>
+  <!-- Snowflake -->
+  <circle cx="92" cy="28" r="2.5" fill="#81D4FA"/>
+  <line x1="92" y1="23" x2="92" y2="33" stroke="#81D4FA" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="87" y1="28" x2="97" y2="28" stroke="#81D4FA" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="88.5" y1="24.5" x2="95.5" y2="31.5" stroke="#81D4FA" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="95.5" y1="24.5" x2="88.5" y2="31.5" stroke="#81D4FA" stroke-width="1.5" stroke-linecap="round"/>
+  <!-- Label -->
+  <text x="60" y="112" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" font-weight="bold" fill="#5C9BD6">ARCHIVÉ</text>
+</svg>
