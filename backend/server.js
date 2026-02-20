@@ -4840,10 +4840,39 @@ app.put('/api/user/files/rename', authenticateUser, async (req, res) => {
       
       await destClient.uploadData(buffer, {
         blobHTTPHeaders: { blobContentType: properties.contentType },
+        tier: properties.accessTier || 'Cool',
         metadata: metadata
       });
       
       await sourceClient.delete();
+    }
+
+    // Mettre à jour toutes les tables DB
+
+    // Mettre à jour toutes les tables DB
+    if (isFolder) {
+      const oldPrefix = oldPath;
+      const newPrefix = newPath;
+      // file_ownership
+      db.prepare(`UPDATE file_ownership SET blob_name = REPLACE(blob_name, ?, ?), original_name = REPLACE(original_name, ?, ?) WHERE blob_name LIKE ?`).run(oldPrefix, newPrefix, oldPrefix, newPrefix, oldPrefix + '%');
+      // file_tiers
+      db.prepare(`UPDATE file_tiers SET blob_name = REPLACE(blob_name, ?, ?) WHERE blob_name LIKE ?`).run(oldPrefix, newPrefix, oldPrefix + '%');
+      // file_tags
+      db.prepare(`UPDATE file_tags SET blob_name = REPLACE(blob_name, ?, ?) WHERE blob_name LIKE ?`).run(oldPrefix, newPrefix, oldPrefix + '%');
+      // file_comments
+      db.prepare(`UPDATE file_comments SET blob_name = REPLACE(blob_name, ?, ?) WHERE blob_name LIKE ?`).run(oldPrefix, newPrefix, oldPrefix + '%');
+      // geolocation
+      db.prepare(`UPDATE geolocation SET blob_name = REPLACE(blob_name, ?, ?) WHERE blob_name LIKE ?`).run(oldPrefix, newPrefix, oldPrefix + '%');
+      // media_analysis
+      db.prepare(`UPDATE media_analysis SET blob_name = REPLACE(blob_name, ?, ?) WHERE blob_name LIKE ?`).run(oldPrefix, newPrefix, oldPrefix + '%');
+    } else {
+      // Fichier unique
+      db.prepare(`UPDATE file_ownership SET blob_name = ?, original_name = ? WHERE blob_name = ?`).run(newPath, newName, oldPath);
+      db.prepare(`UPDATE file_tiers SET blob_name = ? WHERE blob_name = ?`).run(newPath, oldPath);
+      db.prepare(`UPDATE file_tags SET blob_name = ? WHERE blob_name = ?`).run(newPath, oldPath);
+      db.prepare(`UPDATE file_comments SET blob_name = ? WHERE blob_name = ?`).run(newPath, oldPath);
+      db.prepare(`UPDATE geolocation SET blob_name = ? WHERE blob_name = ?`).run(newPath, oldPath);
+      db.prepare(`UPDATE media_analysis SET blob_name = ? WHERE blob_name = ?`).run(newPath, oldPath);
     }
 
     logOperation('file_renamed', { oldPath, newPath });
