@@ -903,15 +903,17 @@ async function handleFiles(files) {
                 `;
                 uploadFilesList.appendChild(fileItem);
             } else {
-                throw new Error('Erreur upload');
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.error || errData.message || `HTTP ${response.status}`);
             }
         } catch (error) {
             console.error('Erreur upload:', error);
+            showError(`Erreur upload "${file.name}": ${error.message}`);
             const fileItem = document.createElement('div');
             fileItem.className = 'upload-file-item';
             fileItem.innerHTML = `
                 <i class="fas fa-times-circle" style="color: #DC2626;"></i>
-                <span>${file.name} - Erreur</span>
+                <span>${file.name} - ${error.message}</span>
             `;
             uploadFilesList.appendChild(fileItem);
         }
