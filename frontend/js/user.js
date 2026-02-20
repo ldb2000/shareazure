@@ -4008,7 +4008,8 @@ async function showFileInfoPanel(blobName, isFolder) {
     // Load data
     loadInfoGeneral(blobName, isFolder, token);
     loadInfoTags(blobName, token);
-    if (!isFolder && (isImage || isVideo)) loadInfoAI(blobName, contentType, token);
+    const fileTier = file?.tier || '';
+    if (!isFolder && (isImage || isVideo)) loadInfoAI(blobName, contentType, token, fileTier);
     if (!isFolder) loadInfoGeo(blobName, token);
 }
 
@@ -4143,10 +4144,26 @@ async function removeInfoTag(blobName, tag) {
     } catch (e) { showError('Erreur suppression tag'); }
 }
 
-async function loadInfoAI(blobName, contentType, token) {
+async function loadInfoAI(blobName, contentType, token, tier) {
     const el = document.getElementById('infoAI');
     const isImage = contentType.startsWith('image/');
     const isVideo = contentType.startsWith('video/');
+    const isArchived = tier === 'Archive' || tier === 'archive';
+
+    // Si archivé → section grisée
+    if (isArchived) {
+        el.innerHTML = `
+            <div style="opacity:0.5;pointer-events:none;filter:grayscale(1);">
+                <div class="info-ai-buttons">
+                    <button class="btn btn-sm btn-secondary" disabled><i class="fas fa-search"></i> Analyser</button>
+                    ${isVideo ? '<button class="btn btn-sm btn-secondary" disabled><i class="fas fa-microphone"></i> Transcrire</button>' : ''}
+                </div>
+            </div>
+            <div style="text-align:center;padding:12px;color:#f59e0b;font-size:0.85rem;">
+                <i class="fas fa-snowflake"></i> Fichier en Archive — réhydratez-le pour lancer l'IA
+            </div>`;
+        return;
+    }
 
     // Load existing analysis
     let existingHtml = '';
@@ -4163,16 +4180,6 @@ async function loadInfoAI(blobName, contentType, token) {
             if (a.transcription) existingHtml += `<div class="info-ai-result"><strong>🎤 Transcription :</strong> ${escapeHtml(a.transcription.substring(0, 300))}${a.transcription.length > 300 ? '...' : ''}</div>`;
         }
     } catch {}
-
-    // Check for transcription separately
-    if (isVideo && !existingHtml.includes('Transcription')) {
-        try {
-            const tres = await fetch(`${API_URL}/ai/analysis/${encodeBlobPath(blobName)}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            // Already checked above
-        } catch {}
-    }
 
     let buttonsHtml = '<div class="info-ai-buttons">';
     if (isImage || isVideo) {
@@ -4209,7 +4216,7 @@ async function infoAIAction(action, blobName) {
             // Reload AI section after delay
             setTimeout(() => {
                 const file = allFiles.find(f => f.name === blobName);
-                if (file) loadInfoAI(blobName, file.contentType || '', token);
+                if (file) loadInfoAI(blobName, file.contentType || '', token, file.tier || '');
             }, 5000);
         } else {
             showError(data.error || 'Erreur analyse IA');
