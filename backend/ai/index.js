@@ -696,14 +696,17 @@ router.get('/map', (req, res) => {
     const { limit } = req.query;
     const files = geolocationService.getAllGeotagged(limit ? parseInt(limit) : 500);
 
-    const mapData = files.map(f => ({
-      blobName: f.blob_name,
-      latitude: f.latitude,
-      longitude: f.longitude,
-      address: f.address,
-      city: f.city,
-      country: f.country
-    }));
+    const mapData = files
+      .filter(f => f.latitude && f.longitude && !(f.latitude === 0 && f.longitude === 0))
+      .map(f => ({
+        blobName: f.blob_name,
+        originalName: f.original_name || f.blob_name,
+        latitude: f.latitude,
+        longitude: f.longitude,
+        address: f.address,
+        city: f.city,
+        country: f.country
+      }));
 
     res.json({ success: true, files: mapData, count: mapData.length });
   } catch (error) {

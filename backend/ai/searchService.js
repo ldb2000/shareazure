@@ -157,7 +157,7 @@ function getFilesByTag(tag) {
   // Manual file_tags
   try {
     const manualResults = db.prepare(`
-      SELECT ft.blob_name, fo.original_name, fo.content_type, fo.size, fo.uploaded_at as created_at
+      SELECT ft.blob_name, fo.original_name, fo.content_type, fo.file_size as size, fo.uploaded_at as created_at
       FROM file_tags ft
       LEFT JOIN file_ownership fo ON ft.blob_name = fo.blob_name
       WHERE LOWER(ft.tag) = LOWER(?)
