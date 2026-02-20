@@ -28,3 +28,4 @@ package-lock.json
 backend/.env.bak.*
 backend/thumbnails/
 pipeline/
+video/
