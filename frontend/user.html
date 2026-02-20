@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ShareAzure - Mon espace de stockage</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="css/user.css?v=20260220b">
+    <link rel="stylesheet" href="css/user.css?v=20260220g">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -475,6 +475,18 @@
             <i class="fas fa-info-circle"></i>
             <span>Informations</span>
         </button>
+        <div class="context-menu-divider"></div>
+        <div class="context-menu-item context-submenu" id="contextTierMenu">
+            <i class="fas fa-layer-group"></i>
+            <span>Tier de stockage</span>
+            <i class="fas fa-chevron-right" style="margin-left:auto;font-size:0.7rem;color:#999;"></i>
+            <div class="context-submenu-list" id="contextTierSubmenu">
+                <button class="context-menu-item" data-tier="Hot"><i class="fas fa-fire" style="color:#ef4444;"></i> <span>Hot</span></button>
+                <button class="context-menu-item" data-tier="Cool"><i class="fas fa-snowflake" style="color:#3b82f6;"></i> <span>Cool</span></button>
+                <button class="context-menu-item" data-tier="Archive"><i class="fas fa-archive" style="color:#8b5cf6;"></i> <span>Archive</span></button>
+            </div>
+        </div>
+        <div class="context-menu-divider"></div>
         <button class="context-menu-item context-menu-item-danger" id="contextDelete">
             <i class="fas fa-trash"></i>
             <span>Supprimer</span>
@@ -777,7 +789,7 @@
         </div>
     </div>
 
-    <script src="js/user.js?v=20260220f"></script>
+    <script src="js/user.js?v=20260220g"></script>
     <!-- Modal Corbeille -->
     <div class="modal-overlay" id="trashModal" style="display: none;">
         <div class="modal-content" style="max-width: 750px;">

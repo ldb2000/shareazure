@@ -1087,7 +1087,32 @@ function showContextMenu(event, fileName, isFolder) {
             menu.style.display = 'none';
             handleDelete();
         };
+        // Tier submenu
+        document.querySelectorAll('#contextTierSubmenu .context-menu-item').forEach(btn => {
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                menu.style.display = 'none';
+                const newTier = btn.dataset.tier;
+                const file = filteredFiles.find(f => f.name === contextMenuFile);
+                if (!file) return;
+                const currentTier = file.tier || 'Hot';
+                changeFileTier(contextMenuFile, newTier, currentTier);
+            };
+        });
         menu.dataset.initialized = 'true';
+    }
+    
+    // Marquer le tier actif et masquer pour les dossiers
+    const tierMenu = document.getElementById('contextTierMenu');
+    if (isFolder) {
+        tierMenu.style.display = 'none';
+    } else {
+        tierMenu.style.display = '';
+        const file = filteredFiles.find(f => f.name === fileName);
+        const currentTier = file?.tier || 'Hot';
+        document.querySelectorAll('#contextTierSubmenu .context-menu-item').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tier === currentTier);
+        });
     }
     
     // Fermer le menu si on clique ailleurs
@@ -3940,6 +3965,56 @@ function uploadTeamLogo() {
 // File Info Panel
 // ============================================
 
+async function changeFileTier(blobName, newTier, currentTier) {
+    if (newTier === currentTier) return;
+    
+    const fileName = blobName.split('/').pop();
+    const token = getAuthToken();
+
+    // Si on passe EN Archive → confirmation
+    if (newTier === 'Archive') {
+        if (!confirm(`⚠️ Archiver "${fileName}" ?\n\nLe fichier sera inaccessible (lecture/IA) jusqu'à réhydratation (~1h à ~15h).`)) {
+            document.getElementById('infoTierSelect').value = currentTier;
+            return;
+        }
+    }
+
+    // Si on sort DE Archive → utiliser la route rehydrate
+    if (currentTier === 'Archive') {
+        showRehydrateDialog({ name: blobName, displayName: fileName, size: 0, tier: 'Archive' });
+        document.getElementById('infoTierSelect').value = currentTier;
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_URL}/files/${encodeBlobPath(blobName)}/archive`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ targetTier: newTier })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showSuccess(`Tier changé : ${fileName} → ${newTier}`);
+            // Mettre à jour le fichier local
+            const file = allFiles.find(f => f.name === blobName);
+            if (file) file.tier = newTier;
+            // Recharger la section général
+            loadInfoGeneral(blobName, false, token);
+            // Recharger la section IA (peut-être grisée maintenant)
+            const contentType = file?.contentType || '';
+            if (contentType.startsWith('image/') || contentType.startsWith('video/')) {
+                loadInfoAI(blobName, contentType, token, newTier);
+            }
+        } else {
+            showError(data.error || 'Erreur changement de tier');
+            document.getElementById('infoTierSelect').value = currentTier;
+        }
+    } catch (e) {
+        showError('Erreur réseau');
+        document.getElementById('infoTierSelect').value = currentTier;
+    }
+}
+
 function closeFileInfoPanel() {
     document.getElementById('infoPanel').style.display = 'none';
     document.getElementById('infoPanelOverlay').style.display = 'none';
@@ -4051,7 +4126,14 @@ async function loadInfoGeneral(blobName, isFolder, token) {
                 <div class="info-row"><span class="info-label">Type MIME</span><span class="info-value">${escapeHtml(i.contentType || '—')}</span></div>
                 <div class="info-row"><span class="info-label">Créé le</span><span class="info-value">${i.createdOn ? new Date(i.createdOn).toLocaleString('fr-FR') : '—'}</span></div>
                 <div class="info-row"><span class="info-label">Modifié le</span><span class="info-value">${i.lastModified ? new Date(i.lastModified).toLocaleString('fr-FR') : '—'}</span></div>
-                <div class="info-row"><span class="info-label">Tier</span><span class="info-value"><span class="badge badge-tier-${(i.tier||'Hot').toLowerCase()}">${i.tier || 'Hot'}</span></span></div>
+                <div class="info-row"><span class="info-label">Tier</span><span class="info-value" style="display:flex;align-items:center;gap:8px;">
+                    <span class="badge badge-tier-${(i.tier||'Hot').toLowerCase()}">${i.tier || 'Hot'}</span>
+                    <select id="infoTierSelect" class="form-input" style="font-size:0.8rem;padding:4px 8px;width:auto;border-radius:6px;" onchange="changeFileTier('${escapeHtml(blobName)}', this.value, '${i.tier || 'Hot'}')">
+                        <option value="Hot" ${(i.tier||'Hot')==='Hot'?'selected':''}>🔥 Hot</option>
+                        <option value="Cool" ${i.tier==='Cool'?'selected':''}>❄️ Cool</option>
+                        <option value="Archive" ${i.tier==='Archive'?'selected':''}>🧊 Archive</option>
+                    </select>
+                </span></div>
             `;
         } else {
             el.innerHTML = '<p style="color:#999;">Impossible de charger les informations</p>';

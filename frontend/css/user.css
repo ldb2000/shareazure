@@ -1037,6 +1037,43 @@ body {
     background: #FEE2E2;
 }
 
+.context-menu-divider {
+    height: 1px;
+    background: #e5e7eb;
+    margin: 4px 8px;
+}
+
+.context-submenu {
+    position: relative;
+    cursor: default;
+}
+
+.context-submenu-list {
+    display: none;
+    position: absolute;
+    left: 100%;
+    top: -4px;
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.12);
+    min-width: 140px;
+    padding: 4px 0;
+    z-index: 1001;
+}
+
+.context-submenu:hover .context-submenu-list {
+    display: block;
+}
+
+.context-submenu-list .context-menu-item[data-tier].active {
+    background: #f0f4ff;
+    font-weight: 600;
+}
+
+.badge-tier-hot { background: #fef2f2; color: #dc2626; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; }
+.badge-tier-cool { background: #eff6ff; color: #2563eb; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; }
+.badge-tier-archive { background: #f5f3ff; color: #7c3aed; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; }
+
 /* Share Link Container */
 .share-link-container {
     display: flex;
