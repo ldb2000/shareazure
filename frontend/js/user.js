@@ -480,10 +480,10 @@ function renderGridView() {
             thumbnail = `<img src="${imageUrl}" alt="${displayName}" class="file-card-image" loading="lazy">`;
         } else if (isVideo) {
             const thumbUrl = `${API_URL}/thumbnail/${encodeBlobPath(file.name)}?token=${encodeURIComponent(token)}${thumbSize}`;
-            thumbnail = `<div class="file-card-video-thumb"><img src="${thumbUrl}" alt="${displayName}" class="file-card-image" loading="lazy" onerror="this.parentElement.innerHTML='<div class=\\'file-card-icon\\'><i class=\\'fas fa-file-video\\' style=\\'color:#6366f1;font-size:2.5rem;\\'></i></div>'"><div class="video-play-overlay"><i class="fas fa-play-circle"></i></div></div>`;
+            thumbnail = `<div class="file-card-video-thumb"><img src="${thumbUrl}" alt="${displayName}" class="file-card-image" loading="lazy" onerror="this.parentElement.innerHTML='<div class=\\'file-card-icon\\'>' + getFileIcon('video/mp4') + '</div>'"><div class="video-play-overlay"><i class="fas fa-play-circle"></i></div></div>`;
         } else if (isPdf) {
             const thumbUrl = `${API_URL}/thumbnail/${encodeBlobPath(file.name)}?token=${encodeURIComponent(token)}${thumbSize}`;
-            thumbnail = `<div class="file-card-pdf-thumb"><img src="${thumbUrl}" alt="${displayName}" class="file-card-image" loading="lazy" onerror="this.parentElement.innerHTML='<div class=\\'file-card-icon\\'><i class=\\'fas fa-file-pdf\\' style=\\'color:#DC2626;\\'></i></div>'"><div class="pdf-badge">PDF</div></div>`;
+            thumbnail = `<div class="file-card-pdf-thumb"><img src="${thumbUrl}" alt="${displayName}" class="file-card-image" loading="lazy" onerror="this.parentElement.innerHTML='<div class=\\'file-card-icon\\'>' + getFileIcon('application/pdf') + '</div>'"><div class="pdf-badge">PDF</div></div>`;
         } else if (isArchived) {
             thumbnail = `<img src="img/archive-file.svg" alt="Archivé" class="file-card-image" style="object-fit:contain;padding:8px;">`;
         } else {
@@ -586,7 +586,7 @@ function renderListView() {
             icon = `<img src="${imageUrl}" alt="${displayName}" class="file-icon" loading="lazy">`;
         } else if (isVideo || isPdf) {
             const thumbUrl = `${API_URL}/thumbnail/${encodeBlobPath(file.name)}?token=${encodeURIComponent(token)}&size=sm`;
-            icon = `<img src="${thumbUrl}" alt="${displayName}" class="file-icon" loading="lazy" style="border-radius:4px;" onerror="this.outerHTML='<div class=\\'file-icon-placeholder\\'>' + (this.alt.match(/\\.pdf$/i) ? '<i class=\\'fas fa-file-pdf\\' style=\\'color:#DC2626;\\'></i>' : '<i class=\\'fas fa-file-video\\' style=\\'color:#6366f1;\\'></i>') + '</div>'">`;
+            icon = `<img src="${thumbUrl}" alt="${displayName}" class="file-icon" loading="lazy" style="border-radius:4px;" onerror="this.outerHTML='<div class=\\'file-icon-placeholder\\'>' + getFileIcon(this.alt.match(/\\.pdf$/i) ? 'application/pdf' : 'video/mp4') + '</div>'">`;
         } else {
             icon = `<div class="file-icon-placeholder">${getFileIcon(file.contentType)}</div>`;
         }
@@ -664,15 +664,21 @@ function renderListView() {
 }
 
 function getFileIcon(contentType) {
-    const icon = getFileIconClass(contentType);
-    const colors = {
-        'fa-file-image': '#10b981', 'fa-file-video': '#6366f1', 'fa-file-audio': '#f59e0b',
-        'fa-file-pdf': '#DC2626', 'fa-file-word': '#2563eb', 'fa-file-excel': '#16a34a',
-        'fa-file-powerpoint': '#ea580c', 'fa-file-archive': '#8b5cf6', 'fa-file-code': '#06b6d4',
-        'fa-file-alt': '#64748b', 'fa-file': '#94a3b8'
+    const type = getFileIconClass(contentType);
+    const icons = {
+        'fa-file-image':  { color: '#10b981', svg: '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"/><path d="M14 2v6h6"/><circle cx="10" cy="13" r="2"/><path d="M20 17l-3.5-3.5L10 20H6l4-6 2.5 2.5L16 12"/>' },
+        'fa-file-video':  { color: '#6366f1', svg: '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"/><path d="M14 2v6h6"/><polygon points="10,11 10,17 15,14"/>' },
+        'fa-file-audio':  { color: '#f59e0b', svg: '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"/><path d="M14 2v6h6"/><path d="M10 12v5a2 2 0 104 0v-5"/>' },
+        'fa-file-pdf':    { color: '#DC2626', svg: '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"/><path d="M14 2v6h6"/><text x="7" y="17" font-size="6" font-weight="bold" fill="currentColor">PDF</text>' },
+        'fa-file-word':   { color: '#2563eb', svg: '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"/><path d="M14 2v6h6"/><text x="7" y="17" font-size="6" font-weight="bold" fill="currentColor">W</text>' },
+        'fa-file-excel':  { color: '#16a34a', svg: '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"/><path d="M14 2v6h6"/><text x="7" y="17" font-size="6" font-weight="bold" fill="currentColor">XL</text>' },
+        'fa-file-archive': { color: '#8b5cf6', svg: '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"/><path d="M14 2v6h6"/><rect x="9" y="12" width="6" height="5" rx="1"/><path d="M10 12v-1h4v1"/>' },
+        'fa-file-code':   { color: '#06b6d4', svg: '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"/><path d="M14 2v6h6"/><path d="M9 15l-2-2 2-2"/><path d="M15 15l2-2-2-2"/>' },
+        'fa-file-alt':    { color: '#64748b', svg: '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"/><path d="M14 2v6h6"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="16" x2="13" y2="16"/>' },
+        'fa-file':        { color: '#94a3b8', svg: '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"/><path d="M14 2v6h6"/>' }
     };
-    const color = colors[icon] || '#94a3b8';
-    return `<i class="fas ${icon}" style="font-size:2.5rem;color:${color};"></i>`;
+    const i = icons[type] || icons['fa-file'];
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="56" height="56" fill="none" stroke="${i.color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:${i.color}">${i.svg}</svg>`;
 }
 
 function switchView(view) {
