@@ -105,6 +105,7 @@ function getSuggestions(prefix) {
 function getAllTags() {
   const tagCounts = {};
 
+  // Tags from AI analysis
   const analyses = db.prepare(`
     SELECT tags FROM media_analysis WHERE tags IS NOT NULL AND status = 'completed'
   `).all();
@@ -121,19 +122,56 @@ function getAllTags() {
     } catch (e) { /* ignore */ }
   }
 
+  // Tags from manual file_tags table
+  try {
+    const manualTags = db.prepare(`
+      SELECT tag, COUNT(*) as count FROM file_tags GROUP BY tag
+    `).all();
+    for (const row of manualTags) {
+      const normalizedTag = row.tag.toLowerCase();
+      tagCounts[normalizedTag] = (tagCounts[normalizedTag] || 0) + row.count;
+    }
+  } catch (e) { /* file_tags table may not exist */ }
+
   return Object.entries(tagCounts)
     .map(([tag, count]) => ({ tag, count }))
     .sort((a, b) => b.count - a.count);
 }
 
 function getFilesByTag(tag) {
+  const results = [];
+  const seenBlobs = new Set();
+
+  // AI analysis tags
   const pattern = `%"${tag}"%`;
-  const stmt = db.prepare(`
+  const aiResults = db.prepare(`
     SELECT * FROM media_analysis
     WHERE tags LIKE ? AND status = 'completed'
     ORDER BY created_at DESC
-  `);
-  return stmt.all(pattern);
+  `).all(pattern);
+  for (const r of aiResults) {
+    seenBlobs.add(r.blob_name);
+    results.push(r);
+  }
+
+  // Manual file_tags
+  try {
+    const manualResults = db.prepare(`
+      SELECT ft.blob_name, fo.original_name, fo.content_type, fo.size, fo.uploaded_at as created_at
+      FROM file_tags ft
+      LEFT JOIN file_ownership fo ON ft.blob_name = fo.blob_name
+      WHERE LOWER(ft.tag) = LOWER(?)
+      ORDER BY fo.uploaded_at DESC
+    `).all(tag);
+    for (const r of manualResults) {
+      if (!seenBlobs.has(r.blob_name)) {
+        seenBlobs.add(r.blob_name);
+        results.push(r);
+      }
+    }
+  } catch (e) { /* file_tags table may not exist */ }
+
+  return results;
 }
 
 function updateIndex(blobName, data) {
