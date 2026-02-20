@@ -4331,19 +4331,24 @@ async function loadInfoGeo(blobName, token) {
         const geo = data.geolocation;
 
         if (geo) {
+            const mapUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${geo.longitude-0.01},${geo.latitude-0.007},${geo.longitude+0.01},${geo.latitude+0.007}&layer=mapnik&marker=${geo.latitude},${geo.longitude}`;
+            const osmLink = `https://www.openstreetmap.org/?mlat=${geo.latitude}&mlon=${geo.longitude}#map=15/${geo.latitude}/${geo.longitude}`;
             el.innerHTML = `
-                <div class="info-row"><span class="info-label">Latitude</span><span class="info-value">${geo.latitude}</span></div>
-                <div class="info-row"><span class="info-label">Longitude</span><span class="info-value">${geo.longitude}</span></div>
-                ${geo.address ? `<div class="info-row"><span class="info-label">Adresse</span><span class="info-value">${escapeHtml(geo.address)}</span></div>` : ''}
-                <div class="info-geo-actions">
-                    <button class="btn btn-sm btn-secondary" onclick="editInfoGeo('${escapeHtml(blobName)}',${geo.latitude},${geo.longitude},'${escapeHtml(geo.address||'')}')"><i class="fas fa-edit"></i> Modifier</button>
-                    <button class="btn btn-sm btn-danger" onclick="deleteInfoGeo('${escapeHtml(blobName)}')"><i class="fas fa-trash"></i> Supprimer</button>
+                <div style="border-radius:10px;overflow:hidden;margin-bottom:10px;border:1px solid #e5e7eb;">
+                    <iframe src="${mapUrl}" style="width:100%;height:180px;border:0;" loading="lazy"></iframe>
+                </div>
+                <div class="info-row"><span class="info-label">📍 Adresse</span><span class="info-value">${escapeHtml(geo.address || 'Non renseignée')}</span></div>
+                <div class="info-row" style="opacity:0.5;font-size:0.75rem;"><span class="info-label">Coordonnées</span><span class="info-value">${geo.latitude.toFixed(5)}, ${geo.longitude.toFixed(5)}</span></div>
+                <div style="display:flex;gap:8px;margin-top:10px;">
+                    <a href="${osmLink}" target="_blank" class="btn btn-sm btn-secondary" style="text-decoration:none;"><i class="fas fa-external-link-alt"></i> Ouvrir la carte</a>
+                    <button class="btn btn-sm btn-secondary" onclick="editInfoGeo('${escapeHtml(blobName)}','${escapeHtml(geo.address||'')}')"><i class="fas fa-edit"></i> Modifier</button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteInfoGeo('${escapeHtml(blobName)}')"><i class="fas fa-trash"></i></button>
                 </div>
             `;
         } else {
             el.innerHTML = `
                 <p style="color:#999;font-size:0.85rem;">Aucune géolocalisation</p>
-                <button class="btn btn-sm btn-secondary" onclick="editInfoGeo('${escapeHtml(blobName)}',0,0,'')"><i class="fas fa-plus"></i> Ajouter</button>
+                <button class="btn btn-sm btn-secondary" onclick="editInfoGeo('${escapeHtml(blobName)}','')"><i class="fas fa-map-marker-alt"></i> Ajouter un lieu</button>
             `;
         }
     } catch (e) {
@@ -4351,33 +4356,75 @@ async function loadInfoGeo(blobName, token) {
     }
 }
 
-function editInfoGeo(blobName, lat, lng, address) {
+function editInfoGeo(blobName, currentAddress) {
     const el = document.getElementById('infoGeo');
     el.innerHTML = `
-        <div class="form-group" style="margin-bottom:8px;">
-            <label style="font-size:0.8rem;">Latitude</label>
-            <input type="number" step="any" id="geoLatInput" class="form-input" value="${lat}" style="font-size:0.85rem;padding:6px 10px;">
+        <div class="form-group" style="margin-bottom:10px;">
+            <label style="font-size:0.8rem;font-weight:600;color:#444;">📍 Adresse ou ville</label>
+            <input type="text" id="geoAddrInput" class="form-input" value="${escapeHtml(currentAddress)}" 
+                placeholder="Ex: Paris, 14 rue Juliette Récamier Lyon, Valencin..." 
+                style="font-size:0.85rem;padding:8px 12px;margin-top:4px;">
+            <div id="geoSearchResults" style="display:none;background:#fff;border:1px solid #e5e7eb;border-radius:8px;margin-top:4px;max-height:150px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1);"></div>
         </div>
-        <div class="form-group" style="margin-bottom:8px;">
-            <label style="font-size:0.8rem;">Longitude</label>
-            <input type="number" step="any" id="geoLngInput" class="form-input" value="${lng}" style="font-size:0.85rem;padding:6px 10px;">
-        </div>
-        <div class="form-group" style="margin-bottom:8px;">
-            <label style="font-size:0.8rem;">Adresse</label>
-            <input type="text" id="geoAddrInput" class="form-input" value="${escapeHtml(address)}" placeholder="Optionnel" style="font-size:0.85rem;padding:6px 10px;">
-        </div>
+        <div id="geoPreviewMap" style="display:none;border-radius:10px;overflow:hidden;margin-bottom:10px;border:1px solid #e5e7eb;"></div>
+        <input type="hidden" id="geoLatInput" value="0">
+        <input type="hidden" id="geoLngInput" value="0">
         <div style="display:flex;gap:8px;">
-            <button class="btn btn-sm btn-primary" onclick="saveInfoGeo('${escapeHtml(blobName)}')"><i class="fas fa-save"></i> Enregistrer</button>
+            <button class="btn btn-sm btn-primary" id="geoSaveBtn" onclick="saveInfoGeo('${escapeHtml(blobName)}')" disabled style="opacity:0.5;"><i class="fas fa-save"></i> Enregistrer</button>
             <button class="btn btn-sm btn-secondary" onclick="loadInfoGeo('${escapeHtml(blobName)}',getAuthToken())">Annuler</button>
         </div>
     `;
+
+    // Autocomplete avec Nominatim (OpenStreetMap)
+    let searchTimeout;
+    document.getElementById('geoAddrInput').addEventListener('input', (e) => {
+        clearTimeout(searchTimeout);
+        const q = e.target.value.trim();
+        if (q.length < 3) { document.getElementById('geoSearchResults').style.display = 'none'; return; }
+        searchTimeout = setTimeout(async () => {
+            try {
+                const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5&accept-language=fr`);
+                const results = await res.json();
+                const container = document.getElementById('geoSearchResults');
+                if (results.length === 0) {
+                    container.innerHTML = '<div style="padding:8px 12px;color:#999;font-size:0.8rem;">Aucun résultat</div>';
+                } else {
+                    container.innerHTML = results.map(r => `
+                        <div class="geo-result-item" style="padding:8px 12px;cursor:pointer;font-size:0.8rem;border-bottom:1px solid #f0f0f0;transition:background .15s;" 
+                            onmouseover="this.style.background='#f0f4ff'" onmouseout="this.style.background=''"
+                            onclick="selectGeoResult(${r.lat},${r.lon},'${escapeHtml(r.display_name)}')">
+                            <i class="fas fa-map-marker-alt" style="color:#ef4444;margin-right:6px;"></i>${escapeHtml(r.display_name)}
+                        </div>
+                    `).join('');
+                }
+                container.style.display = 'block';
+            } catch (err) { console.error('Geocoding error:', err); }
+        }, 400);
+    });
+}
+
+function selectGeoResult(lat, lng, displayName) {
+    document.getElementById('geoLatInput').value = lat;
+    document.getElementById('geoLngInput').value = lng;
+    document.getElementById('geoAddrInput').value = displayName;
+    document.getElementById('geoSearchResults').style.display = 'none';
+    
+    // Afficher preview carte
+    const mapUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${lng-0.01},${lat-0.007},${lng+0.01},${lat+0.007}&layer=mapnik&marker=${lat},${lng}`;
+    document.getElementById('geoPreviewMap').innerHTML = `<iframe src="${mapUrl}" style="width:100%;height:150px;border:0;" loading="lazy"></iframe>`;
+    document.getElementById('geoPreviewMap').style.display = 'block';
+    
+    // Activer le bouton sauvegarder
+    const btn = document.getElementById('geoSaveBtn');
+    btn.disabled = false;
+    btn.style.opacity = '1';
 }
 
 async function saveInfoGeo(blobName) {
     const lat = parseFloat(document.getElementById('geoLatInput').value);
     const lng = parseFloat(document.getElementById('geoLngInput').value);
     const address = document.getElementById('geoAddrInput').value.trim();
-    if (isNaN(lat) || isNaN(lng)) { showError('Coordonnées invalides'); return; }
+    if (!lat || !lng || !address) { showError('Sélectionnez une adresse dans la liste'); return; }
     const token = getAuthToken();
     try {
         const res = await fetch(`${API_URL}/files/${encodeBlobPath(blobName)}/geolocation`, {
@@ -4396,6 +4443,7 @@ async function saveInfoGeo(blobName) {
 }
 
 async function deleteInfoGeo(blobName) {
+    if (!confirm('Supprimer la géolocalisation ?')) return;
     const token = getAuthToken();
     try {
         const res = await fetch(`${API_URL}/files/${encodeBlobPath(blobName)}/geolocation`, {
