@@ -876,65 +876,127 @@ async function handleFiles(files) {
     uploadProgress.style.display = 'block';
     uploadFilesList.innerHTML = '';
 
+    // Ajouter la barre de progression par fichier
+    progressFill.style.width = '0%';
+    progressText.textContent = '0%';
+
     let uploaded = 0;
     const total = files.length;
 
-    for (const file of files) {
-        const formData = new FormData();
-        formData.append('file', file);
-        
-        // Ajouter le chemin du dossier courant
-        if (currentPath) {
-            formData.append('path', currentPath);
-        }
-        
-        // Ajouter teamId si contexte équipe
-        if (currentContext !== 'my') {
-            formData.append('teamId', currentContext);
-        }
+    function formatSize(bytes) {
+        if (bytes < 1024) return bytes + ' o';
+        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' Ko';
+        if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' Mo';
+        return (bytes / 1073741824).toFixed(2) + ' Go';
+    }
 
-        try {
+    function uploadFile(file) {
+        return new Promise((resolve, reject) => {
+            const formData = new FormData();
+            formData.append('file', file);
+            if (currentPath) formData.append('path', currentPath);
+            if (currentContext !== 'my') formData.append('teamId', currentContext);
+
             let url = currentPath ? `${API_URL}/upload?path=${encodeURIComponent(currentPath)}` : `${API_URL}/upload`;
             if (currentContext !== 'my') {
                 url += (url.includes('?') ? '&' : '?') + `teamId=${currentContext}`;
             }
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${getAuthToken()}` },
-                body: formData
-            });
 
-            if (response.ok) {
-                uploaded++;
-                const progress = (uploaded / total) * 100;
-                progressFill.style.width = `${progress}%`;
-                progressText.textContent = `${Math.round(progress)}%`;
-
-                const fileItem = document.createElement('div');
-                fileItem.className = 'upload-file-item';
-                fileItem.innerHTML = `
-                    <i class="fas fa-check-circle" style="color: var(--april-green);"></i>
-                    <span>${file.name}</span>
-                `;
-                uploadFilesList.appendChild(fileItem);
-            } else {
-                const errData = await response.json().catch(() => ({}));
-                throw new Error(errData.error || errData.message || `HTTP ${response.status}`);
-            }
-        } catch (error) {
-            console.error('Erreur upload:', error);
-            showError(`Erreur upload "${file.name}": ${error.message}`);
+            // Créer l'élément de progression pour ce fichier
             const fileItem = document.createElement('div');
             fileItem.className = 'upload-file-item';
             fileItem.innerHTML = `
-                <i class="fas fa-times-circle" style="color: #DC2626;"></i>
-                <span>${file.name} - ${error.message}</span>
+                <div style="display:flex;align-items:center;gap:8px;width:100%">
+                    <i class="fas fa-spinner fa-spin" style="color:var(--april-blue);"></i>
+                    <div style="flex:1;min-width:0">
+                        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+                            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%">${file.name}</span>
+                            <span class="file-upload-stats" style="font-size:0.8em;color:#666">0% — ${formatSize(file.size)}</span>
+                        </div>
+                        <div style="width:100%;height:6px;background:#e5e7eb;border-radius:3px;overflow:hidden">
+                            <div class="file-progress-bar" style="width:0%;height:100%;background:linear-gradient(90deg,var(--april-blue),var(--april-green));border-radius:3px;transition:width 0.2s"></div>
+                        </div>
+                    </div>
+                </div>
             `;
             uploadFilesList.appendChild(fileItem);
+            const fileProgressBar = fileItem.querySelector('.file-progress-bar');
+            const fileStats = fileItem.querySelector('.file-upload-stats');
+            const fileIcon = fileItem.querySelector('i');
+
+            const xhr = new XMLHttpRequest();
+            const startTime = Date.now();
+
+            xhr.upload.addEventListener('progress', (e) => {
+                if (e.lengthComputable) {
+                    const pct = Math.round((e.loaded / e.total) * 100);
+                    fileProgressBar.style.width = pct + '%';
+
+                    // Vitesse et temps restant
+                    const elapsed = (Date.now() - startTime) / 1000;
+                    const speed = elapsed > 0 ? e.loaded / elapsed : 0;
+                    const remaining = speed > 0 ? (e.total - e.loaded) / speed : 0;
+                    const speedStr = formatSize(Math.round(speed)) + '/s';
+                    const remainStr = remaining > 60 ? Math.round(remaining / 60) + ' min' : Math.round(remaining) + ' s';
+
+                    fileStats.textContent = pct < 100
+                        ? `${pct}% — ${formatSize(e.loaded)}/${formatSize(e.total)} — ${speedStr} — ~${remainStr}`
+                        : `Traitement en cours...`;
+
+                    // Progression globale
+                    const globalPct = Math.round(((uploaded + pct / 100) / total) * 100);
+                    progressFill.style.width = globalPct + '%';
+                    progressText.textContent = globalPct + '%';
+                }
+            });
+
+            xhr.addEventListener('load', () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    fileIcon.className = 'fas fa-check-circle';
+                    fileIcon.style.color = 'var(--april-green)';
+                    fileStats.textContent = `✓ ${formatSize(file.size)}`;
+                    fileProgressBar.style.width = '100%';
+                    resolve();
+                } else {
+                    let errMsg = `HTTP ${xhr.status}`;
+                    try { errMsg = JSON.parse(xhr.responseText).error || errMsg; } catch(e) {}
+                    fileIcon.className = 'fas fa-times-circle';
+                    fileIcon.style.color = '#DC2626';
+                    fileStats.textContent = errMsg;
+                    fileProgressBar.style.background = '#DC2626';
+                    reject(new Error(errMsg));
+                }
+            });
+
+            xhr.addEventListener('error', () => {
+                fileIcon.className = 'fas fa-times-circle';
+                fileIcon.style.color = '#DC2626';
+                fileStats.textContent = 'Erreur réseau';
+                fileProgressBar.style.background = '#DC2626';
+                reject(new Error('Erreur réseau'));
+            });
+
+            xhr.open('POST', url);
+            xhr.setRequestHeader('Authorization', `Bearer ${getAuthToken()}`);
+            xhr.send(formData);
+        });
+    }
+
+    for (const file of files) {
+        try {
+            await uploadFile(file);
+            uploaded++;
+            const globalPct = Math.round((uploaded / total) * 100);
+            progressFill.style.width = globalPct + '%';
+            progressText.textContent = globalPct + '%';
+        } catch (error) {
+            console.error('Erreur upload:', error);
+            showError(`Erreur upload "${file.name}": ${error.message}`);
         }
     }
 
     if (uploaded === total) {
+        progressText.textContent = '100% — Terminé !';
         setTimeout(() => {
             document.getElementById('uploadModal').style.display = 'none';
             loadFiles(currentPath);
