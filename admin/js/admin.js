@@ -4069,3 +4069,68 @@ async function toggleAdmin2FA() {
 
 // Charger le statut 2FA au démarrage
 document.addEventListener('DOMContentLoaded', () => { setTimeout(loadAdmin2FAStatus, 500); });
+
+// ============================================================================
+// AVATAR
+// ============================================================================
+
+async function loadAvatar() {
+    try {
+        const res = await fetch(`${API_URL}/user/avatar`, { headers: getAuthHeaders() });
+        const data = await res.json();
+        const img = document.getElementById('adminAvatar');
+        if (img && data.avatar) {
+            img.src = data.avatar;
+        } else if (img && data.username) {
+            img.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(data.username)}&background=003C61&color=fff`;
+        }
+    } catch (e) { /* ignore */ }
+}
+
+function changeAvatar() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/jpeg,image/png,image/webp';
+    input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (file.size > 200 * 1024) {
+            showNotification('Image trop grande (max 200 Ko)', 'error');
+            return;
+        }
+        // Resize to 128x128 via canvas
+        const img = new Image();
+        img.onload = async () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            // Crop to square (center)
+            const size = Math.min(img.width, img.height);
+            const sx = (img.width - size) / 2;
+            const sy = (img.height - size) / 2;
+            ctx.drawImage(img, sx, sy, size, size, 0, 0, 128, 128);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            
+            try {
+                const res = await fetch(`${API_URL}/user/avatar`, {
+                    method: 'PUT',
+                    headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ avatar: dataUrl })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    document.getElementById('adminAvatar').src = dataUrl;
+                    showNotification('Avatar mis à jour ✅', 'success');
+                } else {
+                    showNotification(data.error || 'Erreur', 'error');
+                }
+            } catch (err) { showNotification('Erreur: ' + err.message, 'error'); }
+        };
+        img.src = URL.createObjectURL(file);
+    };
+    input.click();
+}
+
+// Charger l'avatar au démarrage
+document.addEventListener('DOMContentLoaded', () => { setTimeout(loadAvatar, 300); });

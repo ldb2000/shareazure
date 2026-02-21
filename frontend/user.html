@@ -85,6 +85,9 @@
                             <div style="font-weight:600;color:#0A2540;font-size:0.9rem;" id="dropdownUserName"></div>
                             <div style="font-size:0.75rem;color:#5F6B7A;margin-top:2px;" id="dropdownUserRole"></div>
                         </div>
+                        <button onclick="changeUserAvatar();document.getElementById('userMenuDropdown').style.display='none';" style="display:flex;align-items:center;gap:10px;width:100%;padding:12px 16px;border:none;background:none;cursor:pointer;font-size:0.85rem;color:#1A1A2E;transition:background 0.15s;" onmouseover="this.style.background='#f5f7fa'" onmouseout="this.style.background='none'">
+                            <i class="fas fa-camera" style="color:#8b5cf6;width:18px;text-align:center;"></i> Changer l'avatar
+                        </button>
                         <button onclick="showChangePasswordModal();document.getElementById('userMenuDropdown').style.display='none';" style="display:flex;align-items:center;gap:10px;width:100%;padding:12px 16px;border:none;background:none;cursor:pointer;font-size:0.85rem;color:#1A1A2E;transition:background 0.15s;" onmouseover="this.style.background='#f5f7fa'" onmouseout="this.style.background='none'">
                             <i class="fas fa-key" style="color:#1a73e8;width:18px;text-align:center;"></i> Changer le mot de passe
                         </button>
@@ -792,7 +795,7 @@
         </div>
     </div>
 
-    <script src="js/user.js?v=1771607501"></script>
+    <script src="js/user.js?v=1771607502"></script>
     <!-- Modal Corbeille -->
     <div class="modal-overlay" id="trashModal" style="display: none;">
         <div class="modal-content" style="max-width: 750px;">

@@ -3493,6 +3493,42 @@ filesObserver.observe(document.getElementById('filesGrid') || document.body, { c
 
 // === Changement de mot de passe ===
 // ============================================================================
+// AVATAR
+// ============================================================================
+
+function changeUserAvatar() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/jpeg,image/png,image/webp';
+    input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (file.size > 200 * 1024) { showError('Image trop grande (max 200 Ko)'); return; }
+        const img = new Image();
+        img.onload = async () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128; canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            const size = Math.min(img.width, img.height);
+            ctx.drawImage(img, (img.width - size) / 2, (img.height - size) / 2, size, size, 0, 0, 128, 128);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            try {
+                const res = await fetch(`${API_URL}/user/avatar`, {
+                    method: 'PUT',
+                    headers: { 'Authorization': `Bearer ${getAuthToken()}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ avatar: dataUrl })
+                });
+                const data = await res.json();
+                if (data.success) { showSuccess('Avatar mis à jour ✅'); }
+                else { showError(data.error || 'Erreur'); }
+            } catch (err) { showError('Erreur: ' + err.message); }
+        };
+        img.src = URL.createObjectURL(file);
+    };
+    input.click();
+}
+
+// ============================================================================
 // 2FA (Double authentification par email)
 // ============================================================================
 

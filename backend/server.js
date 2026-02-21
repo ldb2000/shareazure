@@ -3852,7 +3852,7 @@ app.put('/api/user/2fa', authenticateUser, (req, res) => {
 // GET /api/user/profile — Profil utilisateur
 app.get('/api/user/profile', authenticateUser, (req, res) => {
   try {
-    const user = db.prepare('SELECT id, username, email, full_name, role, totp_enabled FROM users WHERE id = ?').get(req.user.id);
+    const user = db.prepare('SELECT id, username, email, full_name, role, totp_enabled, avatar FROM users WHERE id = ?').get(req.user.id);
     res.json({ success: true, user });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
@@ -3868,8 +3868,37 @@ app.put('/api/user/profile', authenticateUser, (req, res) => {
     if (full_name !== undefined) {
       db.prepare('UPDATE users SET full_name = ? WHERE id = ?').run(full_name, req.user.id);
     }
-    const user = db.prepare('SELECT id, username, email, full_name, role, totp_enabled FROM users WHERE id = ?').get(req.user.id);
+    const user = db.prepare('SELECT id, username, email, full_name, role, totp_enabled, avatar FROM users WHERE id = ?').get(req.user.id);
     res.json({ success: true, user });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// PUT /api/user/avatar — Upload avatar (base64 JPEG/PNG, max 200KB)
+app.put('/api/user/avatar', authenticateUser, (req, res) => {
+  try {
+    const { avatar } = req.body;
+    if (!avatar) {
+      db.prepare('UPDATE users SET avatar = NULL WHERE id = ?').run(req.user.id);
+      return res.json({ success: true, message: 'Avatar supprimé' });
+    }
+    // Validate: must be data:image/... base64
+    if (!avatar.startsWith('data:image/')) {
+      return res.status(400).json({ success: false, error: 'Format invalide (image requise)' });
+    }
+    // Max 200KB base64
+    if (avatar.length > 300000) {
+      return res.status(400).json({ success: false, error: 'Image trop grande (max 200 Ko)' });
+    }
+    db.prepare('UPDATE users SET avatar = ? WHERE id = ?').run(avatar, req.user.id);
+    res.json({ success: true, message: 'Avatar mis à jour' });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// GET /api/user/avatar — Récupérer l'avatar
+app.get('/api/user/avatar', authenticateUser, (req, res) => {
+  try {
+    const user = db.prepare('SELECT avatar, username FROM users WHERE id = ?').get(req.user.id);
+    res.json({ success: true, avatar: user?.avatar || null, username: user?.username });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
