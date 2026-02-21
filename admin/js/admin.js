@@ -3799,7 +3799,7 @@ async function submitPasswordChange() {
     btn.textContent = 'Modification...';
 
     try {
-        const token = localStorage.getItem('authToken') || localStorage.getItem('adminToken');
+        const token = getAuthToken();
         const resp = await fetch(window.location.origin + '/api/user/password', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
