@@ -4017,3 +4017,49 @@ async function manualBan() {
     document.getElementById('f2bBanReason').value = '';
     loadFail2ban();
 }
+
+// ============================================================================
+// 2FA Admin
+// ============================================================================
+
+async function loadAdmin2FAStatus() {
+    try {
+        const res = await fetch(`${API_URL}/user/2fa`, { headers: authHeaders() });
+        const data = await res.json();
+        const label = document.getElementById('admin2faLabel');
+        const btn = document.getElementById('admin2faBtn');
+        if (!label || !btn) return;
+        if (data.enabled) {
+            label.innerHTML = '🟢 2FA activée';
+            btn.dataset.enabled = 'true';
+        } else {
+            label.innerHTML = '⚪ Activer la 2FA';
+            btn.dataset.enabled = 'false';
+        }
+    } catch (e) { console.error('2FA status error:', e); }
+}
+
+async function toggleAdmin2FA() {
+    const btn = document.getElementById('admin2faBtn');
+    const isEnabled = btn?.dataset.enabled === 'true';
+
+    if (isEnabled) {
+        if (!confirm('Désactiver la double authentification ?')) return;
+        await fetch(`${API_URL}/user/2fa`, {
+            method: 'PUT', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: false })
+        });
+        showNotification('2FA désactivée', 'success');
+    } else {
+        if (!confirm('Activer la 2FA par email ?\n\nUn code à 6 chiffres sera envoyé par email à chaque connexion.')) return;
+        await fetch(`${API_URL}/user/2fa`, {
+            method: 'PUT', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: true })
+        });
+        showNotification('✅ 2FA activée !', 'success');
+    }
+    loadAdmin2FAStatus();
+}
+
+// Charger le statut 2FA au démarrage
+document.addEventListener('DOMContentLoaded', () => { setTimeout(loadAdmin2FAStatus, 500); });

@@ -109,12 +109,15 @@
                 <button class="btn btn-icon" id="refreshBtn" title="Rafraichir">
                     <i class="fas fa-sync-alt"></i>
                 </button>
-                <div class="user-menu" id="userMenuToggle" style="cursor:pointer;position:relative;">
+                <div class="user-menu" id="userMenuToggle" style="cursor:pointer;position:relative;" onclick="var d=document.getElementById('userDropdown');d.style.display=d.style.display==='none'?'block':'none';event.stopPropagation();">
                     <img src="https://ui-avatars.com/api/?name=Admin&background=003C61&color=fff" alt="Admin" class="user-avatar">
                     <span class="user-name" id="currentUserName">Admin</span>
                     <div class="user-dropdown" id="userDropdown" style="display:none;position:absolute;top:100%;right:0;margin-top:8px;background:#fff;border:1px solid #e0e0e0;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);min-width:200px;z-index:200;">
-                        <button onclick="showChangePasswordModal();document.getElementById('userDropdown').style.display='none';" style="display:flex;align-items:center;gap:8px;width:100%;padding:12px 16px;border:none;background:none;cursor:pointer;font-size:0.9rem;color:#333;">
+                        <button onclick="showChangePasswordModal();document.getElementById('userDropdown').style.display='none';" style="display:flex;align-items:center;gap:8px;width:100%;padding:12px 16px;border:none;background:none;cursor:pointer;font-size:0.9rem;color:#333;" ontouchend="this.click()">
                             <i class="fas fa-key"></i> Changer le mot de passe
+                        </button>
+                        <button id="admin2faBtn" onclick="toggleAdmin2FA();document.getElementById('userDropdown').style.display='none';" style="display:flex;align-items:center;gap:8px;width:100%;padding:12px 16px;border:none;background:none;cursor:pointer;font-size:0.9rem;color:#333;">
+                            <i class="fas fa-shield-halved" style="color:#2e7d32;"></i> <span id="admin2faLabel">Double authentification</span>
                         </button>
                         <hr style="margin:0;border:none;border-top:1px solid #e0e0e0;">
                         <button onclick="document.getElementById('logoutBtn').click();document.getElementById('userDropdown').style.display='none';" style="display:flex;align-items:center;gap:8px;width:100%;padding:12px 16px;border:none;background:none;cursor:pointer;font-size:0.9rem;color:#d32f2f;">
