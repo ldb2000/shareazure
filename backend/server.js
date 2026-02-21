@@ -154,6 +154,14 @@ setInterval(() => {
   loginAttemptsDb.cleanup(90);
 }, 3600000);
 
+// Middleware anti-path-traversal sur blobName (appliqué globalement)
+app.param('blobName', (req, res, next, value) => {
+  if (value && (value.includes('..') || value.startsWith('/'))) {
+    return res.status(400).json({ success: false, error: 'Chemin invalide' });
+  }
+  next();
+});
+
 // Servir les fichiers statiques frontend et admin depuis Express
 app.use('/admin', express.static(path.join(__dirname, '../admin'), { maxAge: 0, etag: false }));
 app.use(express.static(path.join(__dirname, '../frontend'), { maxAge: 0, etag: false }));
@@ -4212,7 +4220,7 @@ app.post('/api/admin/verify', authenticateUser, (req, res) => {
 });
 
 // Route POST /api/user/login - Connexion utilisateur
-app.post('/api/user/login', async (req, res) => {
+app.post('/api/user/login', fail2banMiddleware, async (req, res) => {
   try {
     const { username, password } = req.body;
 
@@ -4227,6 +4235,7 @@ app.post('/api/user/login', async (req, res) => {
     // Trouver l'utilisateur dans la DB
     const user = usersDb.getByUsername(username);
     if (!user) {
+      await logLoginAttempt(req, username || '?', false);
       return res.status(401).json({
         success: false,
         error: 'Identifiants invalides'
@@ -4237,6 +4246,7 @@ app.post('/api/user/login', async (req, res) => {
     const passwordValid = await bcrypt.compare(password, user.password_hash);
 
     if (!passwordValid) {
+      await logLoginAttempt(req, username, false);
       return res.status(401).json({
         success: false,
         error: 'Identifiants invalides'
@@ -4245,8 +4255,9 @@ app.post('/api/user/login', async (req, res) => {
 
     // Mettre à jour la dernière connexion
     usersDb.updateLastLogin(user.id);
+    await logLoginAttempt(req, username, true);
 
-    // Générer un token simple (en production, utiliser JWT)
+    // Générer un token JWT
     const token = jwt.sign({ userId: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
     logOperation('user_login', { username: user.username, role: user.role });
