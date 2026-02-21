@@ -179,9 +179,14 @@ function getMaxFileSizeMB() {
 // Configuration Multer pour l'upload en mémoire
 // Note: La limite est définie statiquement au démarrage, mais vérifiée dans fileFilter
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination: '/tmp/shareazure-uploads/',
+    filename: (req, file, cb) => {
+      cb(null, Date.now() + '-' + Math.random().toString(36).slice(2) + '-' + file.originalname);
+    }
+  }),
   limits: {
-    fileSize: 500 * 1024 * 1024 // 500 MB comme limite absolue
+    fileSize: 2 * 1024 * 1024 * 1024 // 2 GB limite absolue
   },
   fileFilter: (req, file, cb) => {
     // Vérifier la taille du fichier selon la config
@@ -751,13 +756,19 @@ app.post('/api/upload', authenticateUserOrGuest, upload.single('file'), validate
       folderPath = guestPrefix + (folderPath || '');
     }
 
+    // Lire le fichier depuis le disque (multer disk storage)
+    const fs = require('fs');
+    const uploadedFilePath = req.file.path;
+
     // Scan antivirus avant upload
     const virusScanService = require('./ai/virusScanService');
     if (virusScanService.isEnabled()) {
       try {
-        const scanResult = await virusScanService.scanBuffer(req.file.buffer, req.file.originalname);
+        const fileBuffer = fs.readFileSync(uploadedFilePath);
+        const scanResult = await virusScanService.scanBuffer(fileBuffer, req.file.originalname);
         if (!scanResult.clean) {
-          virusScanService.quarantine(req.file.originalname, req.file.buffer, scanResult.virus);
+          virusScanService.quarantine(req.file.originalname, fileBuffer, scanResult.virus);
+          try { fs.unlinkSync(uploadedFilePath); } catch(e) {}
           console.warn(`🦠 Virus detected in ${req.file.originalname}: ${scanResult.virus}`);
           return res.status(400).json({
             success: false,
@@ -815,14 +826,19 @@ app.post('/api/upload', authenticateUserOrGuest, upload.single('file'), validate
       size: req.file.size.toString()
     };
 
-    // Upload du fichier
-    await blockBlobClient.uploadData(req.file.buffer, {
+    // Upload du fichier vers Azure (stream pour gros fichiers)
+    const fileStream = fs.createReadStream(uploadedFilePath);
+    const fileSize = fs.statSync(uploadedFilePath).size;
+    await blockBlobClient.uploadStream(fileStream, fileSize, undefined, {
       blobHTTPHeaders: {
         blobContentType: req.file.mimetype
       },
       tier: 'Cool',
       metadata
     });
+
+    // Nettoyer le fichier temporaire
+    try { fs.unlinkSync(uploadedFilePath); } catch(e) {}
 
     // Enregistrer la propriété du fichier
     const fileData = {
@@ -7448,7 +7464,9 @@ app.post('/api/public/upload/:requestId/file', upload.single('file'), async (req
 
     const blockBlobClient = containerClient.getBlockBlobClient(blobName);
 
-    await blockBlobClient.uploadData(req.file.buffer, {
+    const extFileStream = require('fs').createReadStream(req.file.path);
+    const extFileSize = require('fs').statSync(req.file.path).size;
+    await blockBlobClient.uploadStream(extFileStream, extFileSize, undefined, {
       blobHTTPHeaders: { blobContentType: req.file.mimetype },
       tier: 'Cool',
       metadata: {
@@ -7460,6 +7478,9 @@ app.post('/api/public/upload/:requestId/file', upload.single('file'), async (req
         size: req.file.size.toString()
       }
     });
+
+    // Nettoyer le fichier temporaire
+    try { require('fs').unlinkSync(req.file.path); } catch(e) {}
 
     // Record file ownership (linked to requesting user)
     fileOwnershipDb.create({

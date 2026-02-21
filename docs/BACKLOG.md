@@ -4,7 +4,7 @@
 
 ### 🐛 Bugs
 
-1. **Upload gros fichier bloqué à 0%** — Pas de progression visible lors de l'upload de fichiers volumineux. Implémenter une barre de progression réelle (pourcentage, vitesse, temps restant).
+1. ~~**Upload gros fichier bloqué à 0%**~~ ✅ CORRIGÉ (21/02) — Barre de progression temps réel par fichier (%, vitesse, temps restant) via XMLHttpRequest.
 
 2. **Sélection impossible en mode liste** — Les checkboxes de sélection ne fonctionnent pas en vue liste (uniquement en vue grille).
 
