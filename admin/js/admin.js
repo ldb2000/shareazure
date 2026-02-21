@@ -1196,31 +1196,37 @@ async function loadFinOps() {
                 <h3 class="stat-value">${ops.list}</h3><p class="stat-label">📋 Listings</p>
                 <div style="font-size:0.8rem;color:#666;">${fmtEur(res.costs.operations.list)}</div></div>
             <div class="stat-card" style="border-left:4px solid #8b5cf6;">
-                <h3 class="stat-value">${fmtSize(ops.bytesDownloaded / (1024*1024*1024))}</h3><p class="stat-label">📥 Bande passante sortante</p>
+                <h3 class="stat-value">${fmtSize(ops.bytesDownloaded / (1024*1024*1024))}</h3><p class="stat-label">📥 Bande passante</p>
                 <div style="font-size:0.8rem;color:#666;">${fmtEur(res.costs.bandwidth.cost)}</div></div>`;
 
         // Users table
         document.getElementById('finopsUsersTable').innerHTML = res.costsByUser.length > 0 ? res.costsByUser.map(u => `<tr>
             <td><strong>${escapeHtml(u.username || u.full_name || 'User #' + u.entity_id)}</strong></td>
-            <td>${fmtEur(u.storage_cost)}</td><td>${fmtSize(u.storage_hot_gb)}</td><td>${fmtSize(u.storage_cool_gb)}</td><td>${fmtSize(u.storage_archive_gb)}</td>
-            <td>${fmtEur(u.operations_cost)} <span style="color:#94a3b8;font-size:0.75rem;">(W:${u.operations_write||0} R:${u.operations_read||0} L:${u.operations_list||0})</span></td>
-            <td><strong>${fmtEur(u.total_cost)}</strong></td></tr>`).join('') : '<tr><td colspan="7" class="loading">Aucune donnée</td></tr>';
+            <td style="text-align:right;">${fmtEur(u.storage_cost)}</td>
+            <td style="text-align:right;">${fmtSize(u.storage_hot_gb)}</td>
+            <td style="text-align:right;">${fmtSize(u.storage_cool_gb)}</td>
+            <td style="text-align:right;">${fmtSize(u.storage_archive_gb)}</td>
+            <td style="text-align:right;">${fmtEur(u.operations_cost)}</td>
+            <td style="text-align:right;"><strong>${fmtEur(u.total_cost)}</strong></td></tr>`).join('') : '<tr><td colspan="7" style="text-align:center;color:#94a3b8;">Aucune donnée</td></tr>';
 
         // Teams table
         document.getElementById('finopsTeamsTable').innerHTML = res.costsByTeam.length > 0 ? res.costsByTeam.map(t => `<tr>
             <td><strong>${escapeHtml(t.team_name || 'Team #' + t.entity_id)}</strong></td>
-            <td>${fmtEur(t.storage_cost)}</td><td>${fmtSize(t.storage_hot_gb)}</td><td>${fmtSize(t.storage_cool_gb)}</td>
-            <td>${fmtEur(t.operations_cost)}</td><td><strong>${fmtEur(t.total_cost)}</strong></td></tr>`).join('') : '<tr><td colspan="6" class="loading">Aucune donnée</td></tr>';
+            <td style="text-align:right;">${fmtEur(t.storage_cost)}</td>
+            <td style="text-align:right;">${fmtSize(t.storage_hot_gb)}</td>
+            <td style="text-align:right;">${fmtSize(t.storage_cool_gb)}</td>
+            <td style="text-align:right;">${fmtEur(t.operations_cost)}</td>
+            <td style="text-align:right;"><strong>${fmtEur(t.total_cost)}</strong></td></tr>`).join('') : '<tr><td colspan="6" style="text-align:center;color:#94a3b8;">Aucune donnée</td></tr>';
 
         // Top files
         document.getElementById('finopsFilesTable').innerHTML = res.topFiles.length > 0 ? res.topFiles.map(f => {
             const tierColor = {hot:'#ef4444',cool:'#3b82f6',archive:'#6b7280'}[(f.tier||'Hot').toLowerCase()] || '#666';
             return `<tr>
-                <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(f.original_name || f.blob_name)}</td>
-                <td>${escapeHtml(f.owner || '—')}${f.team_name ? ` <span style="color:#3b82f6;">(${escapeHtml(f.team_name)})</span>` : ''}</td>
-                <td>${fmtSize(f.sizeGb)}</td>
-                <td><span style="background:${tierColor};color:#fff;padding:2px 8px;border-radius:4px;font-size:0.75rem;">${f.tier||'Hot'}</span></td>
-                <td>${fmtEur(f.monthlyCost)}</td></tr>`;
+                <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(f.original_name || f.blob_name)}">${escapeHtml(f.original_name || f.blob_name)}</td>
+                <td>${escapeHtml(f.owner || '—')}${f.team_name ? `<br><span style="color:#3b82f6;font-size:0.8rem;">${escapeHtml(f.team_name)}</span>` : ''}</td>
+                <td style="text-align:right;white-space:nowrap;">${fmtSize(f.sizeGb)}</td>
+                <td style="text-align:center;"><span style="background:${tierColor};color:#fff;padding:2px 8px;border-radius:4px;font-size:0.75rem;">${f.tier||'Hot'}</span></td>
+                <td style="text-align:right;white-space:nowrap;">${fmtEur(f.monthlyCost)}</td></tr>`;
         }).join('') : '<tr><td colspan="5" class="loading">Aucun fichier</td></tr>';
 
     } catch (e) {
