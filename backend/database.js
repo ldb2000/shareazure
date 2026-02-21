@@ -2982,6 +2982,124 @@ const fileTagsDb = {
   }
 };
 
+// ============================================================================
+// LOGIN ATTEMPTS & IP BAN (fail2ban intégré)
+// ============================================================================
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS login_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ip_address TEXT NOT NULL,
+    username TEXT,
+    success INTEGER NOT NULL DEFAULT 0,
+    user_agent TEXT,
+    country TEXT,
+    city TEXT,
+    isp TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_login_attempts_ip ON login_attempts(ip_address);
+  CREATE INDEX IF NOT EXISTS idx_login_attempts_created ON login_attempts(created_at);
+
+  CREATE TABLE IF NOT EXISTS ip_bans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ip_address TEXT UNIQUE NOT NULL,
+    reason TEXT,
+    attempts_count INTEGER DEFAULT 0,
+    banned_at TEXT DEFAULT (datetime('now')),
+    expires_at TEXT,
+    is_permanent INTEGER DEFAULT 0,
+    banned_by TEXT DEFAULT 'auto'
+  );
+  CREATE INDEX IF NOT EXISTS idx_ip_bans_ip ON ip_bans(ip_address);
+  CREATE INDEX IF NOT EXISTS idx_ip_bans_expires ON ip_bans(expires_at);
+
+  CREATE TABLE IF NOT EXISTS ip_whitelist (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ip_address TEXT UNIQUE NOT NULL,
+    label TEXT,
+    added_by TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+`);
+
+const loginAttemptsDb = {
+  log(ip, username, success, userAgent = null) {
+    return db.prepare(`INSERT INTO login_attempts (ip_address, username, success, user_agent) VALUES (?, ?, ?, ?)`).run(ip, username, success ? 1 : 0, userAgent);
+  },
+  updateGeo(id, country, city, isp) {
+    return db.prepare(`UPDATE login_attempts SET country = ?, city = ?, isp = ? WHERE id = ?`).run(country, city, isp, id);
+  },
+  getRecent(limit = 100) {
+    return db.prepare(`SELECT * FROM login_attempts ORDER BY created_at DESC LIMIT ?`).all(limit);
+  },
+  getFailedByIp(ip, minutesWindow = 30) {
+    return db.prepare(`SELECT COUNT(*) as count FROM login_attempts WHERE ip_address = ? AND success = 0 AND created_at > datetime('now', '-' || ? || ' minutes')`).get(ip, minutesWindow);
+  },
+  getStats() {
+    return {
+      total24h: db.prepare(`SELECT COUNT(*) as c FROM login_attempts WHERE created_at > datetime('now', '-1 day')`).get().c,
+      failed24h: db.prepare(`SELECT COUNT(*) as c FROM login_attempts WHERE success = 0 AND created_at > datetime('now', '-1 day')`).get().c,
+      success24h: db.prepare(`SELECT COUNT(*) as c FROM login_attempts WHERE success = 1 AND created_at > datetime('now', '-1 day')`).get().c,
+      uniqueIps24h: db.prepare(`SELECT COUNT(DISTINCT ip_address) as c FROM login_attempts WHERE created_at > datetime('now', '-1 day')`).get().c,
+      bannedCount: db.prepare(`SELECT COUNT(*) as c FROM ip_bans WHERE (expires_at IS NULL OR expires_at > datetime('now')) OR is_permanent = 1`).get().c
+    };
+  },
+  getTopAttackers(limit = 10) {
+    return db.prepare(`
+      SELECT ip_address, COUNT(*) as attempts, MAX(country) as country, MAX(city) as city, MAX(isp) as isp,
+             MIN(created_at) as first_seen, MAX(created_at) as last_seen
+      FROM login_attempts WHERE success = 0 AND created_at > datetime('now', '-7 days')
+      GROUP BY ip_address ORDER BY attempts DESC LIMIT ?
+    `).all(limit);
+  },
+  cleanup(daysToKeep = 90) {
+    return db.prepare(`DELETE FROM login_attempts WHERE created_at < datetime('now', '-' || ? || ' days')`).run(daysToKeep);
+  }
+};
+
+const ipBansDb = {
+  ban(ip, reason, attemptsCount, durationMinutes = null, bannedBy = 'auto') {
+    const expiresAt = durationMinutes ? new Date(Date.now() + durationMinutes * 60000).toISOString() : null;
+    const isPermanent = durationMinutes ? 0 : 0;
+    return db.prepare(`INSERT OR REPLACE INTO ip_bans (ip_address, reason, attempts_count, expires_at, is_permanent, banned_by) VALUES (?, ?, ?, ?, ?, ?)`).run(ip, reason, attemptsCount, expiresAt, isPermanent, bannedBy);
+  },
+  banPermanent(ip, reason, bannedBy = 'admin') {
+    return db.prepare(`INSERT OR REPLACE INTO ip_bans (ip_address, reason, is_permanent, banned_by) VALUES (?, ?, 1, ?)`).run(ip, reason, bannedBy);
+  },
+  unban(ip) {
+    return db.prepare(`DELETE FROM ip_bans WHERE ip_address = ?`).run(ip);
+  },
+  isBanned(ip) {
+    const ban = db.prepare(`SELECT * FROM ip_bans WHERE ip_address = ? AND (is_permanent = 1 OR expires_at > datetime('now'))`).get(ip);
+    return ban || null;
+  },
+  getAll() {
+    return db.prepare(`SELECT * FROM ip_bans ORDER BY banned_at DESC`).all();
+  },
+  getActive() {
+    return db.prepare(`SELECT * FROM ip_bans WHERE is_permanent = 1 OR expires_at > datetime('now') ORDER BY banned_at DESC`).all();
+  },
+  cleanup() {
+    return db.prepare(`DELETE FROM ip_bans WHERE is_permanent = 0 AND expires_at < datetime('now')`).run();
+  }
+};
+
+const ipWhitelistDb = {
+  add(ip, label, addedBy) {
+    return db.prepare(`INSERT OR IGNORE INTO ip_whitelist (ip_address, label, added_by) VALUES (?, ?, ?)`).run(ip, label, addedBy);
+  },
+  remove(ip) {
+    return db.prepare(`DELETE FROM ip_whitelist WHERE ip_address = ?`).run(ip);
+  },
+  isWhitelisted(ip) {
+    return !!db.prepare(`SELECT 1 FROM ip_whitelist WHERE ip_address = ?`).get(ip);
+  },
+  getAll() {
+    return db.prepare(`SELECT * FROM ip_whitelist ORDER BY created_at DESC`).all();
+  }
+};
+
 module.exports = {
   db,
   shareLinksDb,
@@ -3013,5 +3131,8 @@ module.exports = {
   rolePermissionsDb,
   entraRoleMappingsDb,
   tieringPoliciesDb,
-  fileTagsDb
+  fileTagsDb,
+  loginAttemptsDb,
+  ipBansDb,
+  ipWhitelistDb
 };

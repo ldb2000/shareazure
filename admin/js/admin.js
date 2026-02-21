@@ -165,6 +165,7 @@ function loadSectionData(section) {
         case 'faces': loadFacesSection(); break;
         case 'storage': loadStorage(); break;
         case 'audit': loadAuditDashboard(); break;
+        case 'fail2ban': loadFail2ban(); break;
     }
 }
 
@@ -3816,4 +3817,203 @@ async function submitPasswordChange() {
         btn.disabled = false;
         btn.textContent = 'Modifier';
     }
+}
+
+// ============================================================================
+// FAIL2BAN
+// ============================================================================
+
+let f2bCurrentTab = 'attempts';
+
+async function loadFail2ban() {
+    try {
+        const res = await fetch(`${API_URL}/admin/fail2ban/stats`, { headers: authHeaders() });
+        const data = await res.json();
+        if (!data.success) return;
+        
+        document.getElementById('f2bTotal24h').textContent = data.stats.total24h;
+        document.getElementById('f2bFailed24h').textContent = data.stats.failed24h;
+        document.getElementById('f2bSuccess24h').textContent = data.stats.success24h;
+        document.getElementById('f2bUniqueIps').textContent = data.stats.uniqueIps24h;
+        document.getElementById('f2bBanned').textContent = data.stats.bannedCount;
+        
+        // Config
+        document.getElementById('f2bEnabled').checked = data.config.enabled;
+        document.getElementById('f2bMaxAttempts').value = data.config.maxAttempts;
+        document.getElementById('f2bWindow').value = data.config.windowMinutes;
+        document.getElementById('f2bBanDuration').value = data.config.banDurationMinutes;
+        document.getElementById('f2bGeoloc').checked = data.config.geolocEnabled;
+        
+        switchF2bTab(f2bCurrentTab);
+    } catch (e) { console.error('Fail2ban load error:', e); }
+}
+
+function switchF2bTab(tab) {
+    f2bCurrentTab = tab;
+    ['attempts', 'attackers', 'bans', 'whitelist'].forEach(t => {
+        document.getElementById(`f2bTab${t.charAt(0).toUpperCase() + t.slice(1)}`).classList.toggle('active', t === tab);
+        document.getElementById(`f2b${t.charAt(0).toUpperCase() + t.slice(1)}View`).style.display = t === tab ? '' : 'none';
+    });
+    if (tab === 'attempts') loadF2bAttempts();
+    else if (tab === 'attackers') loadF2bAttackers();
+    else if (tab === 'bans') loadF2bBans();
+    else if (tab === 'whitelist') loadF2bWhitelist();
+}
+
+function formatF2bDate(d) {
+    if (!d) return '-';
+    const dt = new Date(d);
+    return dt.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function countryFlag(code) {
+    if (!code || code.length !== 2) return '';
+    const flag = String.fromCodePoint(...[...code.toUpperCase()].map(c => 0x1F1E6 + c.charCodeAt(0) - 65));
+    return flag + ' ';
+}
+
+async function loadF2bAttempts() {
+    try {
+        const res = await fetch(`${API_URL}/admin/fail2ban/attempts?limit=200`, { headers: authHeaders() });
+        const data = await res.json();
+        const tbody = document.getElementById('f2bAttemptsBody');
+        tbody.innerHTML = (data.attempts || []).map(a => `<tr>
+            <td>${formatF2bDate(a.created_at)}</td>
+            <td><code>${a.ip_address}</code></td>
+            <td>${a.username || '-'}</td>
+            <td>${a.success ? '<span style="color:#2e7d32;">✅ Succès</span>' : '<span style="color:#c62828;">❌ Échec</span>'}</td>
+            <td>${countryFlag(a.country)}${a.country || '-'}</td>
+            <td>${a.city || '-'}</td>
+            <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">${a.isp || '-'}</td>
+            <td><button class="btn btn-sm" onclick="banIpFromAttempt('${a.ip_address}')" title="Bannir">🚫</button> <button class="btn btn-sm" onclick="whitelistIpFromAttempt('${a.ip_address}')" title="Autoriser">✅</button></td>
+        </tr>`).join('');
+    } catch (e) { console.error(e); }
+}
+
+async function loadF2bAttackers() {
+    try {
+        const res = await fetch(`${API_URL}/admin/fail2ban/attackers`, { headers: authHeaders() });
+        const data = await res.json();
+        const tbody = document.getElementById('f2bAttackersBody');
+        tbody.innerHTML = (data.attackers || []).map(a => `<tr>
+            <td><code>${a.ip_address}</code></td>
+            <td><strong style="color:#c62828;">${a.attempts}</strong></td>
+            <td>${countryFlag(a.country)}${a.country || '-'}</td>
+            <td>${a.city || '-'}</td>
+            <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">${a.isp || '-'}</td>
+            <td>${formatF2bDate(a.first_seen)}</td>
+            <td>${formatF2bDate(a.last_seen)}</td>
+            <td><button class="btn btn-danger btn-sm" onclick="banIpFromAttempt('${a.ip_address}')">🚫 Bannir</button></td>
+        </tr>`).join('');
+    } catch (e) { console.error(e); }
+}
+
+async function loadF2bBans() {
+    try {
+        const res = await fetch(`${API_URL}/admin/fail2ban/bans`, { headers: authHeaders() });
+        const data = await res.json();
+        const tbody = document.getElementById('f2bBansBody');
+        tbody.innerHTML = (data.bans || []).map(b => `<tr>
+            <td><code>${b.ip_address}</code></td>
+            <td>${b.reason || '-'}</td>
+            <td>${b.attempts_count || 0}</td>
+            <td>${formatF2bDate(b.banned_at)}</td>
+            <td>${b.is_permanent ? '♾️ Permanent' : formatF2bDate(b.expires_at)}</td>
+            <td>${b.banned_by}</td>
+            <td><button class="btn btn-primary btn-sm" onclick="unbanIp('${b.ip_address}')">✅ Débannir</button></td>
+        </tr>`).join('');
+        if ((data.bans || []).length === 0) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#888;">Aucune IP bannie</td></tr>';
+    } catch (e) { console.error(e); }
+}
+
+async function loadF2bWhitelist() {
+    try {
+        const res = await fetch(`${API_URL}/admin/fail2ban/whitelist`, { headers: authHeaders() });
+        const data = await res.json();
+        const tbody = document.getElementById('f2bWhitelistBody');
+        tbody.innerHTML = (data.whitelist || []).map(w => `<tr>
+            <td><code>${w.ip_address}</code></td>
+            <td>${w.label || '-'}</td>
+            <td>${w.added_by || '-'}</td>
+            <td>${formatF2bDate(w.created_at)}</td>
+            <td><button class="btn btn-danger btn-sm" onclick="removeFromWhitelist('${w.ip_address}')">🗑️ Retirer</button></td>
+        </tr>`).join('');
+        if ((data.whitelist || []).length === 0) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#888;">Whitelist vide</td></tr>';
+    } catch (e) { console.error(e); }
+}
+
+async function updateF2bConfig() {
+    try {
+        await fetch(`${API_URL}/admin/fail2ban/config`, {
+            method: 'PUT', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                enabled: document.getElementById('f2bEnabled').checked,
+                maxAttempts: parseInt(document.getElementById('f2bMaxAttempts').value),
+                windowMinutes: parseInt(document.getElementById('f2bWindow').value),
+                banDurationMinutes: parseInt(document.getElementById('f2bBanDuration').value),
+                geolocEnabled: document.getElementById('f2bGeoloc').checked
+            })
+        });
+    } catch (e) { console.error(e); }
+}
+
+async function banIpFromAttempt(ip) {
+    if (!confirm(`Bannir l'IP ${ip} ?`)) return;
+    await fetch(`${API_URL}/admin/fail2ban/ban`, {
+        method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip, reason: 'Ban manuel depuis admin', durationMinutes: 1440 })
+    });
+    loadFail2ban();
+}
+
+async function whitelistIpFromAttempt(ip) {
+    const label = prompt(`Label pour l'IP ${ip} (ex: "Bureau Laurent"):`);
+    if (label === null) return;
+    await fetch(`${API_URL}/admin/fail2ban/whitelist`, {
+        method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip, label })
+    });
+    loadFail2ban();
+}
+
+async function unbanIp(ip) {
+    if (!confirm(`Débannir l'IP ${ip} ?`)) return;
+    await fetch(`${API_URL}/admin/fail2ban/ban/${encodeURIComponent(ip)}`, { method: 'DELETE', headers: authHeaders() });
+    loadFail2ban();
+}
+
+async function addToWhitelist() {
+    const ip = document.getElementById('f2bWhitelistIp').value.trim();
+    const label = document.getElementById('f2bWhitelistLabel').value.trim();
+    if (!ip) return alert('IP requise');
+    await fetch(`${API_URL}/admin/fail2ban/whitelist`, {
+        method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip, label })
+    });
+    document.getElementById('f2bWhitelistIp').value = '';
+    document.getElementById('f2bWhitelistLabel').value = '';
+    loadFail2ban();
+}
+
+async function removeFromWhitelist(ip) {
+    if (!confirm(`Retirer ${ip} de la whitelist ?`)) return;
+    await fetch(`${API_URL}/admin/fail2ban/whitelist/${encodeURIComponent(ip)}`, { method: 'DELETE', headers: authHeaders() });
+    loadFail2ban();
+}
+
+async function manualBan() {
+    const ip = document.getElementById('f2bBanIp').value.trim();
+    const reason = document.getElementById('f2bBanReason').value.trim();
+    const durationType = document.getElementById('f2bBanDurationType').value;
+    if (!ip) return alert('IP requise');
+    const body = { ip, reason: reason || 'Ban manuel' };
+    if (durationType === 'permanent') body.permanent = true;
+    else body.durationMinutes = parseInt(durationType);
+    await fetch(`${API_URL}/admin/fail2ban/ban`, {
+        method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    document.getElementById('f2bBanIp').value = '';
+    document.getElementById('f2bBanReason').value = '';
+    loadFail2ban();
 }

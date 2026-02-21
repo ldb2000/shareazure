@@ -74,6 +74,10 @@
                 <i class="fas fa-shield-halved nav-icon"></i>
                 <span class="nav-text">Audit Sécurité</span>
             </a>
+            <a href="#fail2ban" class="nav-item" data-section="fail2ban">
+                <i class="fas fa-ban nav-icon"></i>
+                <span class="nav-text">Fail2ban</span>
+            </a>
             <a href="#settings" class="nav-item" data-section="settings">
                 <i class="fas fa-cog nav-icon"></i>
                 <span class="nav-text">Parametres</span>
@@ -1067,6 +1071,100 @@
             </div>
             <div id="auditFilesView" style="display:none;">
                 <div class="table-container"><table class="data-table"><thead><tr><th>Fichier</th><th>Propriétaire</th><th>Taille</th><th>Uploadé le</th><th>Partages actifs</th></tr></thead><tbody id="auditFilesBody"></tbody></table></div>
+            </div>
+        </section>
+
+        <!-- Fail2ban Section -->
+        <section id="fail2ban" class="content-section" style="display:none;">
+            <h2><i class="fas fa-ban"></i> Protection Fail2ban</h2>
+
+            <!-- Config -->
+            <div style="background:#e3f2fd;border-radius:8px;padding:16px;margin-bottom:20px;display:flex;flex-wrap:wrap;gap:16px;align-items:center;">
+                <label style="display:flex;align-items:center;gap:8px;font-weight:600;">
+                    <input type="checkbox" id="f2bEnabled" onchange="updateF2bConfig()"> Actif
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;">
+                    Tentatives max:
+                    <input type="number" id="f2bMaxAttempts" min="1" max="50" style="width:60px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;" onchange="updateF2bConfig()">
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;">
+                    Fenêtre (min):
+                    <input type="number" id="f2bWindow" min="1" max="1440" style="width:60px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;" onchange="updateF2bConfig()">
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;">
+                    Ban (min):
+                    <input type="number" id="f2bBanDuration" min="1" max="14400" style="width:80px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;" onchange="updateF2bConfig()">
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;">
+                    <input type="checkbox" id="f2bGeoloc" onchange="updateF2bConfig()"> Géoloc IP
+                </label>
+            </div>
+
+            <!-- Stats Cards -->
+            <div class="stats-grid" id="f2bStats">
+                <div class="stat-card"><div class="stat-icon" style="background:#e3f2fd;color:#1565c0;">🔐</div><div class="stat-info"><h3 id="f2bTotal24h">0</h3><p>Tentatives 24h</p></div></div>
+                <div class="stat-card"><div class="stat-icon" style="background:#fce4ec;color:#c62828;">❌</div><div class="stat-info"><h3 id="f2bFailed24h">0</h3><p>Echecs 24h</p></div></div>
+                <div class="stat-card"><div class="stat-icon" style="background:#e8f5e9;color:#2e7d32;">✅</div><div class="stat-info"><h3 id="f2bSuccess24h">0</h3><p>Succes 24h</p></div></div>
+                <div class="stat-card"><div class="stat-icon" style="background:#fff3e0;color:#e65100;">🌐</div><div class="stat-info"><h3 id="f2bUniqueIps">0</h3><p>IPs uniques</p></div></div>
+                <div class="stat-card"><div class="stat-icon" style="background:#ffebee;color:#b71c1c;">🚫</div><div class="stat-info"><h3 id="f2bBanned">0</h3><p>IPs bannies</p></div></div>
+            </div>
+
+            <!-- Tabs -->
+            <div style="display:flex;gap:8px;margin:20px 0;">
+                <button class="btn btn-secondary active" id="f2bTabAttempts" onclick="switchF2bTab('attempts')">📋 Tentatives récentes</button>
+                <button class="btn btn-secondary" id="f2bTabAttackers" onclick="switchF2bTab('attackers')">🎯 Top attaquants</button>
+                <button class="btn btn-secondary" id="f2bTabBans" onclick="switchF2bTab('bans')">🚫 IPs bannies</button>
+                <button class="btn btn-secondary" id="f2bTabWhitelist" onclick="switchF2bTab('whitelist')">✅ Whitelist</button>
+            </div>
+
+            <!-- Attempts Table -->
+            <div id="f2bAttemptsView">
+                <div class="table-container"><table class="data-table"><thead><tr>
+                    <th>Date</th><th>IP</th><th>Utilisateur</th><th>Résultat</th><th>Pays</th><th>Ville</th><th>FAI</th><th>Actions</th>
+                </tr></thead><tbody id="f2bAttemptsBody"></tbody></table></div>
+            </div>
+
+            <!-- Top Attackers -->
+            <div id="f2bAttackersView" style="display:none;">
+                <div class="table-container"><table class="data-table"><thead><tr>
+                    <th>IP</th><th>Tentatives</th><th>Pays</th><th>Ville</th><th>FAI</th><th>Première vue</th><th>Dernière vue</th><th>Actions</th>
+                </tr></thead><tbody id="f2bAttackersBody"></tbody></table></div>
+            </div>
+
+            <!-- Bans Table -->
+            <div id="f2bBansView" style="display:none;">
+                <div class="table-container"><table class="data-table"><thead><tr>
+                    <th>IP</th><th>Raison</th><th>Tentatives</th><th>Banni le</th><th>Expire le</th><th>Par</th><th>Actions</th>
+                </tr></thead><tbody id="f2bBansBody"></tbody></table></div>
+            </div>
+
+            <!-- Whitelist -->
+            <div id="f2bWhitelistView" style="display:none;">
+                <div style="margin-bottom:12px;display:flex;gap:8px;">
+                    <input type="text" id="f2bWhitelistIp" placeholder="Adresse IP" style="padding:8px;border:1px solid #ccc;border-radius:4px;width:200px;">
+                    <input type="text" id="f2bWhitelistLabel" placeholder="Label (ex: Bureau Laurent)" style="padding:8px;border:1px solid #ccc;border-radius:4px;width:250px;">
+                    <button class="btn btn-primary" onclick="addToWhitelist()">+ Ajouter</button>
+                </div>
+                <div class="table-container"><table class="data-table"><thead><tr>
+                    <th>IP</th><th>Label</th><th>Ajouté par</th><th>Date</th><th>Actions</th>
+                </tr></thead><tbody id="f2bWhitelistBody"></tbody></table></div>
+            </div>
+
+            <!-- Manual Ban -->
+            <div style="margin-top:20px;padding:16px;background:#fff3e0;border-radius:8px;">
+                <h4 style="margin:0 0 12px;"><i class="fas fa-gavel"></i> Ban manuel</h4>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <input type="text" id="f2bBanIp" placeholder="Adresse IP" style="padding:8px;border:1px solid #ccc;border-radius:4px;width:180px;">
+                    <input type="text" id="f2bBanReason" placeholder="Raison" style="padding:8px;border:1px solid #ccc;border-radius:4px;width:250px;">
+                    <select id="f2bBanDurationType" style="padding:8px;border:1px solid #ccc;border-radius:4px;">
+                        <option value="60">1 heure</option>
+                        <option value="1440">24 heures</option>
+                        <option value="10080">7 jours</option>
+                        <option value="43200">30 jours</option>
+                        <option value="permanent">Permanent</option>
+                    </select>
+                    <button class="btn btn-danger" onclick="manualBan()">🚫 Bannir</button>
+                </div>
             </div>
         </section>
 

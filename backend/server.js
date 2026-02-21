@@ -11,7 +11,7 @@ const QRCode = require('qrcode');
 const bcrypt = require('bcrypt');
 const fs = require('fs');
 const path = require('path');
-const { db, shareLinksDb, downloadLogsDb, settingsDb, allowedEmailDomainsDb, usersDb, guestAccountsDb, fileOwnershipDb, teamsDb, teamMembersDb, costTrackingDb, operationLogsDb, fileTiersDb, activityLogsDb, uploadRequestsDb, teamQuotasDb, rolePermissionsDb, entraRoleMappingsDb, tieringPoliciesDb, geolocationDb, mediaAnalysisDb, transcriptionsDb, faceOccurrencesDb } = require('./database');
+const { db, shareLinksDb, downloadLogsDb, settingsDb, allowedEmailDomainsDb, usersDb, guestAccountsDb, fileOwnershipDb, teamsDb, teamMembersDb, costTrackingDb, operationLogsDb, fileTiersDb, activityLogsDb, uploadRequestsDb, teamQuotasDb, rolePermissionsDb, entraRoleMappingsDb, tieringPoliciesDb, geolocationDb, mediaAnalysisDb, transcriptionsDb, faceOccurrencesDb, loginAttemptsDb, ipBansDb, ipWhitelistDb } = require('./database');
 const crypto = require('crypto');
 const { migrateHardcodedUsers } = require('./migrateUsers');
 const emailService = require('./emailService');
@@ -52,6 +52,107 @@ const limiter = rateLimit({
   legacyHeaders: false
 });
 app.use('/api/', limiter);
+
+// ============================================================================
+// FAIL2BAN INTÉGRÉ — Protection contre les tentatives de login
+// ============================================================================
+
+function getClientIp(req) {
+  return req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.headers['x-real-ip'] || req.ip || req.connection?.remoteAddress || 'unknown';
+}
+
+function getFail2banConfig() {
+  return {
+    enabled: settingsDb.get('fail2banEnabled') !== 'false',
+    maxAttempts: parseInt(settingsDb.get('fail2banMaxAttempts')) || 5,
+    windowMinutes: parseInt(settingsDb.get('fail2banWindowMinutes')) || 15,
+    banDurationMinutes: parseInt(settingsDb.get('fail2banBanDuration')) || 60,
+    geolocEnabled: settingsDb.get('fail2banGeolocEnabled') !== 'false'
+  };
+}
+
+// Géolocalisation IP via ipinfo.io (gratuit, 50k/mois)
+async function geolocateIp(ip) {
+  if (!ip || ip === 'unknown' || ip.startsWith('127.') || ip.startsWith('100.') || ip === '::1') return null;
+  try {
+    const https = require('https');
+    return new Promise((resolve) => {
+      const req = https.get(`https://ipinfo.io/${ip}/json`, { timeout: 3000 }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const info = JSON.parse(data);
+            resolve({ country: info.country, city: info.city, isp: info.org });
+          } catch { resolve(null); }
+        });
+      });
+      req.on('error', () => resolve(null));
+      req.on('timeout', () => { req.destroy(); resolve(null); });
+    });
+  } catch { return null; }
+}
+
+// Middleware fail2ban : bloque les IP bannies sur les routes d'auth
+function fail2banMiddleware(req, res, next) {
+  const config = getFail2banConfig();
+  if (!config.enabled) return next();
+  
+  const ip = getClientIp(req);
+  if (ipWhitelistDb.isWhitelisted(ip)) return next();
+  
+  const ban = ipBansDb.isBanned(ip);
+  if (ban) {
+    const remainingMin = ban.is_permanent ? '∞' : Math.ceil((new Date(ban.expires_at) - Date.now()) / 60000);
+    return res.status(403).json({
+      success: false,
+      error: `IP bloquée suite à trop de tentatives. Réessayez dans ${remainingMin} minute(s).`,
+      banned: true,
+      remainingMinutes: ban.is_permanent ? null : remainingMin
+    });
+  }
+  next();
+}
+
+// Vérifier et bannir si nécessaire
+async function checkAndBan(ip, username) {
+  const config = getFail2banConfig();
+  if (!config.enabled) return;
+  if (ipWhitelistDb.isWhitelisted(ip)) return;
+  
+  const { count } = loginAttemptsDb.getFailedByIp(ip, config.windowMinutes);
+  if (count >= config.maxAttempts) {
+    ipBansDb.ban(ip, `${count} tentatives échouées en ${config.windowMinutes}min`, count, config.banDurationMinutes);
+    activityLogsDb.log({
+      level: 'warning', category: 'security', operation: 'ip_banned',
+      message: `IP ${ip} bannie: ${count} tentatives échouées (user: ${username})`,
+      username: 'system', ip_address: ip
+    });
+  }
+}
+
+// Logger une tentative de login
+async function logLoginAttempt(req, username, success) {
+  const ip = getClientIp(req);
+  const ua = req.headers['user-agent'] || null;
+  const result = loginAttemptsDb.log(ip, username, success, ua);
+  
+  // Géoloc en arrière-plan
+  const config = getFail2banConfig();
+  if (config.geolocEnabled && result.lastInsertRowid) {
+    geolocateIp(ip).then(geo => {
+      if (geo) loginAttemptsDb.updateGeo(result.lastInsertRowid, geo.country, geo.city, geo.isp);
+    }).catch(() => {});
+  }
+  
+  if (!success) await checkAndBan(ip, username);
+}
+
+// Nettoyage périodique (toutes les heures)
+setInterval(() => {
+  ipBansDb.cleanup();
+  loginAttemptsDb.cleanup(90);
+}, 3600000);
 
 // Servir les fichiers statiques frontend et admin depuis Express
 app.use('/admin', express.static(path.join(__dirname, '../admin'), { maxAge: 0, etag: false }));
@@ -3537,7 +3638,7 @@ async function initializeAdminPassword() {
 }
 
 // Route POST /api/auth/login - Connexion unifiée (tous les rôles)
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', fail2banMiddleware, async (req, res) => {
   try {
     const { username, password } = req.body;
 
@@ -3550,6 +3651,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     const user = usersDb.getByUsername(username);
     if (!user) {
+      await logLoginAttempt(req, username || '?', false);
       return res.status(401).json({
         success: false,
         error: 'Identifiants invalides'
@@ -3558,6 +3660,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     const passwordValid = await bcrypt.compare(password, user.password_hash);
     if (!passwordValid) {
+      await logLoginAttempt(req, username, false);
       return res.status(401).json({
         success: false,
         error: 'Identifiants invalides'
@@ -3598,6 +3701,7 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     usersDb.updateLastLogin(user.id);
+    await logLoginAttempt(req, username, true);
 
     const token = jwt.sign({ userId: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
@@ -3979,7 +4083,7 @@ app.get('/api/auth/callback', async (req, res) => {
 });
 
 // Route POST /api/admin/login - Connexion admin
-app.post('/api/admin/login', async (req, res) => {
+app.post('/api/admin/login', fail2banMiddleware, async (req, res) => {
   try {
     const { username, password } = req.body;
 
@@ -3994,6 +4098,7 @@ app.post('/api/admin/login', async (req, res) => {
     // Trouver l'utilisateur dans la DB
     const user = usersDb.getByUsername(username);
     if (!user) {
+      await logLoginAttempt(req, username || '?', false);
       return res.status(401).json({
         success: false,
         error: 'Identifiants invalides'
@@ -4002,6 +4107,7 @@ app.post('/api/admin/login', async (req, res) => {
 
     // Vérifier que c'est un admin
     if (user.role !== 'admin') {
+      await logLoginAttempt(req, username, false);
       return res.status(403).json({
         success: false,
         error: 'Accès admin requis'
@@ -4012,6 +4118,7 @@ app.post('/api/admin/login', async (req, res) => {
     const passwordValid = await bcrypt.compare(password, user.password_hash);
 
     if (!passwordValid) {
+      await logLoginAttempt(req, username, false);
       return res.status(401).json({
         success: false,
         error: 'Identifiants invalides'
@@ -4020,6 +4127,7 @@ app.post('/api/admin/login', async (req, res) => {
 
     // Mettre à jour la dernière connexion
     usersDb.updateLastLogin(user.id);
+    await logLoginAttempt(req, username, true);
 
     // Générer un token simple (en production, utiliser JWT)
     const token = jwt.sign({ userId: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
@@ -4317,7 +4425,7 @@ app.post('/api/admin/guest-accounts', authenticateUser, async (req, res) => {
 });
 
 // Route POST /api/guest/login - Connexion invité avec code
-app.post('/api/guest/login', async (req, res) => {
+app.post('/api/guest/login', fail2banMiddleware, async (req, res) => {
   try {
     const { email, code } = req.body;
 
@@ -8472,6 +8580,131 @@ app.get('/api/admin/storage/tree', authenticateUser, requireAdmin, async (req, r
   }
 });
 
+// ============================================================================
+// FAIL2BAN API — Gestion des tentatives de login et bans IP
+// ============================================================================
+
+// GET /api/admin/fail2ban/stats — Stats globales
+app.get('/api/admin/fail2ban/stats', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const stats = loginAttemptsDb.getStats();
+    const config = getFail2banConfig();
+    res.json({ success: true, stats, config });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/admin/fail2ban/attempts — Liste des tentatives récentes
+app.get('/api/admin/fail2ban/attempts', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 100;
+    const attempts = loginAttemptsDb.getRecent(limit);
+    res.json({ success: true, attempts });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/admin/fail2ban/attackers — Top attaquants
+app.get('/api/admin/fail2ban/attackers', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const attackers = loginAttemptsDb.getTopAttackers(20);
+    res.json({ success: true, attackers });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/admin/fail2ban/bans — IPs bannies
+app.get('/api/admin/fail2ban/bans', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const bans = ipBansDb.getActive();
+    res.json({ success: true, bans });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/admin/fail2ban/ban — Bannir une IP manuellement
+app.post('/api/admin/fail2ban/ban', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const { ip, reason, permanent, durationMinutes } = req.body;
+    if (!ip) return res.status(400).json({ success: false, error: 'IP requise' });
+    if (permanent) {
+      ipBansDb.banPermanent(ip, reason || 'Ban manuel admin', req.user.username);
+    } else {
+      ipBansDb.ban(ip, reason || 'Ban manuel admin', 0, durationMinutes || 60, req.user.username);
+    }
+    activityLogsDb.log({ level: 'warning', category: 'security', operation: 'ip_banned_manual', message: `IP ${ip} bannie manuellement par ${req.user.username}`, username: req.user.username });
+    res.json({ success: true, message: `IP ${ip} bannie` });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE /api/admin/fail2ban/ban/:ip — Débannir une IP
+app.delete('/api/admin/fail2ban/ban/:ip', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    ipBansDb.unban(req.params.ip);
+    activityLogsDb.log({ level: 'info', category: 'security', operation: 'ip_unbanned', message: `IP ${req.params.ip} débannie par ${req.user.username}`, username: req.user.username });
+    res.json({ success: true, message: `IP ${req.params.ip} débannie` });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/admin/fail2ban/whitelist — IPs autorisées
+app.get('/api/admin/fail2ban/whitelist', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const whitelist = ipWhitelistDb.getAll();
+    res.json({ success: true, whitelist });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/admin/fail2ban/whitelist — Ajouter une IP à la whitelist
+app.post('/api/admin/fail2ban/whitelist', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const { ip, label } = req.body;
+    if (!ip) return res.status(400).json({ success: false, error: 'IP requise' });
+    ipWhitelistDb.add(ip, label || '', req.user.username);
+    ipBansDb.unban(ip); // Débannir si elle était bannie
+    activityLogsDb.log({ level: 'info', category: 'security', operation: 'ip_whitelisted', message: `IP ${ip} ajoutée à la whitelist par ${req.user.username}`, username: req.user.username });
+    res.json({ success: true, message: `IP ${ip} ajoutée à la whitelist` });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE /api/admin/fail2ban/whitelist/:ip — Retirer de la whitelist
+app.delete('/api/admin/fail2ban/whitelist/:ip', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    ipWhitelistDb.remove(req.params.ip);
+    res.json({ success: true, message: `IP ${req.params.ip} retirée de la whitelist` });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT /api/admin/fail2ban/config — Modifier la configuration
+app.put('/api/admin/fail2ban/config', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const { enabled, maxAttempts, windowMinutes, banDurationMinutes, geolocEnabled } = req.body;
+    if (enabled !== undefined) settingsDb.set('fail2banEnabled', String(enabled));
+    if (maxAttempts !== undefined) settingsDb.set('fail2banMaxAttempts', String(maxAttempts));
+    if (windowMinutes !== undefined) settingsDb.set('fail2banWindowMinutes', String(windowMinutes));
+    if (banDurationMinutes !== undefined) settingsDb.set('fail2banBanDuration', String(banDurationMinutes));
+    if (geolocEnabled !== undefined) settingsDb.set('fail2banGeolocEnabled', String(geolocEnabled));
+    res.json({ success: true, config: getFail2banConfig() });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+
+
 // Catch-all 404 pour les routes API non trouvées (retourne du JSON, pas du HTML)
 app.all('/api/*', (req, res) => {
   res.status(404).json({ success: false, error: 'Route non trouvée' });
@@ -8634,5 +8867,6 @@ if (require.main === module) {
     }
   })();
 }
+
 
 module.exports = app;
