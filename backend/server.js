@@ -1169,7 +1169,7 @@ app.get('/api/download/:blobName(*)', authenticateUser, async (req, res) => {
 async function preGenerateThumbnail(blobName, fileRecord, blobClient) {
   try {
     const crypto = require('crypto');
-    const { execSync } = require('child_process');
+    const { execFileSync } = require('child_process');
     const fs = require('fs');
     const pathModule = require('path');
     const contentType = (fileRecord && fileRecord.content_type) || '';
@@ -1195,16 +1195,16 @@ async function preGenerateThumbnail(blobName, fileRecord, blobClient) {
       if (fs.existsSync(thumbPath)) continue;
       try {
         if (contentType.startsWith('video/')) {
-          try { execSync(`ffmpeg -y -i "${tmpFile}" -ss 00:00:01 -vframes 1 -vf "scale=${size}:-1" -q:v 5 "${thumbPath}" 2>/dev/null`, { timeout: 15000 }); }
-          catch { execSync(`ffmpeg -y -i "${tmpFile}" -vframes 1 -vf "scale=${size}:-1" -q:v 5 "${thumbPath}" 2>/dev/null`, { timeout: 15000 }); }
+          try { execFileSync('ffmpeg', ['-y', '-i', tmpFile, '-ss', '00:00:01', '-vframes', '1', '-vf', `scale=${size}:-1`, '-q:v', '5', thumbPath], { timeout: 15000, stdio: 'ignore' }); }
+          catch { execFileSync('ffmpeg', ['-y', '-i', tmpFile, '-vframes', '1', '-vf', `scale=${size}:-1`, '-q:v', '5', thumbPath], { timeout: 15000, stdio: 'ignore' }); }
         } else if (contentType.startsWith('image/')) {
-          execSync(`ffmpeg -y -i "${tmpFile}" -vf "scale=${size}:-1" -q:v 5 "${thumbPath}" 2>/dev/null`, { timeout: 15000 });
+          execFileSync('ffmpeg', ['-y', '-i', tmpFile, '-vf', `scale=${size}:-1`, '-q:v', '5', thumbPath], { timeout: 15000, stdio: 'ignore' });
         } else if (contentType === 'application/pdf') {
           const tmpPpm = `/tmp/thumb_archive_${hash}_pdf`;
-          execSync(`pdftoppm -jpeg -f 1 -l 1 -r 150 -singlefile "${tmpFile}" "${tmpPpm}"`, { timeout: 15000 });
+          execFileSync('pdftoppm', ['-jpeg', '-f', '1', '-l', '1', '-r', '150', '-singlefile', tmpFile, tmpPpm], { timeout: 15000, stdio: 'ignore' });
           const ppmOut = `${tmpPpm}.jpg`;
           if (fs.existsSync(ppmOut)) {
-            execSync(`ffmpeg -y -i "${ppmOut}" -vf "scale=${size}:-1" -q:v 4 "${thumbPath}" 2>/dev/null`, { timeout: 10000 });
+            execFileSync('ffmpeg', ['-y', '-i', ppmOut, '-vf', `scale=${size}:-1`, '-q:v', '4', thumbPath], { timeout: 10000, stdio: 'ignore' });
             try { fs.unlinkSync(ppmOut); } catch {}
           }
         }
@@ -1221,7 +1221,7 @@ app.get('/api/thumbnail/:blobName(*)', authenticateUser, async (req, res) => {
   try {
     const blobName = req.params.blobName || req.params[0];
     const crypto = require('crypto');
-    const { execSync } = require('child_process');
+    const { execFileSync } = require('child_process');
     const fs = require('fs');
     const path = require('path');
 
@@ -1264,11 +1264,11 @@ app.get('/api/thumbnail/:blobName(*)', authenticateUser, async (req, res) => {
     if (contentType.startsWith('video/')) {
       // Video: extract frame at 1s (or first frame)
       try {
-        execSync(`ffmpeg -y -i "${tmpFile}" -ss 00:00:01 -vframes 1 -vf "scale=${size}:-1" -q:v 5 "${thumbPath}" 2>/dev/null`, { timeout: 15000 });
+        execFileSync('ffmpeg', ['-y', '-i', tmpFile, '-ss', '00:00:01', '-vframes', '1', '-vf', `scale=${size}:-1`, '-q:v', '5', thumbPath], { timeout: 15000, stdio: 'ignore' });
         generated = true;
       } catch {
         try {
-          execSync(`ffmpeg -y -i "${tmpFile}" -vframes 1 -vf "scale=${size}:-1" -q:v 5 "${thumbPath}" 2>/dev/null`, { timeout: 15000 });
+          execFileSync('ffmpeg', ['-y', '-i', tmpFile, '-vframes', '1', '-vf', `scale=${size}:-1`, '-q:v', '5', thumbPath], { timeout: 15000, stdio: 'ignore' });
           generated = true;
         } catch (e) { console.error('ffmpeg video thumb error:', e.message); }
       }
@@ -1276,11 +1276,10 @@ app.get('/api/thumbnail/:blobName(*)', authenticateUser, async (req, res) => {
       // PDF: render first page with pdftoppm
       try {
         const tmpPpm = `/tmp/thumb_${hash}_pdf`;
-        execSync(`pdftoppm -jpeg -f 1 -l 1 -r 150 -singlefile "${tmpFile}" "${tmpPpm}"`, { timeout: 15000 });
+        execFileSync('pdftoppm', ['-jpeg', '-f', '1', '-l', '1', '-r', '150', '-singlefile', tmpFile, tmpPpm], { timeout: 15000, stdio: 'ignore' });
         const ppmOut = `${tmpPpm}.jpg`;
         if (fs.existsSync(ppmOut)) {
-          // Resize to 320px width
-          execSync(`ffmpeg -y -i "${ppmOut}" -vf "scale=${size}:-1" -q:v 4 "${thumbPath}" 2>/dev/null`, { timeout: 10000 });
+          execFileSync('ffmpeg', ['-y', '-i', ppmOut, '-vf', `scale=${size}:-1`, '-q:v', '4', thumbPath], { timeout: 10000, stdio: 'ignore' });
           fs.unlinkSync(ppmOut);
           generated = true;
         }
