@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeEventListeners();
     loadFiles();
     initContextTabs();
+    load2FAStatus();
 });
 
 // ============================================
@@ -3491,6 +3492,73 @@ const filesObserver = new MutationObserver(() => {
 filesObserver.observe(document.getElementById('filesGrid') || document.body, { childList: true, subtree: true });
 
 // === Changement de mot de passe ===
+// ============================================================================
+// 2FA (Double authentification par email)
+// ============================================================================
+
+async function load2FAStatus() {
+    try {
+        const res = await fetch(`${API_URL}/user/2fa`, { headers: { 'Authorization': `Bearer ${getAuthToken()}` } });
+        const data = await res.json();
+        const btn = document.getElementById('toggle2faBtn');
+        const label = document.getElementById('toggle2faLabel');
+        if (!btn || !label) return;
+        if (data.enabled) {
+            label.innerHTML = '🟢 2FA activée <span style="font-size:0.75rem;color:#888;">(cliquer pour désactiver)</span>';
+            btn.dataset.enabled = 'true';
+        } else {
+            label.innerHTML = '⚪ Activer la 2FA par email';
+            btn.dataset.enabled = 'false';
+        }
+    } catch (e) { console.error('2FA status error:', e); }
+}
+
+async function toggle2FA() {
+    const btn = document.getElementById('toggle2faBtn');
+    const isEnabled = btn?.dataset.enabled === 'true';
+
+    if (isEnabled) {
+        if (!confirm('Désactiver la double authentification ?\n\nVotre compte sera moins protégé.')) return;
+        try {
+            await fetch(`${API_URL}/user/2fa`, {
+                method: 'PUT',
+                headers: { 'Authorization': `Bearer ${getAuthToken()}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: false })
+            });
+            showSuccess('2FA désactivée');
+            load2FAStatus();
+        } catch (e) { showError('Erreur: ' + e.message); }
+    } else {
+        // Vérifier que l'utilisateur a un email
+        const userRes = await fetch(`${API_URL}/user/profile`, { headers: { 'Authorization': `Bearer ${getAuthToken()}` } }).catch(() => null);
+        const userData = userRes ? await userRes.json().catch(() => null) : null;
+
+        if (!userData?.user?.email) {
+            // Demander l'email
+            const email = prompt('Pour activer la 2FA, entrez votre adresse email :\n(un code sera envoyé à cette adresse à chaque connexion)');
+            if (!email || !email.includes('@')) { showError('Email invalide'); return; }
+            // Sauvegarder l'email
+            await fetch(`${API_URL}/user/profile`, {
+                method: 'PUT',
+                headers: { 'Authorization': `Bearer ${getAuthToken()}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email })
+            }).catch(() => {});
+        }
+
+        if (!confirm('Activer la double authentification par email ?\n\nÀ chaque connexion, un code à 6 chiffres sera envoyé à votre adresse email.\nVous aurez 5 minutes pour le saisir.')) return;
+
+        try {
+            await fetch(`${API_URL}/user/2fa`, {
+                method: 'PUT',
+                headers: { 'Authorization': `Bearer ${getAuthToken()}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: true })
+            });
+            showSuccess('✅ 2FA activée ! Un code sera envoyé par email à chaque connexion.');
+            load2FAStatus();
+        } catch (e) { showError('Erreur: ' + e.message); }
+    }
+}
+
 function showChangePasswordModal() {
     const old = document.getElementById('changePasswordModal');
     if (old) old.remove();

@@ -88,6 +88,9 @@
                         <button onclick="showChangePasswordModal();document.getElementById('userMenuDropdown').style.display='none';" style="display:flex;align-items:center;gap:10px;width:100%;padding:12px 16px;border:none;background:none;cursor:pointer;font-size:0.85rem;color:#1A1A2E;transition:background 0.15s;" onmouseover="this.style.background='#f5f7fa'" onmouseout="this.style.background='none'">
                             <i class="fas fa-key" style="color:#1a73e8;width:18px;text-align:center;"></i> Changer le mot de passe
                         </button>
+                        <button id="toggle2faBtn" onclick="toggle2FA();document.getElementById('userMenuDropdown').style.display='none';" style="display:flex;align-items:center;gap:10px;width:100%;padding:12px 16px;border:none;background:none;cursor:pointer;font-size:0.85rem;color:#1A1A2E;transition:background 0.15s;" onmouseover="this.style.background='#f5f7fa'" onmouseout="this.style.background='none'">
+                            <i class="fas fa-shield-halved" style="color:#2e7d32;width:18px;text-align:center;"></i> <span id="toggle2faLabel">Double authentification</span>
+                        </button>
                         <div style="height:1px;background:#f0f2f5;margin:0 12px;"></div>
                         <button onclick="document.getElementById('logoutBtn').click();document.getElementById('userMenuDropdown').style.display='none';" style="display:flex;align-items:center;gap:10px;width:100%;padding:12px 16px;border:none;background:none;cursor:pointer;font-size:0.85rem;color:#DC2626;transition:background 0.15s;" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background='none'">
                             <i class="fas fa-sign-out-alt" style="width:18px;text-align:center;"></i> Se déconnecter
@@ -789,7 +792,7 @@
         </div>
     </div>
 
-    <script src="js/user.js?v=1771607500"></script>
+    <script src="js/user.js?v=1771607501"></script>
     <!-- Modal Corbeille -->
     <div class="modal-overlay" id="trashModal" style="display: none;">
         <div class="modal-content" style="max-width: 750px;">

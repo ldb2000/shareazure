@@ -3842,6 +3842,30 @@ app.put('/api/user/2fa', authenticateUser, (req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
+// GET /api/user/profile — Profil utilisateur
+app.get('/api/user/profile', authenticateUser, (req, res) => {
+  try {
+    const user = db.prepare('SELECT id, username, email, full_name, role, totp_enabled FROM users WHERE id = ?').get(req.user.id);
+    res.json({ success: true, user });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// PUT /api/user/profile — Modifier le profil (email, nom)
+app.put('/api/user/profile', authenticateUser, (req, res) => {
+  try {
+    const { email, full_name } = req.body;
+    if (email) {
+      if (!email.includes('@')) return res.status(400).json({ success: false, error: 'Email invalide' });
+      db.prepare('UPDATE users SET email = ? WHERE id = ?').run(email, req.user.id);
+    }
+    if (full_name !== undefined) {
+      db.prepare('UPDATE users SET full_name = ? WHERE id = ?').run(full_name, req.user.id);
+    }
+    const user = db.prepare('SELECT id, username, email, full_name, role, totp_enabled FROM users WHERE id = ?').get(req.user.id);
+    res.json({ success: true, user });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
 // GET /api/user/2fa — Statut 2FA
 app.get('/api/user/2fa', authenticateUser, (req, res) => {
   try {
